@@ -293,24 +293,29 @@ export async function fetchBreakdownsData(
   if (!client) return null
 
   // Queries may fail if tables don't exist yet (migration not run)
+  // Wrap in Promise.resolve() so .catch() is available (Supabase returns PromiseLike)
   const [demoResult, placementResult] = await Promise.all([
-    supabase
-      .from("meta_daily_demographics")
-      .select(DEMO_COLUMNS)
-      .eq("client_id", clientId)
-      .gte("date", from)
-      .lte("date", to)
-      .order("date")
-      .then((r) => r.data || [])
+    Promise.resolve(
+      supabase
+        .from("meta_daily_demographics")
+        .select(DEMO_COLUMNS)
+        .eq("client_id", clientId)
+        .gte("date", from)
+        .lte("date", to)
+        .order("date")
+    )
+      .then((r) => (r.data || []) as MetaDemographicsRow[])
       .catch(() => [] as MetaDemographicsRow[]),
-    supabase
-      .from("meta_daily_placements")
-      .select(PLACEMENT_COLUMNS)
-      .eq("client_id", clientId)
-      .gte("date", from)
-      .lte("date", to)
-      .order("date")
-      .then((r) => r.data || [])
+    Promise.resolve(
+      supabase
+        .from("meta_daily_placements")
+        .select(PLACEMENT_COLUMNS)
+        .eq("client_id", clientId)
+        .gte("date", from)
+        .lte("date", to)
+        .order("date")
+    )
+      .then((r) => (r.data || []) as MetaPlacementsRow[])
       .catch(() => [] as MetaPlacementsRow[]),
   ])
 
