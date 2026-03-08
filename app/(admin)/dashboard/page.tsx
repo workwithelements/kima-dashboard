@@ -1,59 +1,62 @@
-import { createClient } from "@/lib/supabase/server"
+import { createServiceClient } from "@/lib/supabase/server"
 import { Card, MetricCard } from "@/components/ui/card"
 import SpendChart from "@/components/charts/spend-chart"
-
-function fmt(n: number, decimals = 0) {
-  return n.toLocaleString("en-GB", { maximumFractionDigits: decimals })
-}
-
-function fmtCurrency(n: number) {
-  return `$${fmt(n, 2)}`
-}
+import ClientsOverviewTable from "@/components/tables/clients-overview-table"
+import { aggregateMetrics, deriveMetrics, dailySpendSeries } from "@/lib/utils/aggregate"
+import { fmtCurrency, fmtNumber, fmtPercent, fmtRoas } from "@/lib/utils/format"
+import { daysAgo, today } from "@/lib/utils/dates"
 
 export default async function DashboardPage() {
-  const supabase = createClient()
+  const supabase = createServiceClient()
 
   // Fetch all clients
   const { data: clients } = await supabase
     .from("clients")
-    .select("id, name")
+    .select("id, name, slug")
     .eq("active", true)
     .order("name")
 
   // Fetch last 30 days of Meta data across all clients
-  const thirtyDaysAgo = new Date()
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
-  const fromDate = thirtyDaysAgo.toISOString().split("T")[0]
+  const fromDate = daysAgo(29)
+  const toDate = today()
 
   const { data: metaRows } = await supabase
     .from("meta_daily_performance")
-    .select("date, spend, impressions, unique_link_clicks, purchases, purchase_value")
+    .select(
+      "date, client_id, spend, impressions, reach, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, checkouts_initiated, purchases, purchase_value, app_installs"
+    )
     .gte("date", fromDate)
+    .lte("date", toDate)
     .order("date")
 
-  // Aggregate totals
-  const totals = (metaRows || []).reduce(
-    (acc, row) => ({
-      spend: acc.spend + (row.spend || 0),
-      impressions: acc.impressions + (row.impressions || 0),
-      clicks: acc.clicks + (row.unique_link_clicks || 0),
-      purchases: acc.purchases + (row.purchases || 0),
-      revenue: acc.revenue + (row.purchase_value || 0),
-    }),
-    { spend: 0, impressions: 0, clicks: 0, purchases: 0, revenue: 0 }
-  )
+  const rows = metaRows || []
+  const totals = aggregateMetrics(rows)
+  const derived = deriveMetrics(totals)
+  const spendData = dailySpendSeries(rows)
 
-  // Daily spend for chart
-  const dailySpend = Object.entries(
-    (metaRows || []).reduce<Record<string, number>>((acc, row) => {
-      acc[row.date] = (acc[row.date] || 0) + (row.spend || 0)
-      return acc
-    }, {})
-  )
-    .map(([date, spend]) => ({ date, spend: Math.round(spend * 100) / 100 }))
-    .sort((a, b) => a.date.localeCompare(b.date))
+  // Build per-client summary for the table
+  const clientSpend: Record<string, { spend: number; impressions: number; purchases: number; revenue: number }> = {}
+  for (const row of rows) {
+    const cid = row.client_id
+    if (!cid) continue
+    if (!clientSpend[cid]) clientSpend[cid] = { spend: 0, impressions: 0, purchases: 0, revenue: 0 }
+    clientSpend[cid].spend += row.spend || 0
+    clientSpend[cid].impressions += row.impressions || 0
+    clientSpend[cid].purchases += row.purchases || 0
+    clientSpend[cid].revenue += row.purchase_value || 0
+  }
 
-  const roas = totals.spend > 0 ? totals.revenue / totals.spend : 0
+  const clientRows = (clients || []).map((c) => ({
+    id: c.id,
+    name: c.name,
+    spend: clientSpend[c.id]?.spend || 0,
+    impressions: clientSpend[c.id]?.impressions || 0,
+    purchases: clientSpend[c.id]?.purchases || 0,
+    revenue: clientSpend[c.id]?.revenue || 0,
+    roas: (clientSpend[c.id]?.spend || 0) > 0
+      ? (clientSpend[c.id]?.revenue || 0) / (clientSpend[c.id]?.spend || 0)
+      : 0,
+  }))
 
   return (
     <div className="space-y-6">
@@ -64,37 +67,32 @@ export default async function DashboardPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <MetricCard label="Spend" value={fmtCurrency(totals.spend)} />
-        <MetricCard label="Impressions" value={fmt(totals.impressions)} />
-        <MetricCard label="Clicks" value={fmt(totals.clicks)} />
-        <MetricCard label="Purchases" value={fmt(totals.purchases)} />
+      {/* Top-level KPIs */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
+        <MetricCard label="Total Spend" value={fmtCurrency(totals.spend)} />
+        <MetricCard label="Total Revenue" value={fmtCurrency(totals.revenue)} />
         <MetricCard
           label="ROAS"
-          value={`${roas.toFixed(2)}x`}
-          subValue={`Revenue: ${fmtCurrency(totals.revenue)}`}
+          value={fmtRoas(derived.roas)}
         />
+        <MetricCard label="Purchases" value={fmtNumber(totals.purchases)} />
+        <MetricCard label="Impressions" value={fmtNumber(totals.impressions)} />
       </div>
 
+      {/* Spend chart */}
       <Card>
-        <h2 className="mb-4 text-sm font-medium text-neutral-400">Daily Spend</h2>
-        <SpendChart data={dailySpend} />
+        <h2 className="mb-4 text-sm font-medium text-neutral-400">Daily Spend (All Clients)</h2>
+        <SpendChart data={spendData} />
       </Card>
 
+      {/* Clients table */}
       <Card>
-        <h2 className="mb-3 text-sm font-medium text-neutral-400">
-          Active Clients ({clients?.length || 0})
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          {(clients || []).map((c) => (
-            <span
-              key={c.id}
-              className="rounded-full bg-brand-lime/10 px-3 py-1 text-xs text-brand-lime"
-            >
-              {c.name}
-            </span>
-          ))}
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-sm font-medium text-neutral-400">
+            Client Performance ({clients?.length || 0})
+          </h2>
         </div>
+        <ClientsOverviewTable clients={clientRows} />
       </Card>
     </div>
   )
