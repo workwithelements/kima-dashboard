@@ -4,18 +4,22 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { Card, MetricCard } from "@/components/ui/card"
 import ReachChart from "@/components/charts/reach-chart"
 import SaturationGauge from "@/components/charts/saturation-gauge"
+import CpmrChart from "@/components/charts/cpmr-chart"
+import SaturationTimelineChart from "@/components/charts/saturation-timeline-chart"
 import DateRangePicker from "@/components/ui/date-range-picker"
-import { fmtNumber, fmtPercent } from "@/lib/utils/format"
+import { fmtNumber, fmtPercent, fmtCurrency } from "@/lib/utils/format"
 import {
   dailyReachSeries,
   prepareReachData,
   calculateSaturation,
   detectReachFatigue,
+  dailyCpmrSeries,
+  rollingSaturationSeries,
 } from "@/lib/utils/reach"
 import type { DatePreset } from "@/lib/utils/dates"
 
 type Props = {
-  rows: { date: string; reach: number; impressions: number }[]
+  rows: { date: string; reach: number; impressions: number; spend?: number }[]
   baselineReach: number
   preset: DatePreset
   from: string
@@ -56,9 +60,26 @@ export default function ReachAnalysisView({
   // Aggregate totals
   const totalReach = rows.reduce((sum, r) => sum + (r.reach || 0), 0)
   const totalImpressions = rows.reduce((sum, r) => sum + (r.impressions || 0), 0)
+  const totalSpend = rows.reduce((sum, r) => sum + (r.spend || 0), 0)
 
   // Saturation
   const saturation = calculateSaturation(totalImpressions, totalReach, reachData)
+
+  // CPMr
+  const cpmr = totalReach > 0 ? (totalSpend / totalReach) * 1000 : 0
+
+  // CPM vs CPMr series
+  const cpmrData = dailyCpmrSeries(
+    rows.map((r) => ({
+      date: r.date,
+      spend: r.spend || 0,
+      impressions: r.impressions,
+      reach: r.reach,
+    }))
+  )
+
+  // Rolling saturation series
+  const saturationTimeline = rollingSaturationSeries(dailyReach, baselineReach, 7)
 
   // Fatigue detection
   const fatigueDays = detectReachFatigue(reachData)
@@ -89,7 +110,7 @@ export default function ReachAnalysisView({
       </div>
 
       {/* Scorecards */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <MetricCard label="Total Reach" value={fmtNumber(totalReach)} />
         <MetricCard
           label="Est. New Reach %"
@@ -99,6 +120,11 @@ export default function ReachAnalysisView({
         <MetricCard
           label="Avg Frequency"
           value={`${saturation.avgFrequency.toFixed(2)}x`}
+        />
+        <MetricCard
+          label="CPMr"
+          value={fmtCurrency(cpmr)}
+          subValue="Cost per 1k reach"
         />
         <MetricCard
           label="Saturation Score"
@@ -113,9 +139,8 @@ export default function ReachAnalysisView({
         />
       </div>
 
-      {/* Charts */}
+      {/* Charts row 1: Reach + Saturation gauge */}
       <div className="grid gap-4 lg:grid-cols-3">
-        {/* Reach chart — 2/3 width */}
         <Card className="lg:col-span-2">
           <h2 className="mb-4 text-sm font-medium text-neutral-400">
             Reach Over Time
@@ -123,7 +148,6 @@ export default function ReachAnalysisView({
           <ReachChart data={reachData} fatigueDays={fatigueDays} height={300} />
         </Card>
 
-        {/* Saturation gauge — 1/3 width */}
         <Card>
           <h2 className="mb-4 text-sm font-medium text-neutral-400">
             Saturation Score
@@ -131,6 +155,36 @@ export default function ReachAnalysisView({
           <div className="flex items-center justify-center py-4">
             <SaturationGauge saturation={saturation} />
           </div>
+        </Card>
+      </div>
+
+      {/* Charts row 2: CPM/CPMr + Saturation timeline */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <h2 className="mb-4 text-sm font-medium text-neutral-400">
+            CPM vs CPMr
+          </h2>
+          {cpmrData.length > 0 ? (
+            <CpmrChart data={cpmrData} height={280} />
+          ) : (
+            <p className="py-12 text-center text-xs text-neutral-500">
+              No spend data available
+            </p>
+          )}
+        </Card>
+
+        <Card>
+          <h2 className="mb-4 text-sm font-medium text-neutral-400">
+            Saturation Over Time
+            <span className="ml-2 text-[10px] text-neutral-600">(7-day rolling)</span>
+          </h2>
+          {saturationTimeline.length > 0 ? (
+            <SaturationTimelineChart data={saturationTimeline} height={280} />
+          ) : (
+            <p className="py-12 text-center text-xs text-neutral-500">
+              Need at least 7 days of data
+            </p>
+          )}
         </Card>
       </div>
 

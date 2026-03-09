@@ -169,7 +169,7 @@ export async function fetchReachData(
   // Fetch daily reach data for the range
   const { data: rows } = await supabase
     .from("meta_daily_performance")
-    .select("date, reach, impressions")
+    .select("date, reach, impressions, spend")
     .eq("client_id", clientId)
     .gte("date", from)
     .lte("date", to)

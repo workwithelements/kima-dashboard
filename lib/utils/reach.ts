@@ -7,6 +7,7 @@ export type ReachDataPoint = {
   date: string
   reach: number
   impressions: number
+  spend?: number
 }
 
 export type PreparedReachPoint = {
@@ -164,17 +165,18 @@ export function detectReachFatigue(reachData: PreparedReachPoint[]): number {
  * Group rows by date and aggregate reach-related metrics
  */
 export function dailyReachSeries(
-  rows: { date: string; reach: number; impressions: number }[]
+  rows: { date: string; reach: number; impressions: number; spend?: number }[]
 ): ReachDataPoint[] {
-  const byDate: Record<string, { reach: number; impressions: number }> = {}
+  const byDate: Record<string, { reach: number; impressions: number; spend: number }> = {}
 
   for (const row of rows) {
     if (!row.date) continue
     if (!byDate[row.date]) {
-      byDate[row.date] = { reach: 0, impressions: 0 }
+      byDate[row.date] = { reach: 0, impressions: 0, spend: 0 }
     }
     byDate[row.date].reach += row.reach || 0
     byDate[row.date].impressions += row.impressions || 0
+    byDate[row.date].spend += row.spend || 0
   }
 
   return Object.entries(byDate)
@@ -182,6 +184,76 @@ export function dailyReachSeries(
       date,
       reach: v.reach,
       impressions: v.impressions,
+      spend: v.spend,
     }))
     .sort((a, b) => a.date.localeCompare(b.date))
+}
+
+/**
+ * Daily CPM vs CPMr series for dual-line chart.
+ * CPM  = (spend / impressions) × 1000
+ * CPMr = (spend / reach) × 1000
+ */
+export type CpmrDataPoint = {
+  date: string
+  cpm: number
+  cpmr: number
+}
+
+export function dailyCpmrSeries(
+  rows: { date: string; spend: number; impressions: number; reach: number }[]
+): CpmrDataPoint[] {
+  const byDate: Record<string, { spend: number; impressions: number; reach: number }> = {}
+
+  for (const row of rows) {
+    if (!row.date) continue
+    if (!byDate[row.date]) {
+      byDate[row.date] = { spend: 0, impressions: 0, reach: 0 }
+    }
+    byDate[row.date].spend += row.spend || 0
+    byDate[row.date].impressions += row.impressions || 0
+    byDate[row.date].reach += row.reach || 0
+  }
+
+  return Object.entries(byDate)
+    .map(([date, v]) => ({
+      date,
+      cpm: v.impressions > 0 ? (v.spend / v.impressions) * 1000 : 0,
+      cpmr: v.reach > 0 ? (v.spend / v.reach) * 1000 : 0,
+    }))
+    .map((d) => ({
+      ...d,
+      cpm: Math.round(d.cpm * 100) / 100,
+      cpmr: Math.round(d.cpmr * 100) / 100,
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date))
+}
+
+/**
+ * Rolling saturation score over time.
+ * For each day, calculates saturation using a trailing window of N days.
+ */
+export function rollingSaturationSeries(
+  dailyReach: ReachDataPoint[],
+  baselineReach = 0,
+  windowDays = 7
+): { date: string; score: number }[] {
+  if (dailyReach.length < windowDays) return []
+
+  const result: { date: string; score: number }[] = []
+
+  for (let i = windowDays - 1; i < dailyReach.length; i++) {
+    const windowSlice = dailyReach.slice(i - windowDays + 1, i + 1)
+    const windowImpressions = windowSlice.reduce((s, d) => s + d.impressions, 0)
+    const windowReach = windowSlice.reduce((s, d) => s + d.reach, 0)
+
+    // Prepare reach data for the window to calculate decline
+    const windowBaseline = i >= windowDays ? baselineReach : 0
+    const prepared = prepareReachData(windowSlice, windowBaseline)
+
+    const sat = calculateSaturation(windowImpressions, windowReach, prepared)
+    result.push({ date: dailyReach[i].date, score: sat.score })
+  }
+
+  return result
 }

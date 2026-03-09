@@ -9,6 +9,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts"
+import { fmtDateShort } from "@/lib/utils/format"
 
 type DataPoint = {
   date: string
@@ -25,12 +26,13 @@ export default function SpendChart({ data }: { data: DataPoint[] }) {
           tick={{ fill: "#737373", fontSize: 12 }}
           tickLine={false}
           axisLine={{ stroke: "#262626" }}
+          tickFormatter={fmtDateShort}
         />
         <YAxis
           tick={{ fill: "#737373", fontSize: 12 }}
           tickLine={false}
           axisLine={false}
-          tickFormatter={(v) => `$${v.toLocaleString()}`}
+          tickFormatter={(v) => `£${v.toLocaleString()}`}
         />
         <Tooltip
           contentStyle={{
@@ -40,7 +42,8 @@ export default function SpendChart({ data }: { data: DataPoint[] }) {
             fontSize: "13px",
           }}
           labelStyle={{ color: "#a3a3a3" }}
-          formatter={(value: number) => [`$${value.toLocaleString()}`, "Spend"]}
+          labelFormatter={fmtDateShort}
+          formatter={(value: number) => [`£${value.toLocaleString()}`, "Spend"]}
         />
         <Area
           type="monotone"

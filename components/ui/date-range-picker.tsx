@@ -68,8 +68,8 @@ export default function DateRangePicker({
               <button
                 key={p.value}
                 onClick={() => {
+                  onPresetChange(p.value)
                   if (p.value !== "custom") {
-                    onPresetChange(p.value)
                     setOpen(false)
                   }
                 }}

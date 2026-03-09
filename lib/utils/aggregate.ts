@@ -52,13 +52,29 @@ export function deriveMetrics(m: AggregatedMetrics) {
   }
 }
 
-/** Group rows by date and sum spend */
-export function dailySpendSeries(rows: Partial<MetaDailyRow>[]): { date: string; spend: number }[] {
+/** Group rows by date and sum spend, filling in zero-spend days across the full range */
+export function dailySpendSeries(
+  rows: Partial<MetaDailyRow>[],
+  fromDate?: string,
+  toDate?: string
+): { date: string; spend: number }[] {
   const byDate: Record<string, number> = {}
   for (const row of rows) {
     if (!row.date) continue
     byDate[row.date] = (byDate[row.date] || 0) + (row.spend || 0)
   }
+
+  // If date range is provided, fill in missing days with zero spend
+  if (fromDate && toDate) {
+    const cursor = new Date(fromDate + "T00:00:00")
+    const end = new Date(toDate + "T00:00:00")
+    while (cursor <= end) {
+      const key = cursor.toISOString().split("T")[0]
+      if (!(key in byDate)) byDate[key] = 0
+      cursor.setDate(cursor.getDate() + 1)
+    }
+  }
+
   return Object.entries(byDate)
     .map(([date, spend]) => ({ date, spend: Math.round(spend * 100) / 100 }))
     .sort((a, b) => a.date.localeCompare(b.date))
