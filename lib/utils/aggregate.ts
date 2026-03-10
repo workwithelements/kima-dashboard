@@ -20,6 +20,7 @@ export function aggregateMetrics(rows: Partial<MetaDailyRow>[]): AggregatedMetri
       purchases: acc.purchases + (row.purchases || 0),
       revenue: acc.revenue + (row.purchase_value || 0),
       appInstalls: acc.appInstalls + (row.app_installs || 0),
+      mobileAppRegistrations: acc.mobileAppRegistrations + (row.mobile_app_registrations || 0),
     }),
     {
       spend: 0,
@@ -33,6 +34,7 @@ export function aggregateMetrics(rows: Partial<MetaDailyRow>[]): AggregatedMetri
       purchases: 0,
       revenue: 0,
       appInstalls: 0,
+      mobileAppRegistrations: 0,
     }
   )
 }
@@ -52,6 +54,7 @@ export function aggregateGoogleAdsMetrics(rows: Partial<GoogleAdsDailyRow>[]): A
       purchases: acc.purchases + (row.conversions || 0),
       revenue: acc.revenue + (row.conversion_value || 0),
       appInstalls: 0,
+      mobileAppRegistrations: 0,
     }),
     {
       spend: 0,
@@ -65,6 +68,7 @@ export function aggregateGoogleAdsMetrics(rows: Partial<GoogleAdsDailyRow>[]): A
       purchases: 0,
       revenue: 0,
       appInstalls: 0,
+      mobileAppRegistrations: 0,
     }
   )
 }

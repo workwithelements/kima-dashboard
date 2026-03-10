@@ -98,6 +98,15 @@ export const FUNNEL_STEP_DEFS: Record<string, FunnelStepDef> = {
     rateMultiplier: 100,
     costLabel: "Cost per Install",
   },
+  mobile_app_registrations: {
+    field: "mobileAppRegistrations",
+    label: "In-App Registrations",
+    shortLabel: "In-App Reg.",
+    rateLabel: "In-App Reg. Rate",
+    rateDenominator: "appInstalls",
+    rateMultiplier: 100,
+    costLabel: "Cost per In-App Reg.",
+  },
 }
 
 /** Ordered list of all available step keys for the config UI */
@@ -109,6 +118,7 @@ export const FUNNEL_STEP_ORDER = [
   "purchases",
   "registrations_completed",
   "app_installs",
+  "mobile_app_registrations",
 ] as const
 
 export type FunnelStepKey = (typeof FUNNEL_STEP_ORDER)[number]

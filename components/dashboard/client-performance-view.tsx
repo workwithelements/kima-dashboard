@@ -102,6 +102,7 @@ function mergeMetrics(a: AggregatedMetrics, b: AggregatedMetrics): AggregatedMet
     purchases: a.purchases + b.purchases,
     revenue: a.revenue + b.revenue,
     appInstalls: a.appInstalls + b.appInstalls,
+    mobileAppRegistrations: a.mobileAppRegistrations + b.mobileAppRegistrations,
   }
 }
 
@@ -133,8 +134,7 @@ export default function ClientPerformanceView({
   // Drill-down state for Meta performance table
   type DrillCrumb = { level: HierarchyLevel; id: string; name: string }
   const [drillPath, setDrillPath] = useState<DrillCrumb[]>([])
-  const drillLevel: HierarchyLevel =
-    drillPath.length === 0 ? "campaign" : drillPath.length === 1 ? "adset" : "ad"
+  const [metaLevel, setMetaLevel] = useState<HierarchyLevel>("campaign")
 
   // Platform toggle
   const platforms = useMemo(() => getClientPlatforms(client), [client])
@@ -286,7 +286,7 @@ export default function ClientPerformanceView({
       let rows = filteredRows
       if (drillPath.length >= 1) rows = rows.filter(r => r.campaign_id === drillPath[0].id)
       if (drillPath.length >= 2) rows = rows.filter(r => r.adset_id === drillPath[1].id)
-      return groupByLevel(rows, drillLevel)
+      return groupByLevel(rows, metaLevel)
     }
     if (isGoogleAds) return groupGoogleAdsByLevel(googleAdsRows, gaLevel)
     // "all" — combine both platforms grouped by campaign
@@ -294,10 +294,41 @@ export default function ClientPerformanceView({
     const gaGroups = groupGoogleAdsByLevel(googleAdsRows, "campaign")
     // Merge: different platforms will have different campaign IDs, so just concat
     return [...metaGroups, ...gaGroups].sort((a, b) => b.metrics.spend - a.metrics.spend)
-  }, [filteredRows, googleAdsRows, drillLevel, drillPath, gaLevel, platform])
+  }, [filteredRows, googleAdsRows, metaLevel, drillPath, gaLevel, platform])
 
   // Has comparison data?
   const hasComp = compareType !== "none" && (filteredCompRows.length > 0 || googleAdsComparisonRows.length > 0)
+
+  // Comparison spend series — built from comparison rows (aligned by day index)
+  const compSpendSeries = useMemo(() => {
+    if (!hasComp) return undefined
+    if (isMeta) {
+      return dailySpendSeries(filteredCompRows).map((d) => ({ date: d.date, value: d.spend }))
+    }
+    if (isGoogleAds) {
+      const byDate: Record<string, number> = {}
+      for (const r of googleAdsComparisonRows) {
+        if (!r.date) continue
+        byDate[r.date] = (byDate[r.date] || 0) + (r.spend || 0)
+      }
+      return Object.entries(byDate)
+        .map(([date, spend]) => ({ date, value: Math.round(spend * 100) / 100 }))
+        .sort((a, b) => a.date.localeCompare(b.date))
+    }
+    // "all"
+    const byDate: Record<string, number> = {}
+    for (const r of filteredCompRows) {
+      if (!r.date) continue
+      byDate[r.date] = (byDate[r.date] || 0) + (r.spend || 0)
+    }
+    for (const r of googleAdsComparisonRows) {
+      if (!r.date) continue
+      byDate[r.date] = (byDate[r.date] || 0) + (r.spend || 0)
+    }
+    return Object.entries(byDate)
+      .map(([date, spend]) => ({ date, value: Math.round(spend * 100) / 100 }))
+      .sort((a, b) => a.date.localeCompare(b.date))
+  }, [filteredCompRows, googleAdsComparisonRows, hasComp, platform])
 
   // Delta helper
   const delta = (current: number, prev: number) =>
@@ -344,23 +375,30 @@ export default function ClientPerformanceView({
     return undefined // Use default (campaign/adset/ad)
   }, [platform])
 
-  const currentTableLevel = isGoogleAds ? gaLevel : isAll ? "campaign" : drillLevel
+  const currentTableLevel = isGoogleAds ? gaLevel : isAll ? "campaign" : metaLevel
   const handleTableLevelChange = (newLevel: any) => {
     if (isGoogleAds) setGaLevel(newLevel)
-    else if (!isAll) setDrillPath([]) // reset drill-down when manually switching
+    else if (!isAll) {
+      setMetaLevel(newLevel as HierarchyLevel)
+      setDrillPath([]) // reset drill-down when manually switching level
+    }
   }
 
   // Drill-down breadcrumb for Meta performance table
   const drillBreadcrumb = isMeta && drillPath.length > 0 ? [
-    { label: "All Campaigns", onClick: () => setDrillPath([]) },
+    { label: "All Campaigns", onClick: () => { setDrillPath([]); setMetaLevel("campaign") } },
     ...drillPath.map((crumb, i) => ({
       label: crumb.name,
-      onClick: () => setDrillPath(prev => prev.slice(0, i + 1)),
+      onClick: () => {
+        setDrillPath(prev => prev.slice(0, i + 1))
+        setMetaLevel(crumb.level === "campaign" ? "adset" : "ad")
+      },
     })),
   ] : undefined
 
-  const handleDrillDown = isMeta && drillLevel !== "ad" ? (row: { id: string; name: string }) => {
-    setDrillPath(prev => [...prev, { level: drillLevel, id: row.id, name: row.name }])
+  const handleDrillDown = isMeta && metaLevel !== "ad" ? (row: { id: string; name: string }) => {
+    setDrillPath(prev => [...prev, { level: metaLevel, id: row.id, name: row.name }])
+    setMetaLevel(metaLevel === "campaign" ? "adset" : "ad")
   } : undefined
 
   return (
@@ -568,7 +606,7 @@ export default function ClientPerformanceView({
       {/* Charts */}
       <Card>
         <h2 className="mb-4 text-sm font-medium text-neutral-400">Daily Spend</h2>
-        <MetricChart data={spendSeries} label="Spend" color="#CDFF00" format="currency" height={260} currency={currency} />
+        <MetricChart data={spendSeries} label="Spend" color="#CDFF00" format="currency" height={260} currency={currency} comparisonData={compSpendSeries} comparisonLabel="Previous Period" />
       </Card>
 
       {showFunnel && (

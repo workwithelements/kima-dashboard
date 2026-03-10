@@ -305,38 +305,12 @@ export default function PerformanceTable({
 
   return (
     <div>
-      {/* Level tabs / breadcrumb + column picker */}
-      <div className="mb-3 flex items-center justify-between">
-        <div className="flex items-center gap-1">
-          {breadcrumb ? (
-            /* Drill-down breadcrumb trail */
-            <div className="flex items-center gap-0">
-              {breadcrumb.map((crumb, i) => {
-                const isLast = i === breadcrumb.length - 1
-                return (
-                  <span key={i} className="flex items-center">
-                    {i > 0 && (
-                      <span className="mx-1.5 text-[11px] text-neutral-600">›</span>
-                    )}
-                    {isLast ? (
-                      <span className="text-xs font-medium text-white">
-                        {crumb.label}
-                      </span>
-                    ) : (
-                      <button
-                        onClick={crumb.onClick}
-                        className="text-xs font-medium text-brand-lime transition hover:underline"
-                      >
-                        {crumb.label}
-                      </button>
-                    )}
-                  </span>
-                )
-              })}
-            </div>
-          ) : (
-            /* Default level tabs */
-            levels.map((l) => (
+      {/* Level tabs + column picker + optional breadcrumb */}
+      <div className="mb-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1">
+            {/* Level tabs — always shown */}
+            {levels.map((l) => (
               <button
                 key={l.key}
                 onClick={() => onLevelChange(l.key)}
@@ -348,11 +322,10 @@ export default function PerformanceTable({
               >
                 {l.label}
               </button>
-            ))
-          )}
-        </div>
+            ))}
+          </div>
 
-        {/* Column picker */}
+          {/* Column picker */}
         {availableExtras.length > 0 && (
           <div className="relative" ref={pickerRef}>
             <button
@@ -421,6 +394,35 @@ export default function PerformanceTable({
                 })}
               </div>
             )}
+          </div>
+        )}
+        </div>
+
+        {/* Drill-down breadcrumb trail (shown below level tabs when drilling) */}
+        {breadcrumb && (
+          <div className="mt-1.5 flex items-center gap-0">
+            {breadcrumb.map((crumb, i) => {
+              const isLast = i === breadcrumb.length - 1
+              return (
+                <span key={i} className="flex items-center">
+                  {i > 0 && (
+                    <span className="mx-1.5 text-[11px] text-neutral-600">›</span>
+                  )}
+                  {isLast ? (
+                    <span className="text-xs font-medium text-white">
+                      {crumb.label}
+                    </span>
+                  ) : (
+                    <button
+                      onClick={crumb.onClick}
+                      className="text-xs font-medium text-brand-lime transition hover:underline"
+                    >
+                      {crumb.label}
+                    </button>
+                  )}
+                </span>
+              )
+            })}
           </div>
         )}
       </div>

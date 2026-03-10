@@ -45,6 +45,7 @@ export type AggregatedMetrics = {
   purchases: number
   revenue: number
   appInstalls: number
+  mobileAppRegistrations: number
 }
 
 /** Client record from the clients table */
@@ -134,6 +135,7 @@ export const BASE_METRIC_FIELDS = [
   { value: "purchases", label: "Purchases" },
   { value: "purchase_value", label: "Purchase Value (Revenue)" },
   { value: "app_installs", label: "App Installs" },
+  { value: "mobile_app_registrations", label: "In-App Registrations" },
 ] as const
 
 export type BaseMetricField = (typeof BASE_METRIC_FIELDS)[number]["value"]
