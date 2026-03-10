@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic"
+
 import { createServiceClient } from "@/lib/supabase/server"
 import type { CustomMetric } from "@/lib/utils/types"
 import CustomMetricsManager from "@/components/settings/custom-metrics-manager"

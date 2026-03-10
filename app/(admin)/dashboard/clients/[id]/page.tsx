@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic"
+
 import { notFound } from "next/navigation"
 import { fetchClientData, fetchGoogleAdsData, fetchBreakdownsData } from "@/lib/data/fetch-client-data"
 import { createServiceClient } from "@/lib/supabase/server"

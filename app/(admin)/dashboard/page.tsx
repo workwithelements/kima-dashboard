@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic"
+
 import { createServiceClient } from "@/lib/supabase/server"
 import { Card, MetricCard } from "@/components/ui/card"
 import SpendChart from "@/components/charts/spend-chart"

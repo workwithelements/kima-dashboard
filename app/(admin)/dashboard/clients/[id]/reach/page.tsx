@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic"
+
 import { fetchReachData } from "@/lib/data/fetch-client-data"
 import { getPresetRange } from "@/lib/utils/dates"
 import type { DatePreset } from "@/lib/utils/dates"
