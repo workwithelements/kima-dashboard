@@ -22,6 +22,7 @@ import DateRangePicker from "@/components/ui/date-range-picker"
 import AdSetSelector from "@/components/ui/adset-selector"
 import PlatformSelector, { type PlatformView } from "@/components/ui/platform-selector"
 import PerformanceTable from "@/components/tables/performance-table"
+import AdsSidebar, { type AdEntry } from "@/components/ui/ads-sidebar"
 import ScorecardConfigModal from "./scorecard-config-modal"
 
 // Lazy-load heavy chart components (recharts ~200KB)
@@ -122,12 +123,18 @@ export default function ClientPerformanceView({
 }: Props) {
   const currency = client.currency_code ?? "GBP"
   const router = useRouter()
-  const [level, setLevel] = useState<HierarchyLevel>("campaign")
   const [gaLevel, setGaLevel] = useState<"campaign" | "ad_group">("campaign")
   const [showConfig, setShowConfig] = useState(false)
   const [funnelSteps, setFunnelSteps] = useState<string[]>(initialSteps || [])
   const [breakdownTab, setBreakdownTab] = useState<"demographics" | "placements">("demographics")
   const [breakdownMetric, setBreakdownMetric] = useState<"spend" | "impressions" | "purchases">("spend")
+  const [breakdownOpen, setBreakdownOpen] = useState(true)
+
+  // Drill-down state for Meta performance table
+  type DrillCrumb = { level: HierarchyLevel; id: string; name: string }
+  const [drillPath, setDrillPath] = useState<DrillCrumb[]>([])
+  const drillLevel: HierarchyLevel =
+    drillPath.length === 0 ? "campaign" : drillPath.length === 1 ? "adset" : "ad"
 
   // Platform toggle
   const platforms = useMemo(() => getClientPlatforms(client), [client])
@@ -273,16 +280,21 @@ export default function ClientPerformanceView({
     return byDate
   }, [filteredRows])
 
-  // Table data
+  // Table data — apply drill-down filtering for Meta
   const groupedData = useMemo(() => {
-    if (isMeta) return groupByLevel(filteredRows, level)
+    if (isMeta) {
+      let rows = filteredRows
+      if (drillPath.length >= 1) rows = rows.filter(r => r.campaign_id === drillPath[0].id)
+      if (drillPath.length >= 2) rows = rows.filter(r => r.adset_id === drillPath[1].id)
+      return groupByLevel(rows, drillLevel)
+    }
     if (isGoogleAds) return groupGoogleAdsByLevel(googleAdsRows, gaLevel)
     // "all" — combine both platforms grouped by campaign
     const metaGroups = groupByLevel(filteredRows, "campaign")
     const gaGroups = groupGoogleAdsByLevel(googleAdsRows, "campaign")
     // Merge: different platforms will have different campaign IDs, so just concat
     return [...metaGroups, ...gaGroups].sort((a, b) => b.metrics.spend - a.metrics.spend)
-  }, [filteredRows, googleAdsRows, level, gaLevel, platform])
+  }, [filteredRows, googleAdsRows, drillLevel, drillPath, gaLevel, platform])
 
   // Has comparison data?
   const hasComp = compareType !== "none" && (filteredCompRows.length > 0 || googleAdsComparisonRows.length > 0)
@@ -332,11 +344,24 @@ export default function ClientPerformanceView({
     return undefined // Use default (campaign/adset/ad)
   }, [platform])
 
-  const currentTableLevel = isGoogleAds ? gaLevel : isAll ? "campaign" : level
+  const currentTableLevel = isGoogleAds ? gaLevel : isAll ? "campaign" : drillLevel
   const handleTableLevelChange = (newLevel: any) => {
     if (isGoogleAds) setGaLevel(newLevel)
-    else if (!isAll) setLevel(newLevel)
+    else if (!isAll) setDrillPath([]) // reset drill-down when manually switching
   }
+
+  // Drill-down breadcrumb for Meta performance table
+  const drillBreadcrumb = isMeta && drillPath.length > 0 ? [
+    { label: "All Campaigns", onClick: () => setDrillPath([]) },
+    ...drillPath.map((crumb, i) => ({
+      label: crumb.name,
+      onClick: () => setDrillPath(prev => prev.slice(0, i + 1)),
+    })),
+  ] : undefined
+
+  const handleDrillDown = isMeta && drillLevel !== "ad" ? (row: { id: string; name: string }) => {
+    setDrillPath(prev => [...prev, { level: drillLevel, id: row.id, name: row.name }])
+  } : undefined
 
   return (
     <div className="space-y-6">
@@ -565,6 +590,7 @@ export default function ClientPerformanceView({
               data={funnelSeries}
               series={funnelChartSeries}
               dailyTotals={dailyTotals}
+              funnelStepKeys={funnelSteps}
             />
           </Card>
         </div>
@@ -578,19 +604,37 @@ export default function ClientPerformanceView({
         </Card>
       )}
 
-      {/* Performance table */}
+      {/* Performance table — collapsible */}
       <Card>
-        <h2 className="mb-4 text-sm font-medium text-neutral-400">
-          Breakdown
-        </h2>
-        <PerformanceTable
-          data={groupedData}
-          level={currentTableLevel}
-          onLevelChange={handleTableLevelChange}
-          funnelSteps={isMeta ? funnelSteps : []}
-          levelOptions={tableLevelOptions}
-          currency={currency}
-        />
+        <button
+          onClick={() => setBreakdownOpen((v) => !v)}
+          className="flex w-full items-center justify-between"
+        >
+          <h2 className="text-sm font-medium text-neutral-400">Breakdown</h2>
+          <svg
+            className={`h-4 w-4 text-neutral-500 transition-transform ${breakdownOpen ? "rotate-180" : ""}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {breakdownOpen && (
+          <div className="mt-4">
+            <PerformanceTable
+              data={groupedData}
+              level={currentTableLevel}
+              onLevelChange={handleTableLevelChange}
+              funnelSteps={isMeta ? funnelSteps : []}
+              levelOptions={tableLevelOptions}
+              currency={currency}
+              breadcrumb={drillBreadcrumb}
+              onRowClick={handleDrillDown}
+            />
+          </div>
+        )}
       </Card>
 
       {/* Breakdowns section (Meta only) */}
@@ -665,6 +709,13 @@ function BreakdownsSection({
   selectedAdSets,
   allAdSets,
 }: BreakdownsSectionProps) {
+  // Sidebar state for showing top ads per breakdown dimension
+  const [sidebarData, setSidebarData] = useState<{
+    title: string
+    metric: string
+    ads: AdEntry[]
+  } | null>(null)
+
   // Filter breakdowns by selected ad sets
   const filteredDemographics = useMemo(() => {
     if (selectedAdSets.length === 0 || selectedAdSets.length === allAdSets) return demographics
@@ -731,6 +782,43 @@ function BreakdownsSection({
 
   const metricLabel = metric === "spend" ? "Spend" : metric === "impressions" ? "Impressions" : "Purchases"
 
+  // Build ads sidebar from a subset of breakdown rows
+  function buildAdEntries(rows: { ad_id?: string; ad_name?: string; spend?: number; impressions?: number; purchases?: number }[]): AdEntry[] {
+    const agg = new Map<string, { name: string; value: number }>()
+    for (const r of rows) {
+      if (!r.ad_id) continue
+      const existing = agg.get(r.ad_id) || { name: r.ad_name || r.ad_id, value: 0 }
+      existing.value += (r[metric] || 0)
+      agg.set(r.ad_id, existing)
+    }
+    const entries = Array.from(agg.entries())
+      .map(([adId, { name, value }]) => ({ adId, adName: name, value, share: 0 }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 20)
+    const total = entries.reduce((s, e) => s + e.value, 0)
+    for (const e of entries) e.share = total > 0 ? e.value / total : 0
+    return entries
+  }
+
+  function handleDemoBarClick(age: string, gender: string) {
+    const genderLabel = gender.charAt(0).toUpperCase() + gender.slice(1)
+    const filtered = filteredDemographics.filter(r => r.age === age && r.gender === gender)
+    setSidebarData({
+      title: `${genderLabel} ${age}`,
+      metric: metricLabel,
+      ads: buildAdEntries(filtered),
+    })
+  }
+
+  function handlePlacementBarClick(groupBy: "publisher_platform" | "platform_position", rawName: string) {
+    const filtered = filteredPlacements.filter(r => r[groupBy] === rawName)
+    setSidebarData({
+      title: fmtPlatform(rawName),
+      metric: metricLabel,
+      ads: buildAdEntries(filtered),
+    })
+  }
+
   return (
     <Card>
       {/* Header with tabs + metric selector */}
@@ -776,7 +864,7 @@ function BreakdownsSection({
             <div className="space-y-4">
               <div>
                 <p className="mb-2 text-xs text-neutral-500">{metricLabel} by Age &amp; Gender</p>
-                <DemographicsChart rows={filteredDemographics} metric={metric} />
+                <DemographicsChart rows={filteredDemographics} metric={metric} onBarClick={handleDemoBarClick} />
               </div>
 
               <div className="overflow-x-auto">
@@ -826,11 +914,11 @@ function BreakdownsSection({
               <div className="grid gap-4 lg:grid-cols-2">
                 <div>
                   <p className="mb-2 text-xs text-neutral-500">{metricLabel} by Platform</p>
-                  <PlacementsChart rows={filteredPlacements} groupBy="publisher_platform" metric={metric} />
+                  <PlacementsChart rows={filteredPlacements} groupBy="publisher_platform" metric={metric} onBarClick={(raw) => handlePlacementBarClick("publisher_platform", raw)} />
                 </div>
                 <div>
                   <p className="mb-2 text-xs text-neutral-500">{metricLabel} by Position</p>
-                  <PlacementsChart rows={filteredPlacements} groupBy="platform_position" metric={metric} />
+                  <PlacementsChart rows={filteredPlacements} groupBy="platform_position" metric={metric} onBarClick={(raw) => handlePlacementBarClick("platform_position", raw)} />
                 </div>
               </div>
 
@@ -865,6 +953,17 @@ function BreakdownsSection({
             </div>
           )}
         </>
+      )}
+
+      {/* Ads sidebar */}
+      {sidebarData && (
+        <AdsSidebar
+          title={sidebarData.title}
+          metric={sidebarData.metric}
+          ads={sidebarData.ads}
+          currency={currency}
+          onClose={() => setSidebarData(null)}
+        />
       )}
     </Card>
   )

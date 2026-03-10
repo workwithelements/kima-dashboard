@@ -217,6 +217,8 @@ export default function PerformanceTable({
   funnelSteps = [],
   levelOptions,
   currency = "GBP",
+  breadcrumb,
+  onRowClick,
 }: {
   data: GroupRow[]
   level: string
@@ -225,6 +227,10 @@ export default function PerformanceTable({
   /** Override the default level tabs (for Google Ads, which uses campaign/ad_group) */
   levelOptions?: { key: string; label: string }[]
   currency?: string
+  /** When provided, replaces level tabs with a breadcrumb trail */
+  breadcrumb?: { label: string; onClick: () => void }[]
+  /** Click handler for drill-down rows (campaigns→adsets, adsets→ads) */
+  onRowClick?: (row: GroupRow) => void
 }) {
   const [sortKey, setSortKey] = useState<string>("spend")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
@@ -299,22 +305,51 @@ export default function PerformanceTable({
 
   return (
     <div>
-      {/* Level tabs + column picker */}
+      {/* Level tabs / breadcrumb + column picker */}
       <div className="mb-3 flex items-center justify-between">
-        <div className="flex gap-1">
-          {levels.map((l) => (
-            <button
-              key={l.key}
-              onClick={() => onLevelChange(l.key)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                level === l.key
-                  ? "bg-brand-lime/10 text-brand-lime"
-                  : "text-neutral-400 hover:bg-neutral-800 hover:text-white"
-              }`}
-            >
-              {l.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-1">
+          {breadcrumb ? (
+            /* Drill-down breadcrumb trail */
+            <div className="flex items-center gap-0">
+              {breadcrumb.map((crumb, i) => {
+                const isLast = i === breadcrumb.length - 1
+                return (
+                  <span key={i} className="flex items-center">
+                    {i > 0 && (
+                      <span className="mx-1.5 text-[11px] text-neutral-600">›</span>
+                    )}
+                    {isLast ? (
+                      <span className="text-xs font-medium text-white">
+                        {crumb.label}
+                      </span>
+                    ) : (
+                      <button
+                        onClick={crumb.onClick}
+                        className="text-xs font-medium text-brand-lime transition hover:underline"
+                      >
+                        {crumb.label}
+                      </button>
+                    )}
+                  </span>
+                )
+              })}
+            </div>
+          ) : (
+            /* Default level tabs */
+            levels.map((l) => (
+              <button
+                key={l.key}
+                onClick={() => onLevelChange(l.key)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                  level === l.key
+                    ? "bg-brand-lime/10 text-brand-lime"
+                    : "text-neutral-400 hover:bg-neutral-800 hover:text-white"
+                }`}
+              >
+                {l.label}
+              </button>
+            ))
+          )}
         </div>
 
         {/* Column picker */}
@@ -425,7 +460,12 @@ export default function PerformanceTable({
             {sorted.map((row) => (
               <tr
                 key={row.id}
-                className="border-b border-neutral-800/50 transition hover:bg-neutral-800/30"
+                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                className={`border-b border-neutral-800/50 transition ${
+                  onRowClick
+                    ? "cursor-pointer hover:bg-neutral-800/50"
+                    : "hover:bg-neutral-800/30"
+                }`}
               >
                 {columns.map((col) => (
                   <td
@@ -435,7 +475,16 @@ export default function PerformanceTable({
                     } ${col.key === "name" ? "max-w-[320px] truncate font-medium text-white" : "text-neutral-300"}`}
                     title={col.key === "name" ? row.name : undefined}
                   >
-                    {col.format(row)}
+                    {col.key === "name" && onRowClick ? (
+                      <span className="inline-flex items-center gap-1">
+                        {col.format(row)}
+                        <svg className="h-3 w-3 shrink-0 text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                      </span>
+                    ) : (
+                      col.format(row)
+                    )}
                   </td>
                 ))}
               </tr>

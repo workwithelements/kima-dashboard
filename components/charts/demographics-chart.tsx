@@ -17,6 +17,7 @@ import { fmtCurrency, fmtNumber } from "@/lib/utils/format"
 type Props = {
   rows: MetaDemographicsRow[]
   metric: "spend" | "impressions" | "purchases"
+  onBarClick?: (age: string, gender: string) => void
 }
 
 const GENDER_COLORS: Record<string, string> = {
@@ -33,7 +34,7 @@ const GENDER_LABELS: Record<string, string> = {
 
 const AGE_ORDER = ["13-17", "18-24", "25-34", "35-44", "45-54", "55-64", "65+"]
 
-export default function DemographicsChart({ rows, metric }: Props) {
+export default function DemographicsChart({ rows, metric, onBarClick }: Props) {
   const { data, genders } = useMemo(() => {
     // Aggregate by age + gender
     const agg = new Map<string, Record<string, number>>()
@@ -111,6 +112,10 @@ export default function DemographicsChart({ rows, metric }: Props) {
             stackId="demo"
             fill={GENDER_COLORS[g] || "#737373"}
             name={g}
+            cursor={onBarClick ? "pointer" : undefined}
+            onClick={onBarClick ? (payload: any) => {
+              if (payload?.age) onBarClick(payload.age, g)
+            } : undefined}
           />
         ))}
       </BarChart>

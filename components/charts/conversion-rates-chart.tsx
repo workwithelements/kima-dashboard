@@ -20,6 +20,8 @@ type Props = {
   series: FunnelSeriesDef[]
   /** Daily totals: { date, impressions, clicks, spend } */
   dailyTotals: Record<string, { impressions: number; clicks: number; spend: number }>
+  /** Ordered funnel step keys — when provided, uses progressive denominators */
+  funnelStepKeys?: string[]
 }
 
 /** Softer palette for rate lines (distinct from bar colors) */
@@ -37,6 +39,7 @@ export default function ConversionRatesChart({
   data,
   series,
   dailyTotals,
+  funnelStepKeys,
 }: Props) {
   if (series.length === 0 || data.length === 0) return null
 
@@ -52,14 +55,27 @@ export default function ConversionRatesChart({
       if (!def) continue
 
       const count = (d[stepKey] as number) || 0
-      // Use the step's static denominator to look up the daily value
       let denominator = 0
-      const denomField = def.rateDenominator
-      if (denomField === "impressions") denominator = totals.impressions
-      else if (denomField === "clicks") denominator = totals.clicks
-      else if (denomField === "landingPageViews") denominator = (d["landing_page_views"] as number) || 0
-      else if (denomField === "addsToCart") denominator = (d["adds_to_cart"] as number) || 0
-      else if (denomField === "checkoutsInitiated") denominator = (d["checkouts_initiated"] as number) || 0
+
+      if (funnelStepKeys && funnelStepKeys.length > 0) {
+        // Progressive: use previous funnel step as denominator
+        const stepIdx = funnelStepKeys.indexOf(stepKey)
+        if (stepIdx > 0) {
+          const prevKey = funnelStepKeys[stepIdx - 1]
+          denominator = (d[prevKey] as number) || 0
+        } else {
+          // First step: use impressions
+          denominator = totals.impressions
+        }
+      } else {
+        // Fallback: static denominator from step def
+        const denomField = def.rateDenominator
+        if (denomField === "impressions") denominator = totals.impressions
+        else if (denomField === "clicks") denominator = totals.clicks
+        else if (denomField === "landingPageViews") denominator = (d["landing_page_views"] as number) || 0
+        else if (denomField === "addsToCart") denominator = (d["adds_to_cart"] as number) || 0
+        else if (denomField === "checkoutsInitiated") denominator = (d["checkouts_initiated"] as number) || 0
+      }
 
       const rate = denominator > 0 ? (count / denominator) * 100 : null
       entry[`${stepKey}_rate`] = rate
@@ -67,6 +83,21 @@ export default function ConversionRatesChart({
 
     return entry
   })
+
+  // Build progressive labels: "Purchases / Carts" instead of static "Purchase Rate"
+  const getProgressiveLabel = (stepKey: string) => {
+    const def = FUNNEL_STEP_DEFS[stepKey]
+    if (!def) return stepKey
+    if (funnelStepKeys && funnelStepKeys.length > 0) {
+      const stepIdx = funnelStepKeys.indexOf(stepKey)
+      if (stepIdx > 0) {
+        const prevDef = FUNNEL_STEP_DEFS[funnelStepKeys[stepIdx - 1]]
+        if (prevDef) return `${def.shortLabel} / ${prevDef.shortLabel}`
+      }
+      return `${def.shortLabel} / Impr.`
+    }
+    return def.rateLabel
+  }
 
   return (
     <ResponsiveContainer width="100%" height={300}>
@@ -97,9 +128,7 @@ export default function ConversionRatesChart({
           formatter={(value: any, name: string) => {
             // name is like "landing_page_views_rate"
             const stepKey = name.replace(/_rate$/, "")
-            const s = series.find((s) => s.key === stepKey)
-            const def = FUNNEL_STEP_DEFS[stepKey]
-            const label = def?.rateLabel || s?.label || name
+            const label = getProgressiveLabel(stepKey)
             return value != null ? [fmtPercent(value as number, 2), label] : ["—", label]
           }}
         />
@@ -110,10 +139,9 @@ export default function ConversionRatesChart({
           iconSize={8}
           formatter={(value: string) => {
             const stepKey = value.replace(/_rate$/, "")
-            const def = FUNNEL_STEP_DEFS[stepKey]
             return (
               <span className="text-xs text-neutral-400">
-                {def?.rateLabel || value}
+                {getProgressiveLabel(stepKey)}
               </span>
             )
           }}

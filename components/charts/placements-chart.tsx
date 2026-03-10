@@ -17,6 +17,7 @@ type Props = {
   rows: MetaPlacementsRow[]
   groupBy: "publisher_platform" | "platform_position"
   metric: "spend" | "impressions" | "purchases"
+  onBarClick?: (rawName: string) => void
 }
 
 const PLATFORM_COLORS: Record<string, string> = {
@@ -33,7 +34,7 @@ const PLATFORM_LABELS: Record<string, string> = {
   messenger: "Messenger",
 }
 
-export default function PlacementsChart({ rows, groupBy, metric }: Props) {
+export default function PlacementsChart({ rows, groupBy, metric, onBarClick }: Props) {
   const data = useMemo(() => {
     const agg = new Map<string, number>()
 
@@ -91,6 +92,10 @@ export default function PlacementsChart({ rows, groupBy, metric }: Props) {
           fill="#CDFF00"
           radius={[0, 4, 4, 0]}
           barSize={24}
+          cursor={onBarClick ? "pointer" : undefined}
+          onClick={onBarClick ? (payload: any) => {
+            if (payload?.rawName) onBarClick(payload.rawName)
+          } : undefined}
         />
       </BarChart>
     </ResponsiveContainer>
