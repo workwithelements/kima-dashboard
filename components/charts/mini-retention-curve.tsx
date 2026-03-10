@@ -52,22 +52,64 @@ export default function MiniRetentionCurve({
     percent: p.percent,
   }))
 
-  // ── Smooth Catmull-Rom → cubic bezier curve ─────────────────
-  function smoothPath(arr: { x: number; y: number }[]): string {
-    if (arr.length < 2) return ""
+  // ── Monotone cubic interpolation (Fritsch–Carlson) ──────────
+  // Prevents overshoot that caused curves to dip below zero
+  function monotonePath(arr: { x: number; y: number }[]): string {
+    const n = arr.length
+    if (n < 2) return ""
+    if (n === 2) return `M ${arr[0].x.toFixed(1)} ${arr[0].y.toFixed(1)} L ${arr[1].x.toFixed(1)} ${arr[1].y.toFixed(1)}`
+
+    // Step 1: compute slopes (delta) and intervals (h)
+    const h: number[] = []
+    const delta: number[] = []
+    for (let i = 0; i < n - 1; i++) {
+      h.push(arr[i + 1].x - arr[i].x)
+      delta.push(h[i] !== 0 ? (arr[i + 1].y - arr[i].y) / h[i] : 0)
+    }
+
+    // Step 2: initial tangent estimates
+    const m: number[] = new Array(n)
+    m[0] = delta[0]
+    m[n - 1] = delta[n - 2]
+    for (let i = 1; i < n - 1; i++) {
+      if (delta[i - 1] * delta[i] <= 0) {
+        m[i] = 0 // local extremum → flat tangent
+      } else {
+        m[i] = (delta[i - 1] + delta[i]) / 2
+      }
+    }
+
+    // Step 3: Fritsch–Carlson monotonicity correction
+    for (let i = 0; i < n - 1; i++) {
+      if (Math.abs(delta[i]) < 1e-12) {
+        m[i] = 0
+        m[i + 1] = 0
+      } else {
+        const alpha = m[i] / delta[i]
+        const beta = m[i + 1] / delta[i]
+        const s = alpha * alpha + beta * beta
+        if (s > 9) {
+          const t = 3 / Math.sqrt(s)
+          m[i] = t * alpha * delta[i]
+          m[i + 1] = t * beta * delta[i]
+        }
+      }
+    }
+
+    // Step 4: build cubic bezier path from hermite tangents
     let d = `M ${arr[0].x.toFixed(1)} ${arr[0].y.toFixed(1)}`
-    for (let i = 0; i < arr.length - 1; i++) {
-      const a = arr[Math.max(0, i - 1)]
-      const b = arr[i]
-      const c = arr[i + 1]
-      const e = arr[Math.min(arr.length - 1, i + 2)]
-      const t = 0.3
-      d += ` C ${(b.x + (c.x - a.x) * t).toFixed(1)} ${(b.y + (c.y - a.y) * t).toFixed(1)}, ${(c.x - (e.x - b.x) * t).toFixed(1)} ${(c.y - (e.y - b.y) * t).toFixed(1)}, ${c.x.toFixed(1)} ${c.y.toFixed(1)}`
+    for (let i = 0; i < n - 1; i++) {
+      const dx = h[i] / 3
+      const cp1x = arr[i].x + dx
+      const cp1y = arr[i].y + m[i] * dx
+      const cp2x = arr[i + 1].x - dx
+      const cp2y = arr[i + 1].y - m[i + 1] * dx
+      d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${arr[i + 1].x.toFixed(1)} ${arr[i + 1].y.toFixed(1)}`
     }
     return d
   }
 
-  const line = smoothPath(pts)
+  const line = monotonePath(pts)
   const bottomY = m.top + cH
   const area = `${line} L ${pts[pts.length - 1].x.toFixed(1)} ${bottomY} L ${pts[0].x.toFixed(1)} ${bottomY} Z`
 

@@ -34,8 +34,9 @@ import {
 import { isVideoAd } from "@/lib/utils/video-retention"
 import { detectFatigueAll, FATIGUE_CONFIG, type FatigueResult } from "@/lib/utils/fatigue-detection"
 import { calculateConcentration, CONCENTRATION_COLORS } from "@/lib/utils/spend-concentration"
-import type { MetaDailyRow } from "@/lib/utils/types"
+import type { MetaDailyRow, AdPlatform } from "@/lib/utils/types"
 import type { DatePreset } from "@/lib/utils/dates"
+import PlatformSelector, { type PlatformView } from "@/components/ui/platform-selector"
 
 type ThumbnailMap = Record<string, string> // ad_id -> thumbnail_url
 
@@ -48,6 +49,8 @@ type Props = {
   thumbnails?: ThumbnailMap
   previewsEnabled?: boolean
   currency?: string
+  /** Available platforms for this client (drives platform tabs) */
+  platforms?: AdPlatform[]
 }
 
 type SortKey =
@@ -80,11 +83,13 @@ export default function CreativeAnalysisView({
   thumbnails = {},
   previewsEnabled = false,
   currency = "GBP",
+  platforms = ["meta"],
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
 
+  const [platform, setPlatform] = useState<PlatformView>("meta")
   const [sortKey, setSortKey] = useState<SortKey>("spend")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
   const [activeFilters, setActiveFilters] = useState<Set<ClassificationType>>(
@@ -384,9 +389,16 @@ export default function CreativeAnalysisView({
     <div className="space-y-6">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-sm font-medium text-neutral-400">
-          Creative Analysis
-        </h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-sm font-medium text-neutral-400">
+            Creative Analysis
+          </h2>
+          <PlatformSelector
+            platforms={platforms}
+            selected={platform}
+            onChange={setPlatform}
+          />
+        </div>
         <div className="flex flex-wrap items-center gap-3">
           <AdSetSelector
             adsets={adsets}
@@ -402,6 +414,24 @@ export default function CreativeAnalysisView({
           />
         </div>
       </div>
+
+      {/* Google Ads blank state */}
+      {platform === "google_ads" && (
+        <Card className="flex flex-col items-center justify-center py-20 text-center">
+          <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-neutral-800">
+            <svg className="h-8 w-8 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v13.5A1.5 1.5 0 003.75 21z" />
+            </svg>
+          </div>
+          <h3 className="text-base font-medium text-neutral-300">Google Ads Creative Analysis</h3>
+          <p className="mt-2 max-w-sm text-sm text-neutral-500">
+            Creative analysis for Google Ads is coming soon. Connect your Google Ads account to see ad creative performance here.
+          </p>
+        </Card>
+      )}
+
+      {/* Meta creative analysis content */}
+      {platform !== "google_ads" && <>
 
       {/* Tag filters */}
       {tags.length > 0 && (
@@ -740,6 +770,8 @@ export default function CreativeAnalysisView({
           onClose={() => setDetailAd(null)}
         />
       )}
+
+      </>}
     </div>
   )
 }
@@ -1126,11 +1158,21 @@ function CreativeDetailModal({
             <img
               src={thumbnailUrl}
               alt={ad.adName}
-              className="h-full w-full object-cover"
+              className="h-full w-full object-contain"
             />
           ) : (
             <div className="text-neutral-600 text-sm">
               {isVideo ? "🎬" : "🖼"} No preview
+            </div>
+          )}
+          {/* Video play icon overlay */}
+          {isVideo && thumbnailUrl && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="h-10 w-10 rounded-full bg-black/50 flex items-center justify-center backdrop-blur-sm">
+                <svg className="h-5 w-5 text-white ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              </div>
             </div>
           )}
           <span
@@ -1151,12 +1193,28 @@ function CreativeDetailModal({
 
         {/* Content */}
         <div className="p-5 space-y-4">
-          {/* Ad name + adset */}
+          {/* Ad name + adset + View on Meta link */}
           <div>
-            <h3 className="text-base font-medium text-neutral-100 leading-snug">
-              {ad.adName}
-            </h3>
-            <p className="text-xs text-neutral-500 mt-1">{ad.adsetName}</p>
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-medium text-neutral-100 leading-snug">
+                  {ad.adName}
+                </h3>
+                <p className="text-xs text-neutral-500 mt-1">{ad.adsetName}</p>
+              </div>
+              <a
+                href={`https://www.facebook.com/ads/library/?id=${ad.adId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-neutral-800 px-2.5 py-1.5 text-[11px] font-medium text-neutral-300 transition hover:bg-neutral-700 hover:text-white"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+                View on Meta
+              </a>
+            </div>
             {tags && tags.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {tags.map((tag) => (

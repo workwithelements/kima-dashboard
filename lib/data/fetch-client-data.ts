@@ -263,7 +263,7 @@ export async function fetchCreativeData(
 
   const { data: client } = await supabase
     .from("clients")
-    .select("id, name, currency_code")
+    .select("id, name, currency_code, meta_account_id, google_ads_customer_id")
     .eq("id", clientId)
     .single()
 

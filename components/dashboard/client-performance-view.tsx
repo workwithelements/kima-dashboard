@@ -36,6 +36,14 @@ const FunnelChart = dynamic(
   () => import("@/components/charts/funnel-chart"),
   { ssr: false, loading: ChartPlaceholder }
 )
+const FunnelBarChart = dynamic(
+  () => import("@/components/charts/funnel-bar-chart"),
+  { ssr: false, loading: ChartPlaceholder }
+)
+const ConversionRatesChart = dynamic(
+  () => import("@/components/charts/conversion-rates-chart"),
+  { ssr: false, loading: ChartPlaceholder }
+)
 const FunnelDropOffChart = dynamic(
   () => import("@/components/charts/funnel-drop-off-chart"),
   { ssr: false, loading: ChartPlaceholder }
@@ -241,6 +249,29 @@ export default function ClientPerformanceView({
     () => (isMeta ? dailyFunnelSeries(filteredRows, funnelSteps) : []),
     [filteredRows, funnelSteps, platform]
   )
+
+  // Daily spend lookup (keyed by date) for CPA line on funnel bar chart
+  const spendByDate = useMemo(() => {
+    const byDate: Record<string, number> = {}
+    for (const r of filteredRows) {
+      if (!r.date) continue
+      byDate[r.date] = (byDate[r.date] || 0) + (r.spend || 0)
+    }
+    return byDate
+  }, [filteredRows])
+
+  // Daily totals for conversion rates chart
+  const dailyTotals = useMemo(() => {
+    const byDate: Record<string, { impressions: number; clicks: number; spend: number }> = {}
+    for (const r of filteredRows) {
+      if (!r.date) continue
+      if (!byDate[r.date]) byDate[r.date] = { impressions: 0, clicks: 0, spend: 0 }
+      byDate[r.date].impressions += r.impressions || 0
+      byDate[r.date].clicks += r.unique_link_clicks || 0
+      byDate[r.date].spend += r.spend || 0
+    }
+    return byDate
+  }, [filteredRows])
 
   // Table data
   const groupedData = useMemo(() => {
@@ -510,19 +541,34 @@ export default function ClientPerformanceView({
       )}
 
       {/* Charts */}
-      <div className={`grid gap-4 ${showFunnel ? "lg:grid-cols-2" : ""}`}>
-        <Card>
-          <h2 className="mb-4 text-sm font-medium text-neutral-400">Daily Spend</h2>
-          <MetricChart data={spendSeries} label="Spend" color="#CDFF00" format="currency" height={260} />
-        </Card>
+      <Card>
+        <h2 className="mb-4 text-sm font-medium text-neutral-400">Daily Spend</h2>
+        <MetricChart data={spendSeries} label="Spend" color="#CDFF00" format="currency" height={260} currency={currency} />
+      </Card>
 
-        {showFunnel && (
+      {showFunnel && (
+        <div className="grid gap-4 lg:grid-cols-2">
           <Card>
             <h2 className="mb-4 text-sm font-medium text-neutral-400">Funnel Trends</h2>
-            <FunnelChart data={funnelSeries} series={funnelChartSeries} />
+            <FunnelBarChart
+              data={funnelSeries}
+              series={funnelChartSeries}
+              spendByDate={spendByDate}
+              cpaStepKey={funnelSteps[funnelSteps.length - 1]}
+              currency={currency}
+            />
           </Card>
-        )}
-      </div>
+
+          <Card>
+            <h2 className="mb-4 text-sm font-medium text-neutral-400">Conversion Rates</h2>
+            <ConversionRatesChart
+              data={funnelSeries}
+              series={funnelChartSeries}
+              dailyTotals={dailyTotals}
+            />
+          </Card>
+        </div>
+      )}
 
       {/* Funnel drop-off (Meta only) */}
       {showFunnel && (

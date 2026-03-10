@@ -106,13 +106,24 @@ function CreativeCard({
             alt={ad.adName}
             fill
             sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
-            className="object-cover"
+            className="object-contain"
             unoptimized
             onError={() => setImgError(true)}
           />
         ) : (
           <div className="text-neutral-600 text-xs text-center px-4">
             {isVideo ? "🎬" : "🖼"} No preview
+          </div>
+        )}
+
+        {/* Video play icon overlay */}
+        {isVideo && thumbnailUrl && !imgError && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="h-8 w-8 rounded-full bg-black/50 flex items-center justify-center backdrop-blur-sm">
+              <svg className="h-4 w-4 text-white ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            </div>
           </div>
         )}
 
