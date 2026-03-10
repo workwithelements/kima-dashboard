@@ -11,6 +11,7 @@ import type { PacingResult } from "@/lib/utils/pacing"
 type ClientPacingRow = {
   id: string
   name: string
+  currency: string
   pacing: PacingResult
 }
 
@@ -24,7 +25,7 @@ export default async function PacingOverviewPage() {
   // Fetch all active clients with budgets
   const { data: clients } = await supabase
     .from("clients")
-    .select("id, name, monthly_budget")
+    .select("id, name, monthly_budget, currency_code")
     .eq("active", true)
     .order("name")
 
@@ -42,20 +43,48 @@ export default async function PacingOverviewPage() {
     )
   }
 
-  // Fetch current month + historical spend for all clients
-  const { data: currentMonthRows } = await supabase
-    .from("meta_daily_performance")
-    .select("date, client_id, spend")
-    .gte("date", monthStart())
-    .lte("date", today())
-    .order("date")
+  // Fetch current month + historical spend for all clients from both platforms
+  // Wrap Google Ads queries in .catch() in case table doesn't exist yet
+  const [metaCurrent, gaCurrent, metaHistorical, gaHistorical] = await Promise.all([
+    supabase
+      .from("meta_daily_performance")
+      .select("date, client_id, spend")
+      .gte("date", monthStart())
+      .lte("date", today())
+      .order("date"),
+    Promise.resolve(
+      supabase
+        .from("google_ads_daily_performance")
+        .select("date, client_id, spend")
+        .gte("date", monthStart())
+        .lte("date", today())
+        .order("date")
+    ).catch(() => ({ data: [] as any[] })),
+    supabase
+      .from("meta_daily_performance")
+      .select("date, client_id, spend")
+      .gte("date", daysAgo(90))
+      .lte("date", today())
+      .order("date"),
+    Promise.resolve(
+      supabase
+        .from("google_ads_daily_performance")
+        .select("date, client_id, spend")
+        .gte("date", daysAgo(90))
+        .lte("date", today())
+        .order("date")
+    ).catch(() => ({ data: [] as any[] })),
+  ])
 
-  const { data: historicalRows } = await supabase
-    .from("meta_daily_performance")
-    .select("date, client_id, spend")
-    .gte("date", daysAgo(90))
-    .lte("date", today())
-    .order("date")
+  // Combine Meta + Google Ads rows
+  const currentMonthRows = [
+    ...(metaCurrent.data || []),
+    ...(gaCurrent.data || []),
+  ]
+  const historicalRows = [
+    ...(metaHistorical.data || []),
+    ...(gaHistorical.data || []),
+  ]
 
   // Group by client
   function groupByClient(rows: { date: string; client_id: string; spend: number }[]) {
@@ -79,6 +108,7 @@ export default async function PacingOverviewPage() {
   const clientPacing: ClientPacingRow[] = clients.map((c) => ({
     id: c.id,
     name: c.name,
+    currency: (c as any).currency_code ?? "GBP",
     pacing: calculatePacing(
       currentByClient[c.id] || [],
       c.monthly_budget || null,
@@ -189,13 +219,13 @@ export default async function PacingOverviewPage() {
                       </Link>
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 text-right text-xs tabular-nums text-neutral-300">
-                      {row.pacing.budget ? fmtCurrency(row.pacing.budget) : "—"}
+                      {row.pacing.budget ? fmtCurrency(row.pacing.budget, row.currency) : "—"}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 text-right text-xs tabular-nums text-neutral-300">
-                      {fmtCurrency(row.pacing.spentToDate)}
+                      {fmtCurrency(row.pacing.spentToDate, row.currency)}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 text-right text-xs tabular-nums text-neutral-300">
-                      {fmtCurrency(row.pacing.projectedSpend)}
+                      {fmtCurrency(row.pacing.projectedSpend, row.currency)}
                     </td>
                     <td className={`whitespace-nowrap px-3 py-3 text-right text-xs tabular-nums font-medium ${config.color}`}>
                       {row.pacing.pacingPct !== null ? fmtPercent(row.pacing.pacingPct, 1) : "—"}

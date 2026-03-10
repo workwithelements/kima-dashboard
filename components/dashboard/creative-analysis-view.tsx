@@ -1,15 +1,28 @@
 "use client"
 
-import { useMemo, useState, useEffect, useCallback, useRef } from "react"
+import { useMemo, useState, useEffect, useCallback, useRef, type MouseEvent as ReactMouseEvent } from "react"
+import { createPortal } from "react-dom"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
-import { Card, MetricCard } from "@/components/ui/card"
+import dynamic from "next/dynamic"
+import { Card } from "@/components/ui/card"
 import DateRangePicker from "@/components/ui/date-range-picker"
 import AdSetSelector from "@/components/ui/adset-selector"
-import SpendShareChart from "@/components/charts/spend-share-chart"
-import CreativeGroupingView from "@/components/dashboard/creative-grouping-view"
-import CreativeCardGrid from "@/components/dashboard/creative-card-grid"
+import CreativeCardGrid, { type TagInfo } from "@/components/dashboard/creative-card-grid"
+import {
+  CREATIVE_METRICS,
+  CREATIVE_METRIC_ORDER,
+  DEFAULT_CARD_METRICS,
+  DEFAULT_TABLE_METRICS,
+  type CreativeMetricKey,
+} from "@/lib/utils/creative-metrics"
+
+// Lazy-load chart component
+const SpendShareChart = dynamic(
+  () => import("@/components/charts/spend-share-chart"),
+  { ssr: false, loading: () => <div className="h-64 animate-pulse rounded bg-neutral-800/50" /> }
+)
 import TagManagerModal, { type Tag } from "@/components/dashboard/tag-manager-modal"
-import VideoRetentionChart from "@/components/charts/video-retention-chart"
+import MiniRetentionCurve from "@/components/charts/mini-retention-curve"
 import { fmtCurrency, fmtNumber, fmtPercent } from "@/lib/utils/format"
 import {
   classifyAllAds,
@@ -20,6 +33,7 @@ import {
 } from "@/lib/utils/creative-classification"
 import { isVideoAd } from "@/lib/utils/video-retention"
 import { detectFatigueAll, FATIGUE_CONFIG, type FatigueResult } from "@/lib/utils/fatigue-detection"
+import { calculateConcentration, CONCENTRATION_COLORS } from "@/lib/utils/spend-concentration"
 import type { MetaDailyRow } from "@/lib/utils/types"
 import type { DatePreset } from "@/lib/utils/dates"
 
@@ -33,20 +47,17 @@ type Props = {
   clientId: string
   thumbnails?: ThumbnailMap
   previewsEnabled?: boolean
+  currency?: string
 }
 
 type SortKey =
   | "adName"
   | "adsetName"
   | "classification"
-  | "spend"
-  | "impressions"
-  | "conversions"
-  | "cpa"
-  | "cvr"
-  | "spendShare"
+  | CreativeMetricKey
 
-type ViewMode = "table" | "grouped" | "grid"
+type ViewMode = "table" | "grid"
+type GroupBy = "none" | "tags"
 
 type AdTagMap = Record<string, string[]> // ad_id -> tag_id[]
 
@@ -68,6 +79,7 @@ export default function CreativeAnalysisView({
   clientId,
   thumbnails = {},
   previewsEnabled = false,
+  currency = "GBP",
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -78,7 +90,8 @@ export default function CreativeAnalysisView({
   const [activeFilters, setActiveFilters] = useState<Set<ClassificationType>>(
     new Set()
   )
-  const [viewMode, setViewMode] = useState<ViewMode>("table")
+  const [viewMode, setViewMode] = useState<ViewMode>("grid")
+  const [groupBy, setGroupBy] = useState<GroupBy>("none")
   const [spendShareAdSet, setSpendShareAdSet] = useState<string | null>(null)
 
   // Tag state
@@ -87,9 +100,15 @@ export default function CreativeAnalysisView({
   const [selectedTagFilters, setSelectedTagFilters] = useState<string[]>([])
   const [showTagManager, setShowTagManager] = useState(false)
   const [tagDropdownAdId, setTagDropdownAdId] = useState<string | null>(null)
+  const [tagDropdownAnchor, setTagDropdownAnchor] = useState<DOMRect | null>(null)
 
-  // Video retention state — track selected video ads for comparison
-  const [selectedVideoAdIds, setSelectedVideoAdIds] = useState<Set<string>>(new Set())
+  // Detail modal state
+  const [detailAd, setDetailAd] = useState<ClassifiedAd | null>(null)
+
+  // Configurable metrics
+  const [cardMetrics, setCardMetrics] = useState<CreativeMetricKey[]>(DEFAULT_CARD_METRICS)
+  const [tableMetrics, setTableMetrics] = useState<CreativeMetricKey[]>(DEFAULT_TABLE_METRICS)
+  const [showMetricPicker, setShowMetricPicker] = useState(false)
 
   // Fetch tags + ad-tag mappings
   const fetchTags = useCallback(async () => {
@@ -244,24 +263,16 @@ export default function CreativeAnalysisView({
             CLASSIFICATION_ORDER.indexOf(a.classification.type) -
             CLASSIFICATION_ORDER.indexOf(b.classification.type)
           break
-        case "spend":
-          cmp = a.spend - b.spend
+        default: {
+          // Dynamic metric sort using CREATIVE_METRICS
+          const metricDef = CREATIVE_METRICS[sortKey as CreativeMetricKey]
+          if (metricDef) {
+            const va = metricDef.getValue(a) ?? -Infinity
+            const vb = metricDef.getValue(b) ?? -Infinity
+            cmp = va - vb
+          }
           break
-        case "impressions":
-          cmp = a.impressions - b.impressions
-          break
-        case "conversions":
-          cmp = a.conversions - b.conversions
-          break
-        case "cpa":
-          cmp = (a.cpa ?? Infinity) - (b.cpa ?? Infinity)
-          break
-        case "cvr":
-          cmp = a.cvr - b.cvr
-          break
-        case "spendShare":
-          cmp = a.spendShare - b.spendShare
-          break
+        }
       }
       return sortDir === "desc" ? -cmp : cmp
     })
@@ -271,11 +282,60 @@ export default function CreativeAnalysisView({
   // Summary metrics
   const totalCreatives = classifiedAds.length
   const activeAds = classifiedAds.filter((a) => a.impressions > 0).length
-  const winnersCount =
-    counts.DIRECT_WINNER + counts.INDIRECT_WINNER
-  const viableCount = counts.VIABLE_UNDERSCALED
-  const losersCount =
-    counts.LOSER + counts.LOSER_NON_CONTRIBUTING + counts.LOSER_NO_DELIVERY
+
+  // Spend concentration (HHI)
+  const concentration = useMemo(
+    () =>
+      calculateConcentration(
+        classifiedAds.map((a) => ({
+          adId: a.adId,
+          adName: a.adName,
+          spend: a.spend,
+        }))
+      ),
+    [classifiedAds]
+  )
+
+  // Build per-ad TagInfo lookup for card grid
+  const adTagsLookup = useMemo(() => {
+    const lookup: Record<string, TagInfo[]> = {}
+    for (const [adId, tagIds] of Object.entries(adTagMap)) {
+      lookup[adId] = tagIds
+        .map((tid) => tags.find((t) => t.id === tid))
+        .filter((t): t is Tag => t !== undefined)
+    }
+    return lookup
+  }, [adTagMap, tags])
+
+  // Grouped ads: split sortedAds into sections when groupBy !== "none"
+  const groupedSections = useMemo(() => {
+    if (groupBy === "none") return null
+    // group by tags
+    const tagMap = new Map<string, ClassifiedAd[]>()
+    const untagged: ClassifiedAd[] = []
+    for (const ad of sortedAds) {
+      const adTags = adTagMap[ad.adId] || []
+      if (adTags.length === 0) {
+        untagged.push(ad)
+      } else {
+        for (const tid of adTags) {
+          if (!tagMap.has(tid)) tagMap.set(tid, [])
+          tagMap.get(tid)!.push(ad)
+        }
+      }
+    }
+    const sections: { label: string; color: string; ads: ClassifiedAd[] }[] = []
+    for (const tag of tags) {
+      const ads = tagMap.get(tag.id)
+      if (ads && ads.length > 0) {
+        sections.push({ label: tag.name, color: tag.color, ads })
+      }
+    }
+    if (untagged.length > 0) {
+      sections.push({ label: "Untagged", color: "#525252", ads: untagged })
+    }
+    return sections
+  }, [groupBy, sortedAds, adTagMap, tags])
 
   // Navigation
   function handlePresetChange(newPreset: DatePreset) {
@@ -385,35 +445,35 @@ export default function CreativeAnalysisView({
         </div>
       )}
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <MetricCard label="Total Creatives" value={String(totalCreatives)} />
-        <MetricCard
-          label="Active Ads"
-          value={String(activeAds)}
-          subValue={`${totalCreatives - activeAds} with no delivery`}
-        />
-        <MetricCard
-          label="Winners"
-          value={String(winnersCount)}
-          subValue={`${counts.DIRECT_WINNER} direct, ${counts.INDIRECT_WINNER} indirect`}
-        />
-        <MetricCard
-          label="Viable (Under-scaled)"
-          value={String(viableCount)}
-        />
-        <MetricCard
-          label="Losers"
-          value={String(losersCount)}
-          subValue={`${counts.LOSER} below median, ${counts.LOSER_NON_CONTRIBUTING} non-contributing`}
-        />
-      </div>
-
-      {/* Classification distribution bar */}
+      {/* Classification overview */}
       <Card>
-        <h2 className="mb-3 text-sm font-medium text-neutral-400">
-          Classification Distribution
-        </h2>
+        {/* Compact overview row */}
+        <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-2">
+          <div>
+            <span className="text-2xl font-semibold tabular-nums text-neutral-100">
+              {totalCreatives}
+            </span>
+            <span className="ml-1.5 text-xs text-neutral-500">Creatives</span>
+          </div>
+          <div>
+            <span className="text-2xl font-semibold tabular-nums text-neutral-100">
+              {activeAds}
+            </span>
+            <span className="ml-1.5 text-xs text-neutral-500">Active</span>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <span
+              className="inline-block h-2 w-2 rounded-full"
+              style={{ backgroundColor: CONCENTRATION_COLORS[concentration.level] }}
+            />
+            <span className="text-xs font-medium text-neutral-300">
+              {concentration.level}
+            </span>
+            <span className="text-[10px] text-neutral-500">
+              Top ad: {concentration.topAdShare.toFixed(0)}% of spend
+            </span>
+          </div>
+        </div>
         {totalCreatives > 0 ? (
           <div className="space-y-3">
             {/* Stacked bar */}
@@ -505,65 +565,20 @@ export default function CreativeAnalysisView({
         </Card>
       )}
 
-      {/* Video Retention */}
-      {videoAdIds.size > 0 && (
-        <Card>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-sm font-medium text-neutral-400">
-              Video Retention Curves
-            </h2>
-            <span className="text-xs text-neutral-500">
-              {selectedVideoAdIds.size}/{videoAdIds.size} video ads selected
-            </span>
-          </div>
-
-          {/* Video ad selector */}
-          <div className="mb-4 flex flex-wrap gap-2">
-            {classifiedAds
-              .filter((ad) => videoAdIds.has(ad.adId))
-              .slice(0, 20)
-              .map((ad) => {
-                const selected = selectedVideoAdIds.has(ad.adId)
-                return (
-                  <button
-                    key={ad.adId}
-                    onClick={() => {
-                      setSelectedVideoAdIds((prev) => {
-                        const next = new Set(prev)
-                        if (next.has(ad.adId)) {
-                          next.delete(ad.adId)
-                        } else if (next.size < 5) {
-                          next.add(ad.adId)
-                        }
-                        return next
-                      })
-                    }}
-                    className={`rounded-lg border px-2.5 py-1 text-xs transition ${
-                      selected
-                        ? "border-brand-lime/50 bg-brand-lime/10 text-brand-lime"
-                        : "border-neutral-700 text-neutral-400 hover:border-neutral-600 hover:text-neutral-300"
-                    }`}
-                    title={ad.adName}
-                  >
-                    {ad.adName.length > 25 ? ad.adName.slice(0, 22) + "..." : ad.adName}
-                  </button>
-                )
-              })}
-          </div>
-
-          <VideoRetentionChart
-            rows={filteredRows}
-            selectedAds={classifiedAds
-              .filter((ad) => selectedVideoAdIds.has(ad.adId))
-              .map((ad) => ({ adId: ad.adId, adName: ad.adName }))}
-          />
-        </Card>
-      )}
-
       {/* View toggle + Creative content */}
       <div className="space-y-4">
-        {/* View mode toggle */}
-        <div className="flex items-center gap-2">
+        {/* View mode toggle + Group By */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setViewMode("grid")}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+              viewMode === "grid"
+                ? "bg-neutral-700 text-white"
+                : "text-neutral-500 hover:text-neutral-300"
+            }`}
+          >
+            Cards
+          </button>
           <button
             onClick={() => setViewMode("table")}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
@@ -574,186 +589,129 @@ export default function CreativeAnalysisView({
           >
             Table
           </button>
-          {previewsEnabled && (
+
+          <div className="ml-auto flex items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-neutral-500">Group by</span>
+              <select
+                value={groupBy}
+                onChange={(e) => setGroupBy(e.target.value as GroupBy)}
+                className="rounded-lg border border-neutral-700 bg-neutral-800 px-2.5 py-1.5 text-xs text-neutral-200 focus:border-brand-lime focus:outline-none"
+              >
+                <option value="none">None</option>
+                {tags.length > 0 && <option value="tags">Tags</option>}
+              </select>
+            </div>
             <button
-              onClick={() => setViewMode("grid")}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                viewMode === "grid"
-                  ? "bg-neutral-700 text-white"
+              onClick={() => setShowMetricPicker((v) => !v)}
+              className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition flex items-center gap-1.5 ${
+                showMetricPicker
+                  ? "bg-brand-lime/20 text-brand-lime"
                   : "text-neutral-500 hover:text-neutral-300"
               }`}
+              title="Configure metrics"
             >
-              Grid
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+              </svg>
+              Metrics
             </button>
-          )}
-          <button
-            onClick={() => setViewMode("grouped")}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-              viewMode === "grouped"
-                ? "bg-neutral-700 text-white"
-                : "text-neutral-500 hover:text-neutral-300"
-            }`}
-          >
-            Grouped
-          </button>
+          </div>
         </div>
 
-        {viewMode === "grid" ? (
-          /* Card grid view */
-          <CreativeCardGrid ads={sortedAds} thumbnails={thumbnails} />
-        ) : viewMode === "table" ? (
-          /* Creative table */
-          <Card>
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-sm font-medium text-neutral-400">
-                All Creatives ({sortedAds.length})
-              </h2>
-              <div className="flex items-center gap-3">
-                {(activeFilters.size > 0 || selectedTagFilters.length > 0) && (
-                  <button
-                    onClick={() => {
-                      setActiveFilters(new Set())
-                      setSelectedTagFilters([])
-                    }}
-                    className="text-xs text-neutral-500 transition hover:text-white"
-                  >
-                    Clear filters
-                  </button>
+        {/* Metric picker panel */}
+        {showMetricPicker && (
+          <MetricPickerPanel
+            cardMetrics={cardMetrics}
+            tableMetrics={tableMetrics}
+            onCardChange={setCardMetrics}
+            onTableChange={setTableMetrics}
+          />
+        )}
+
+        {/* Grouped sections or flat view */}
+        {groupBy !== "none" && groupedSections ? (
+          <div className="space-y-6">
+            {groupedSections.map((section) => (
+              <div key={section.label}>
+                <div className="mb-3 flex items-center gap-2">
+                  <span
+                    className="inline-block h-3 w-3 rounded-sm"
+                    style={{ backgroundColor: section.color }}
+                  />
+                  <span className="text-sm font-medium text-neutral-200">
+                    {section.label}
+                  </span>
+                  <span className="text-xs text-neutral-500">
+                    ({section.ads.length})
+                  </span>
+                </div>
+                {viewMode === "grid" ? (
+                  <CreativeCardGrid
+                    ads={section.ads}
+                    thumbnails={thumbnails}
+                    videoAdIds={videoAdIds}
+                    fatigueMap={fatigueMap}
+                    rows={filteredRows}
+                    currency={currency}
+                    adTags={adTagsLookup}
+                    onAdClick={setDetailAd}
+                    selectedMetrics={cardMetrics}
+                  />
+                ) : (
+                  <CreativeTableInline
+                    ads={section.ads}
+                    tags={tags}
+                    adTagMap={adTagMap}
+                    fatigueMap={fatigueMap}
+                    currency={currency}
+                    sortKey={sortKey}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                    tagDropdownAdId={tagDropdownAdId}
+                    setTagDropdownAdId={setTagDropdownAdId}
+                    setTagDropdownAnchor={setTagDropdownAnchor}
+                    tagDropdownAnchor={tagDropdownAnchor}
+                    assignTag={assignTag}
+                    removeTag={removeTag}
+                    onAdClick={setDetailAd}
+                    selectedMetrics={tableMetrics}
+                  />
                 )}
               </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-neutral-800 text-neutral-500">
-                    <ThButton col="adName" label="Ad Name" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-                    <ThButton col="adsetName" label="Ad Set" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-                    <ThButton col="classification" label="Classification" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-                    <th className="py-2 pr-3 font-medium">Tags</th>
-                    <ThButton col="spend" label="Spend" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
-                    <ThButton col="impressions" label="Impr." sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
-                    <ThButton col="conversions" label="Conv." sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
-                    <ThButton col="cpa" label="CPA" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
-                    <ThButton col="cvr" label="CVR" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
-                    <ThButton col="spendShare" label="Share" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
-                    <th className="py-2 pr-3 font-medium text-center">Fatigue</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedAds.map((ad) => {
-                    const def = CLASSIFICATIONS[ad.classification.type]
-                    const adTags = adTagMap[ad.adId] || []
-                    const assignedTags = tags.filter((t) => adTags.includes(t.id))
-                    const unassignedTags = tags.filter((t) => !adTags.includes(t.id))
-                    return (
-                      <tr
-                        key={ad.adId}
-                        className="border-b border-neutral-800/50 transition hover:bg-neutral-800/30"
-                      >
-                        <td className="max-w-[200px] truncate py-2.5 pr-3 text-neutral-200" title={ad.adName}>
-                          {ad.adName}
-                        </td>
-                        <td className="max-w-[150px] truncate py-2.5 pr-3 text-neutral-400" title={ad.adsetName}>
-                          {ad.adsetName}
-                        </td>
-                        <td className="py-2.5 pr-3">
-                          <span
-                            className={`inline-block rounded-md border px-2 py-0.5 text-[10px] font-medium ${def.bgColor}`}
-                          >
-                            {def.label}
-                          </span>
-                        </td>
-                        <td className="py-2.5 pr-3">
-                          <div className="flex items-center gap-1 flex-wrap">
-                            {assignedTags.map((tag) => (
-                              <span
-                                key={tag.id}
-                                className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-black"
-                                style={{ backgroundColor: tag.color }}
-                              >
-                                {tag.name}
-                                <button
-                                  onClick={() => removeTag(ad.adId, tag.id)}
-                                  className="ml-0.5 opacity-60 hover:opacity-100"
-                                  title="Remove tag"
-                                >
-                                  ×
-                                </button>
-                              </span>
-                            ))}
-                            <div className="relative">
-                              <button
-                                onClick={() =>
-                                  setTagDropdownAdId(
-                                    tagDropdownAdId === ad.adId ? null : ad.adId
-                                  )
-                                }
-                                className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-neutral-700 text-neutral-500 transition hover:border-neutral-500 hover:text-neutral-300"
-                                title="Add tag"
-                              >
-                                +
-                              </button>
-                              {tagDropdownAdId === ad.adId && (
-                                <TagDropdown
-                                  tags={unassignedTags}
-                                  onSelect={(tagId) => assignTag(ad.adId, tagId)}
-                                  onClose={() => setTagDropdownAdId(null)}
-                                />
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-2.5 pr-3 text-right tabular-nums text-neutral-200">
-                          {fmtCurrency(ad.spend)}
-                        </td>
-                        <td className="py-2.5 pr-3 text-right tabular-nums text-neutral-300">
-                          {fmtNumber(ad.impressions)}
-                        </td>
-                        <td className="py-2.5 pr-3 text-right tabular-nums text-neutral-300">
-                          {fmtNumber(ad.conversions)}
-                        </td>
-                        <td className="py-2.5 pr-3 text-right tabular-nums text-neutral-300">
-                          {ad.cpa !== null ? fmtCurrency(ad.cpa) : "—"}
-                        </td>
-                        <td className="py-2.5 pr-3 text-right tabular-nums text-neutral-300">
-                          {fmtPercent(ad.cvr * 100, 2)}
-                        </td>
-                        <td className="py-2.5 text-right tabular-nums text-neutral-400">
-                          {fmtPercent(ad.spendShare, 1)}
-                        </td>
-                        <td className="py-2.5 text-center">
-                          {(() => {
-                            const f = fatigueMap[ad.adId]
-                            if (!f || f.status === "healthy") return <span className="text-neutral-600">—</span>
-                            const cfg = FATIGUE_CONFIG
-                            return (
-                              <span
-                                className={`inline-flex items-center gap-1 text-[10px] font-medium ${cfg.color[f.status]}`}
-                                title={f.reason}
-                              >
-                                <span className={`inline-block h-1.5 w-1.5 rounded-full ${cfg.dot[f.status]}`} />
-                                {cfg.label[f.status]}
-                              </span>
-                            )
-                          })()}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                  {sortedAds.length === 0 && (
-                    <tr>
-                      <td colSpan={11} className="py-8 text-center text-neutral-500">
-                        No creatives match the current filters.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
+            ))}
+          </div>
+        ) : viewMode === "grid" ? (
+          <CreativeCardGrid
+            ads={sortedAds}
+            thumbnails={thumbnails}
+            videoAdIds={videoAdIds}
+            fatigueMap={fatigueMap}
+            rows={filteredRows}
+            currency={currency}
+            adTags={adTagsLookup}
+            onAdClick={setDetailAd}
+            selectedMetrics={cardMetrics}
+          />
         ) : (
-          /* Grouped view */
-          <CreativeGroupingView classifiedAds={classifiedAds} />
+          <CreativeTableInline
+            ads={sortedAds}
+            tags={tags}
+            adTagMap={adTagMap}
+            fatigueMap={fatigueMap}
+            currency={currency}
+            sortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+            tagDropdownAdId={tagDropdownAdId}
+            setTagDropdownAdId={setTagDropdownAdId}
+            setTagDropdownAnchor={setTagDropdownAnchor}
+            tagDropdownAnchor={tagDropdownAnchor}
+            assignTag={assignTag}
+            removeTag={removeTag}
+            onAdClick={setDetailAd}
+            selectedMetrics={tableMetrics}
+          />
         )}
       </div>
 
@@ -768,24 +726,309 @@ export default function CreativeAnalysisView({
           }}
         />
       )}
+
+      {/* Creative detail modal */}
+      {detailAd && (
+        <CreativeDetailModal
+          ad={detailAd}
+          thumbnailUrl={thumbnails[detailAd.adId]}
+          isVideo={videoAdIds.has(detailAd.adId)}
+          fatigue={fatigueMap[detailAd.adId]}
+          rows={filteredRows}
+          currency={currency}
+          tags={adTagsLookup[detailAd.adId]}
+          onClose={() => setDetailAd(null)}
+        />
+      )}
     </div>
   )
 }
 
-// Inline tag assignment dropdown
+// Extracted table component used by both flat and grouped views
+function CreativeTableInline({
+  ads,
+  tags,
+  adTagMap,
+  fatigueMap,
+  currency,
+  sortKey,
+  sortDir,
+  onSort,
+  tagDropdownAdId,
+  setTagDropdownAdId,
+  setTagDropdownAnchor,
+  tagDropdownAnchor,
+  assignTag,
+  removeTag,
+  onAdClick,
+  selectedMetrics = DEFAULT_TABLE_METRICS,
+}: {
+  ads: ClassifiedAd[]
+  tags: Tag[]
+  adTagMap: Record<string, string[]>
+  fatigueMap: Record<string, FatigueResult>
+  currency: string
+  sortKey: SortKey
+  sortDir: "asc" | "desc"
+  onSort: (key: SortKey) => void
+  tagDropdownAdId: string | null
+  setTagDropdownAdId: (id: string | null) => void
+  setTagDropdownAnchor: (rect: DOMRect | null) => void
+  tagDropdownAnchor: DOMRect | null
+  assignTag: (adId: string, tagId: string) => void
+  removeTag: (adId: string, tagId: string) => void
+  onAdClick?: (ad: ClassifiedAd) => void
+  selectedMetrics?: CreativeMetricKey[]
+}) {
+  // Fixed columns: 4 (Name, AdSet, Classification, Tags) + dynamic metrics + Fatigue
+  const fixedColCount = 4 + selectedMetrics.length + 1
+
+  return (
+    <Card>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs">
+          <thead>
+            <tr className="border-b border-neutral-800 text-neutral-500">
+              <ThButton col="adName" label="Ad Name" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+              <ThButton col="adsetName" label="Ad Set" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+              <ThButton col="classification" label="Classification" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+              <th className="py-2 pr-3 font-medium">Tags</th>
+              {selectedMetrics.map((key) => {
+                const m = CREATIVE_METRICS[key]
+                return (
+                  <ThButton
+                    key={key}
+                    col={key}
+                    label={m.shortLabel}
+                    sortKey={sortKey}
+                    sortDir={sortDir}
+                    onSort={onSort}
+                    align={m.align as "left" | "right"}
+                  />
+                )
+              })}
+              <th className="py-2 pr-3 font-medium text-center">Fatigue</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ads.map((ad) => {
+              const def = CLASSIFICATIONS[ad.classification.type]
+              const adTags = adTagMap[ad.adId] || []
+              const assignedTags = tags.filter((t) => adTags.includes(t.id))
+              const unassignedTags = tags.filter((t) => !adTags.includes(t.id))
+              return (
+                <tr
+                  key={ad.adId}
+                  className="border-b border-neutral-800/50 transition hover:bg-neutral-800/30"
+                >
+                  <td className="max-w-[200px] truncate py-2.5 pr-3" title={ad.adName}>
+                    <button
+                      onClick={() => onAdClick?.(ad)}
+                      className="text-neutral-200 hover:text-brand-lime transition truncate text-left"
+                    >
+                      {ad.adName}
+                    </button>
+                  </td>
+                  <td className="max-w-[150px] truncate py-2.5 pr-3 text-neutral-400" title={ad.adsetName}>
+                    {ad.adsetName}
+                  </td>
+                  <td className="py-2.5 pr-3">
+                    <span
+                      className={`inline-block rounded-md border px-2 py-0.5 text-[10px] font-medium ${def.bgColor}`}
+                    >
+                      {def.label}
+                    </span>
+                  </td>
+                  <td className="py-2.5 pr-3">
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {assignedTags.map((tag) => (
+                        <span
+                          key={tag.id}
+                          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-black"
+                          style={{ backgroundColor: tag.color }}
+                        >
+                          {tag.name}
+                          <button
+                            onClick={() => removeTag(ad.adId, tag.id)}
+                            className="ml-0.5 opacity-60 hover:opacity-100"
+                            title="Remove tag"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                      <div className="relative">
+                        <button
+                          onClick={(e) => {
+                            if (tagDropdownAdId === ad.adId) {
+                              setTagDropdownAdId(null)
+                              setTagDropdownAnchor(null)
+                            } else {
+                              setTagDropdownAnchor(e.currentTarget.getBoundingClientRect())
+                              setTagDropdownAdId(ad.adId)
+                            }
+                          }}
+                          className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-neutral-700 text-neutral-500 transition hover:border-neutral-500 hover:text-neutral-300"
+                          title="Add tag"
+                        >
+                          +
+                        </button>
+                        {tagDropdownAdId === ad.adId && tagDropdownAnchor && (
+                          <TagDropdown
+                            tags={unassignedTags}
+                            onSelect={(tagId) => assignTag(ad.adId, tagId)}
+                            onClose={() => {
+                              setTagDropdownAdId(null)
+                              setTagDropdownAnchor(null)
+                            }}
+                            anchorRect={tagDropdownAnchor}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                  {selectedMetrics.map((key) => {
+                    const m = CREATIVE_METRICS[key]
+                    return (
+                      <td
+                        key={key}
+                        className={`py-2.5 pr-3 tabular-nums text-neutral-300 ${
+                          m.align === "right" ? "text-right" : ""
+                        }`}
+                      >
+                        {m.format(ad, currency)}
+                      </td>
+                    )
+                  })}
+                  <td className="py-2.5 text-center">
+                    {(() => {
+                      const f = fatigueMap[ad.adId]
+                      if (!f || f.status === "healthy") return <span className="text-neutral-600">—</span>
+                      const cfg = FATIGUE_CONFIG
+                      return (
+                        <span
+                          className={`inline-flex items-center gap-1 text-[10px] font-medium ${cfg.color[f.status]}`}
+                          title={f.reason}
+                        >
+                          <span className={`inline-block h-1.5 w-1.5 rounded-full ${cfg.dot[f.status]}`} />
+                          {cfg.label[f.status]}
+                        </span>
+                      )
+                    })()}
+                  </td>
+                </tr>
+              )
+            })}
+            {ads.length === 0 && (
+              <tr>
+                <td colSpan={fixedColCount} className="py-8 text-center text-neutral-500">
+                  No creatives match the current filters.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  )
+}
+
+// Metric picker panel for card + table metric configuration
+function MetricPickerPanel({
+  cardMetrics,
+  tableMetrics,
+  onCardChange,
+  onTableChange,
+}: {
+  cardMetrics: CreativeMetricKey[]
+  tableMetrics: CreativeMetricKey[]
+  onCardChange: (m: CreativeMetricKey[]) => void
+  onTableChange: (m: CreativeMetricKey[]) => void
+}) {
+  function toggleMetric(
+    current: CreativeMetricKey[],
+    key: CreativeMetricKey,
+    onChange: (m: CreativeMetricKey[]) => void
+  ) {
+    if (current.includes(key)) {
+      // Don't allow removing all metrics
+      if (current.length <= 1) return
+      onChange(current.filter((k) => k !== key))
+    } else {
+      onChange([...current, key])
+    }
+  }
+
+  return (
+    <Card>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Card metrics */}
+        <div>
+          <p className="text-xs font-medium text-neutral-400 mb-2">Card Metrics</p>
+          <div className="flex flex-wrap gap-1.5">
+            {CREATIVE_METRIC_ORDER.map((key) => {
+              const m = CREATIVE_METRICS[key]
+              const active = cardMetrics.includes(key)
+              return (
+                <button
+                  key={key}
+                  onClick={() => toggleMetric(cardMetrics, key, onCardChange)}
+                  className={`rounded-md px-2 py-1 text-[11px] font-medium transition border ${
+                    active
+                      ? "bg-brand-lime/15 border-brand-lime/40 text-brand-lime"
+                      : "border-neutral-700 text-neutral-500 hover:text-neutral-300 hover:border-neutral-600"
+                  }`}
+                >
+                  {m.shortLabel}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+        {/* Table metrics */}
+        <div>
+          <p className="text-xs font-medium text-neutral-400 mb-2">Table Columns</p>
+          <div className="flex flex-wrap gap-1.5">
+            {CREATIVE_METRIC_ORDER.map((key) => {
+              const m = CREATIVE_METRICS[key]
+              const active = tableMetrics.includes(key)
+              return (
+                <button
+                  key={key}
+                  onClick={() => toggleMetric(tableMetrics, key, onTableChange)}
+                  className={`rounded-md px-2 py-1 text-[11px] font-medium transition border ${
+                    active
+                      ? "bg-brand-lime/15 border-brand-lime/40 text-brand-lime"
+                      : "border-neutral-700 text-neutral-500 hover:text-neutral-300 hover:border-neutral-600"
+                  }`}
+                >
+                  {m.shortLabel}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+// Inline tag assignment dropdown — uses portal to escape overflow clipping
 function TagDropdown({
   tags,
   onSelect,
   onClose,
+  anchorRect,
 }: {
   tags: Tag[]
   onSelect: (tagId: string) => void
   onClose: () => void
+  anchorRect: DOMRect
 }) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    function handleClick(e: MouseEvent) {
+    function handleClick(e: globalThis.MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         onClose()
       }
@@ -794,35 +1037,181 @@ function TagDropdown({
     return () => document.removeEventListener("mousedown", handleClick)
   }, [onClose])
 
-  if (tags.length === 0) {
-    return (
-      <div
-        ref={ref}
-        className="absolute left-0 top-7 z-40 w-36 rounded-lg border border-neutral-700 bg-neutral-800 p-2 shadow-xl"
-      >
-        <p className="text-xs text-neutral-500">No more tags</p>
-      </div>
-    )
+  // Position below anchor, clamp to viewport
+  const style: React.CSSProperties = {
+    position: "fixed",
+    top: Math.min(anchorRect.bottom + 4, window.innerHeight - 200),
+    left: Math.min(anchorRect.left, window.innerWidth - 170),
+    zIndex: 50,
   }
 
-  return (
+  const content =
+    tags.length === 0 ? (
+      <div ref={ref} className="w-36 rounded-lg border border-neutral-700 bg-neutral-800 p-2 shadow-xl" style={style}>
+        <p className="text-xs text-neutral-500">No more tags</p>
+      </div>
+    ) : (
+      <div ref={ref} className="w-40 rounded-lg border border-neutral-700 bg-neutral-800 py-1 shadow-xl" style={style}>
+        {tags.map((tag) => (
+          <button
+            key={tag.id}
+            onClick={() => onSelect(tag.id)}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-neutral-300 transition hover:bg-neutral-700"
+          >
+            <span
+              className="inline-block h-2.5 w-2.5 rounded-full"
+              style={{ backgroundColor: tag.color }}
+            />
+            {tag.name}
+          </button>
+        ))}
+      </div>
+    )
+
+  return createPortal(content, document.body)
+}
+
+// Creative detail modal
+function CreativeDetailModal({
+  ad,
+  thumbnailUrl,
+  isVideo,
+  fatigue,
+  rows,
+  currency,
+  tags,
+  onClose,
+}: {
+  ad: ClassifiedAd
+  thumbnailUrl?: string
+  isVideo: boolean
+  fatigue?: FatigueResult
+  rows: Partial<MetaDailyRow>[]
+  currency: string
+  tags?: TagInfo[]
+  onClose: () => void
+}) {
+  const cls = CLASSIFICATIONS[ad.classification.type]
+  const roas = ad.spend > 0 ? ad.revenue / ad.spend : 0
+
+  useEffect(() => {
+    function handleEsc(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose()
+    }
+    document.addEventListener("keydown", handleEsc)
+    return () => document.removeEventListener("keydown", handleEsc)
+  }, [onClose])
+
+  return createPortal(
     <div
-      ref={ref}
-      className="absolute left-0 top-7 z-40 w-40 rounded-lg border border-neutral-700 bg-neutral-800 py-1 shadow-xl"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
     >
-      {tags.map((tag) => (
+      <div className="relative max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-neutral-700 bg-neutral-900 shadow-2xl">
+        {/* Close button */}
         <button
-          key={tag.id}
-          onClick={() => onSelect(tag.id)}
-          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-neutral-300 transition hover:bg-neutral-700"
+          onClick={onClose}
+          className="absolute right-3 top-3 z-10 rounded-lg bg-neutral-800/80 p-1.5 text-neutral-400 transition hover:text-white"
         >
-          <span
-            className="inline-block h-2.5 w-2.5 rounded-full"
-            style={{ backgroundColor: tag.color }}
-          />
-          {tag.name}
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
         </button>
-      ))}
+
+        {/* Thumbnail */}
+        <div className="aspect-video bg-neutral-800 relative flex items-center justify-center">
+          {thumbnailUrl ? (
+            <img
+              src={thumbnailUrl}
+              alt={ad.adName}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div className="text-neutral-600 text-sm">
+              {isVideo ? "🎬" : "🖼"} No preview
+            </div>
+          )}
+          <span
+            className={`absolute top-3 left-3 text-xs font-semibold px-2.5 py-1 rounded-lg border backdrop-blur-sm ${cls.bgColor}`}
+          >
+            {cls.label}
+          </span>
+          {fatigue && fatigue.status !== "healthy" && (
+            <span
+              className={`absolute top-3 right-3 inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg bg-neutral-900/80 backdrop-blur-sm ${FATIGUE_CONFIG.color[fatigue.status]}`}
+              title={fatigue.reason}
+            >
+              <span className={`inline-block h-2 w-2 rounded-full ${FATIGUE_CONFIG.dot[fatigue.status]}`} />
+              {FATIGUE_CONFIG.label[fatigue.status]}
+            </span>
+          )}
+        </div>
+
+        {/* Content */}
+        <div className="p-5 space-y-4">
+          {/* Ad name + adset */}
+          <div>
+            <h3 className="text-base font-medium text-neutral-100 leading-snug">
+              {ad.adName}
+            </h3>
+            <p className="text-xs text-neutral-500 mt-1">{ad.adsetName}</p>
+            {tags && tags.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {tags.map((tag) => (
+                  <span
+                    key={tag.id}
+                    className="inline-block rounded-full px-2 py-0.5 text-[10px] font-medium text-black"
+                    style={{ backgroundColor: tag.color }}
+                  >
+                    {tag.name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Metrics grid */}
+          <div className="grid grid-cols-3 gap-3">
+            <DetailMetric label="Spend" value={fmtCurrency(ad.spend, currency)} />
+            <DetailMetric label="Impressions" value={fmtNumber(ad.impressions)} />
+            <DetailMetric label="Clicks" value={fmtNumber(ad.clicks)} />
+            <DetailMetric label="Conversions" value={fmtNumber(ad.conversions)} />
+            <DetailMetric label="CPA" value={ad.cpa !== null ? fmtCurrency(ad.cpa, currency) : "—"} />
+            <DetailMetric label="CVR" value={fmtPercent(ad.cvr * 100, 2)} />
+            <DetailMetric label="Revenue" value={fmtCurrency(ad.revenue, currency)} />
+            <DetailMetric label="ROAS" value={roas > 0 ? `${roas.toFixed(2)}x` : "—"} />
+            <DetailMetric label="Spend Share" value={fmtPercent(ad.spendShare, 1)} />
+          </div>
+
+          {/* Video retention */}
+          {isVideo && (
+            <div className="border-t border-neutral-800 pt-3">
+              <p className="text-xs text-neutral-500 mb-2">Video Retention</p>
+              <MiniRetentionCurve rows={rows} adId={ad.adId} />
+            </div>
+          )}
+
+          {/* Fatigue detail */}
+          {fatigue && fatigue.status !== "healthy" && (
+            <div className="border-t border-neutral-800 pt-3">
+              <p className="text-xs text-neutral-500 mb-1">Fatigue Analysis</p>
+              <p className="text-xs text-neutral-300">{fatigue.reason}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+function DetailMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-neutral-800/50 px-3 py-2">
+      <p className="text-[10px] text-neutral-500">{label}</p>
+      <p className="text-sm font-medium tabular-nums text-neutral-100">{value}</p>
     </div>
   )
 }

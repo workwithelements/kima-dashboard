@@ -16,6 +16,8 @@ export type FunnelStepDef = {
   rateDenominator: keyof AggregatedMetrics
   rateMultiplier: number
   costLabel: string
+  /** Decimal places for rate display (default 1) */
+  rateDecimals?: number
 }
 
 export type FunnelStepValues = {
@@ -46,9 +48,10 @@ export const FUNNEL_STEP_DEFS: Record<string, FunnelStepDef> = {
     label: "Landing Page Views",
     shortLabel: "Landing",
     rateLabel: "Landing Rate",
-    rateDenominator: "clicks",
+    rateDenominator: "impressions",
     rateMultiplier: 100,
     costLabel: "Cost per Landing",
+    rateDecimals: 2,
   },
   adds_to_cart: {
     field: "addsToCart",
@@ -112,16 +115,20 @@ export type FunnelStepKey = (typeof FUNNEL_STEP_ORDER)[number]
 
 /**
  * Calculate the count, rate, and cost-per values for a funnel step.
+ * When `prevStepField` is provided, it overrides the static rateDenominator
+ * so the rate is calculated relative to the previous step in the funnel.
  */
 export function calculateFunnelStep(
   stepKey: string,
-  data: AggregatedMetrics
+  data: AggregatedMetrics,
+  prevStepField?: keyof AggregatedMetrics
 ): FunnelStepValues {
   const def = FUNNEL_STEP_DEFS[stepKey]
   if (!def) return { count: 0, rate: null, costPer: null }
 
   const count = data[def.field] || 0
-  const denominator = data[def.rateDenominator] || 0
+  const denominatorField = prevStepField ?? def.rateDenominator
+  const denominator = data[denominatorField] || 0
   const spend = data.spend || 0
 
   return {
@@ -134,10 +141,10 @@ export function calculateFunnelStep(
 /**
  * Format a funnel step's values for display.
  */
-export function formatFunnelStep(values: FunnelStepValues): FormattedFunnelStep {
+export function formatFunnelStep(values: FunnelStepValues, rateDecimals = 1): FormattedFunnelStep {
   return {
     count: fmtNumber(values.count),
-    rate: values.rate !== null ? fmtPercent(values.rate) : "—",
+    rate: values.rate !== null ? fmtPercent(values.rate, rateDecimals) : "—",
     costPer: values.costPer !== null ? fmtCurrency(values.costPer) : "—",
   }
 }

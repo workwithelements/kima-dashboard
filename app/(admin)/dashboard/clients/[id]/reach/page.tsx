@@ -29,6 +29,7 @@ export default async function ReachAnalysisPage({ params, searchParams }: Props)
       preset={preset}
       from={range.from}
       to={range.to}
+      currency={data.client.currency_code ?? "GBP"}
     />
   )
 }

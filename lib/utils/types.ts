@@ -54,6 +54,10 @@ export type Client = {
   slug?: string
   active: boolean
   view_password_hash?: string | null
+  meta_account_id?: string | null
+  google_ads_customer_id?: string | null
+  monthly_budget?: number | null
+  currency_code?: string | null
 }
 
 /** Date range for filters */
@@ -133,6 +137,39 @@ export const BASE_METRIC_FIELDS = [
 ] as const
 
 export type BaseMetricField = (typeof BASE_METRIC_FIELDS)[number]["value"]
+
+/** Ad platform identifier */
+export type AdPlatform = "meta" | "google_ads"
+
+/** A row from google_ads_daily_performance */
+export type GoogleAdsDailyRow = {
+  client_id: string
+  date: string
+  campaign_id: string
+  campaign_name: string
+  ad_group_id: string
+  ad_group_name: string
+  spend: number
+  impressions: number
+  clicks: number
+  conversions: number
+  conversion_value: number
+}
+
+/** Unified spend row for pacing (platform-agnostic) */
+export type DailySpendRow = {
+  date: string
+  spend: number
+  platform: AdPlatform
+}
+
+/** Determine which ad platforms a client has configured */
+export function getClientPlatforms(client: Client): AdPlatform[] {
+  const platforms: AdPlatform[] = []
+  if (client.meta_account_id) platforms.push("meta")
+  if (client.google_ads_customer_id) platforms.push("google_ads")
+  return platforms
+}
 
 /** A row from meta_daily_demographics */
 export type MetaDemographicsRow = {

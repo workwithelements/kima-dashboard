@@ -2,13 +2,25 @@
 
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
+import dynamic from "next/dynamic"
 import type { MetaDemographicsRow, MetaPlacementsRow } from "@/lib/utils/types"
 import type { DatePreset } from "@/lib/utils/dates"
 import { fmtCurrency, fmtNumber, fmtPercent } from "@/lib/utils/format"
 import { Card } from "@/components/ui/card"
 import DateRangePicker from "@/components/ui/date-range-picker"
-import DemographicsChart from "@/components/charts/demographics-chart"
-import PlacementsChart from "@/components/charts/placements-chart"
+
+// Lazy-load chart components
+const ChartPlaceholder = () => (
+  <div className="h-80 animate-pulse rounded bg-neutral-800/50" />
+)
+const DemographicsChart = dynamic(
+  () => import("@/components/charts/demographics-chart"),
+  { ssr: false, loading: ChartPlaceholder }
+)
+const PlacementsChart = dynamic(
+  () => import("@/components/charts/placements-chart"),
+  { ssr: false, loading: ChartPlaceholder }
+)
 
 type Props = {
   clientId: string
@@ -17,6 +29,7 @@ type Props = {
   preset: DatePreset
   from: string
   to: string
+  currency?: string
 }
 
 type Tab = "demographics" | "placements"
@@ -43,6 +56,7 @@ export default function BreakdownsView({
   preset,
   from,
   to,
+  currency = "GBP",
 }: Props) {
   const router = useRouter()
   const [tab, setTab] = useState<Tab>("demographics")
@@ -206,11 +220,11 @@ export default function BreakdownsView({
                         <tr key={i} className="border-b border-neutral-800/50 hover:bg-neutral-800/30">
                           <td className="py-2 pr-4 text-neutral-300">{row.age}</td>
                           <td className="py-2 pr-4 capitalize text-neutral-300">{row.gender}</td>
-                          <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(row.spend)}</td>
+                          <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(row.spend, currency)}</td>
                           <td className="py-2 pr-4 text-right text-neutral-300">{fmtNumber(row.impressions)}</td>
                           <td className="py-2 pr-4 text-right text-neutral-300">{fmtPercent(row.ctr)}</td>
                           <td className="py-2 pr-4 text-right text-neutral-300">{fmtNumber(row.purchases)}</td>
-                          <td className="py-2 pr-4 text-right text-neutral-300">{row.cpa !== null ? fmtCurrency(row.cpa) : "—"}</td>
+                          <td className="py-2 pr-4 text-right text-neutral-300">{row.cpa !== null ? fmtCurrency(row.cpa, currency) : "—"}</td>
                           <td className="py-2 text-right text-neutral-300">{row.roas.toFixed(2)}x</td>
                         </tr>
                       ))}
@@ -271,11 +285,11 @@ export default function BreakdownsView({
                         <tr key={i} className="border-b border-neutral-800/50 hover:bg-neutral-800/30">
                           <td className="py-2 pr-4 text-neutral-300">{fmtPlatform(row.platform)}</td>
                           <td className="py-2 pr-4 text-neutral-300">{fmtPlatform(row.position)}</td>
-                          <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(row.spend)}</td>
+                          <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(row.spend, currency)}</td>
                           <td className="py-2 pr-4 text-right text-neutral-300">{fmtNumber(row.impressions)}</td>
-                          <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(row.cpm)}</td>
+                          <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(row.cpm, currency)}</td>
                           <td className="py-2 pr-4 text-right text-neutral-300">{fmtNumber(row.purchases)}</td>
-                          <td className="py-2 text-right text-neutral-300">{row.cpa !== null ? fmtCurrency(row.cpa) : "—"}</td>
+                          <td className="py-2 text-right text-neutral-300">{row.cpa !== null ? fmtCurrency(row.cpa, currency) : "—"}</td>
                         </tr>
                       ))}
                     </tbody>

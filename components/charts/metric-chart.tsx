@@ -19,6 +19,8 @@ type MetricChartProps = {
   color?: string
   /** Format style for Y axis and tooltip */
   format?: "currency" | "number" | "percent"
+  /** Currency code for currency formatting */
+  currency?: string
   /** Height of the chart */
   height?: number
 }
@@ -28,12 +30,13 @@ export default function MetricChart({
   label = "Value",
   color = "#CDFF00",
   format = "currency",
+  currency = "GBP",
   height = 300,
 }: MetricChartProps) {
   const formatter = (v: number) => {
     switch (format) {
       case "currency":
-        return fmtCurrency(v)
+        return fmtCurrency(v, currency)
       case "percent":
         return `${v.toFixed(1)}%`
       default:

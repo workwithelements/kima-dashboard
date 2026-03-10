@@ -3,6 +3,7 @@ import { notFound } from "next/navigation"
 import { monthStart, today, daysAgo } from "@/lib/utils/dates"
 import { dailySpendSeries } from "@/lib/utils/aggregate"
 import { calculatePacing } from "@/lib/utils/pacing"
+import { fetchConsolidatedSpend, consolidateDailySpend } from "@/lib/data/fetch-client-data"
 import PacingCard from "@/components/dashboard/pacing-card"
 import { Card, MetricCard } from "@/components/ui/card"
 import MetricChart from "@/components/charts/metric-chart"
@@ -18,36 +19,25 @@ export default async function ClientPacingPage({ params }: Props) {
   // Fetch client
   const { data: client } = await supabase
     .from("clients")
-    .select("id, name, monthly_budget")
+    .select("id, name, monthly_budget, currency_code")
     .eq("id", params.id)
     .single()
 
   if (!client) notFound()
 
+  const currency = (client as any).currency_code ?? "GBP"
   const now = new Date()
   const year = now.getFullYear()
   const month = now.getMonth() + 1
 
-  // Fetch current month data
-  const { data: currentMonthRows } = await supabase
-    .from("meta_daily_performance")
-    .select("date, spend")
-    .eq("client_id", params.id)
-    .gte("date", monthStart())
-    .lte("date", today())
-    .order("date")
+  // Fetch consolidated spend (Meta + Google Ads) for current month + historical
+  const [currentMonthSpend, historicalSpend] = await Promise.all([
+    fetchConsolidatedSpend(params.id, monthStart(), today()),
+    fetchConsolidatedSpend(params.id, daysAgo(90), today()),
+  ])
 
-  // Fetch historical data (last 90 days for projection patterns)
-  const { data: historicalRows } = await supabase
-    .from("meta_daily_performance")
-    .select("date, spend")
-    .eq("client_id", params.id)
-    .gte("date", daysAgo(90))
-    .lte("date", today())
-    .order("date")
-
-  const dailySpend = dailySpendSeries(currentMonthRows || [])
-  const historicalDaily = dailySpendSeries(historicalRows || [])
+  const dailySpend = consolidateDailySpend(currentMonthSpend)
+  const historicalDaily = consolidateDailySpend(historicalSpend)
 
   // Calculate pacing
   const pacing = calculatePacing(
@@ -71,7 +61,7 @@ export default async function ClientPacingPage({ params }: Props) {
   return (
     <div className="space-y-6">
       {/* Pacing card */}
-      <PacingCard pacing={pacing} />
+      <PacingCard pacing={pacing} currency={currency} />
 
       {/* Charts */}
       <div className="grid gap-4 lg:grid-cols-2">
@@ -84,6 +74,7 @@ export default async function ClientPacingPage({ params }: Props) {
             label="Spend"
             color="#CDFF00"
             format="currency"
+            currency={currency}
             height={260}
           />
         </Card>
@@ -97,6 +88,7 @@ export default async function ClientPacingPage({ params }: Props) {
             label="Cumulative Spend"
             color="#FF69B4"
             format="currency"
+            currency={currency}
             height={260}
           />
         </Card>
@@ -111,12 +103,12 @@ export default async function ClientPacingPage({ params }: Props) {
         />
         <MetricCard
           label="Avg Daily Spend"
-          value={fmtCurrency(pacing.daysElapsed > 0 ? pacing.spentToDate / pacing.daysElapsed : 0)}
-          subValue={pacing.idealDailySpend ? `Ideal: ${fmtCurrency(pacing.idealDailySpend)}` : undefined}
+          value={fmtCurrency(pacing.daysElapsed > 0 ? pacing.spentToDate / pacing.daysElapsed : 0, currency)}
+          subValue={pacing.idealDailySpend ? `Ideal: ${fmtCurrency(pacing.idealDailySpend, currency)}` : undefined}
         />
         <MetricCard
           label="Remaining Projected"
-          value={fmtCurrency(pacing.remainingProjected)}
+          value={fmtCurrency(pacing.remainingProjected, currency)}
         />
         <MetricCard
           label="Spend Days"

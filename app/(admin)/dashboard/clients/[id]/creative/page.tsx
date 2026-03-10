@@ -31,6 +31,7 @@ export default async function CreativeAnalysisPage({ params, searchParams }: Pro
       clientId={params.id}
       thumbnails={data.thumbnails}
       previewsEnabled={data.previewsEnabled}
+      currency={data.client.currency_code ?? "GBP"}
     />
   )
 }

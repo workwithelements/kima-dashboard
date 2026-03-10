@@ -3,8 +3,8 @@ import { createServiceClient } from "@/lib/supabase/server"
 import ClientDashboard from "./client-dashboard"
 import PasswordGate from "./password-gate"
 import { daysAgo, today, monthStart } from "@/lib/utils/dates"
-import { dailySpendSeries } from "@/lib/utils/aggregate"
 import { calculatePacing } from "@/lib/utils/pacing"
+import { fetchConsolidatedSpend, consolidateDailySpend } from "@/lib/data/fetch-client-data"
 
 type Props = {
   params: { slug: string }
@@ -71,29 +71,18 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     .lte("date", to)
     .order("date")
 
-  // Fetch pacing data — current month spend + 90-day historical
+  // Fetch pacing data — current month spend + 90-day historical (Meta + Google Ads)
   const now = new Date()
   const year = now.getFullYear()
   const month = now.getMonth() + 1
 
-  const { data: currentMonthRows } = await supabase
-    .from("meta_daily_performance")
-    .select("date, spend")
-    .eq("client_id", client.id)
-    .gte("date", monthStart())
-    .lte("date", today())
-    .order("date")
+  const [currentMonthSpend, historicalSpend] = await Promise.all([
+    fetchConsolidatedSpend(client.id, monthStart(), today()),
+    fetchConsolidatedSpend(client.id, daysAgo(90), today()),
+  ])
 
-  const { data: historicalRows } = await supabase
-    .from("meta_daily_performance")
-    .select("date, spend")
-    .eq("client_id", client.id)
-    .gte("date", daysAgo(90))
-    .lte("date", today())
-    .order("date")
-
-  const dailySpend = dailySpendSeries(currentMonthRows || [])
-  const historicalDaily = dailySpendSeries(historicalRows || [])
+  const dailySpend = consolidateDailySpend(currentMonthSpend)
+  const historicalDaily = consolidateDailySpend(historicalSpend)
 
   const pacing = calculatePacing(
     dailySpend,

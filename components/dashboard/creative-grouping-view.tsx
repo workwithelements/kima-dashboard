@@ -16,6 +16,7 @@ import {
 
 type Props = {
   classifiedAds: ClassifiedAd[]
+  currency?: string
 }
 
 type GroupRow = {
@@ -30,7 +31,7 @@ type GroupRow = {
   losers: number
 }
 
-export default function CreativeGroupingView({ classifiedAds }: Props) {
+export default function CreativeGroupingView({ classifiedAds, currency = "GBP" }: Props) {
   // Get available dimensions from parsed ads
   const availableDimensions = useMemo(() => {
     const parsed = classifiedAds
@@ -174,19 +175,19 @@ export default function CreativeGroupingView({ classifiedAds }: Props) {
                   {g.adCount}
                 </td>
                 <td className="py-2.5 pr-3 text-right tabular-nums text-neutral-200">
-                  {fmtCurrency(g.totalSpend)}
+                  {fmtCurrency(g.totalSpend, currency)}
                 </td>
                 <td className="py-2.5 pr-3 text-right tabular-nums text-neutral-300">
                   {fmtNumber(g.totalConversions)}
                 </td>
                 <td className="py-2.5 pr-3 text-right tabular-nums text-neutral-300">
-                  {g.avgCpa !== null ? fmtCurrency(g.avgCpa) : "—"}
+                  {g.avgCpa !== null ? fmtCurrency(g.avgCpa, currency) : "—"}
                 </td>
                 <td className="py-2.5 pr-3 text-right tabular-nums text-neutral-300">
                   {fmtPercent(g.avgCvr, 2)}
                 </td>
                 <td className="py-2.5 pr-3 text-right tabular-nums text-neutral-200">
-                  {fmtCurrency(g.totalRevenue)}
+                  {fmtCurrency(g.totalRevenue, currency)}
                 </td>
                 <td className="py-2.5 pr-3 text-right">
                   {g.winners > 0 && (

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation"
-import { fetchClientData } from "@/lib/data/fetch-client-data"
+import { fetchClientData, fetchGoogleAdsData, fetchBreakdownsData } from "@/lib/data/fetch-client-data"
 import { createServiceClient } from "@/lib/supabase/server"
 import { getPresetRange, getComparisonRange } from "@/lib/utils/dates"
 import type { DatePreset } from "@/lib/utils/dates"
@@ -27,10 +27,10 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
   const compareType = (searchParams.compare || "previous_period") as ComparisonType
   const compRange = getComparisonRange(range, compareType)
 
-  // Fetch performance data + scorecard config in parallel
+  // Fetch performance data + scorecard config + Google Ads data in parallel
   const supabase = createServiceClient()
 
-  const [data, configRes] = await Promise.all([
+  const [data, configRes, gaRows, gaCompRows, breakdownsData] = await Promise.all([
     fetchClientData(
       params.id,
       range.from,
@@ -43,6 +43,11 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       .select("funnel_steps")
       .eq("client_id", params.id)
       .single(),
+    fetchGoogleAdsData(params.id, range.from, range.to),
+    compRange
+      ? fetchGoogleAdsData(params.id, compRange.from, compRange.to)
+      : Promise.resolve([]),
+    fetchBreakdownsData(params.id, range.from, range.to),
   ])
 
   if (!data) notFound()
@@ -54,12 +59,16 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       client={data.client}
       rows={data.rows}
       comparisonRows={data.comparisonRows}
+      googleAdsRows={gaRows}
+      googleAdsComparisonRows={gaCompRows}
       preset={preset}
       from={range.from}
       to={range.to}
       compareType={compareType}
       baselineReach={data.baselineReach}
       funnelSteps={funnelSteps}
+      demographics={breakdownsData?.demographics ?? []}
+      placements={breakdownsData?.placements ?? []}
     />
   )
 }

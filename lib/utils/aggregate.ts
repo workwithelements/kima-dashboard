@@ -3,7 +3,7 @@
  * Used across all dashboard pages.
  */
 
-import type { MetaDailyRow, AggregatedMetrics, HierarchyLevel } from "./types"
+import type { MetaDailyRow, GoogleAdsDailyRow, AggregatedMetrics, HierarchyLevel } from "./types"
 
 /** Sum all metric rows into a single aggregate */
 export function aggregateMetrics(rows: Partial<MetaDailyRow>[]): AggregatedMetrics {
@@ -35,6 +35,75 @@ export function aggregateMetrics(rows: Partial<MetaDailyRow>[]): AggregatedMetri
       appInstalls: 0,
     }
   )
+}
+
+/** Aggregate Google Ads rows into the common AggregatedMetrics shape */
+export function aggregateGoogleAdsMetrics(rows: Partial<GoogleAdsDailyRow>[]): AggregatedMetrics {
+  return rows.reduce<AggregatedMetrics>(
+    (acc, row) => ({
+      spend: acc.spend + (row.spend || 0),
+      impressions: acc.impressions + (row.impressions || 0),
+      reach: 0, // Google Ads doesn't report reach
+      clicks: acc.clicks + (row.clicks || 0),
+      landingPageViews: 0,
+      addsToCart: 0,
+      registrationsCompleted: 0,
+      checkoutsInitiated: 0,
+      purchases: acc.purchases + (row.conversions || 0),
+      revenue: acc.revenue + (row.conversion_value || 0),
+      appInstalls: 0,
+    }),
+    {
+      spend: 0,
+      impressions: 0,
+      reach: 0,
+      clicks: 0,
+      landingPageViews: 0,
+      addsToCart: 0,
+      registrationsCompleted: 0,
+      checkoutsInitiated: 0,
+      purchases: 0,
+      revenue: 0,
+      appInstalls: 0,
+    }
+  )
+}
+
+/** Group Google Ads rows by campaign for the data table */
+export function groupGoogleAdsByLevel(
+  rows: Partial<GoogleAdsDailyRow>[],
+  level: "campaign" | "ad_group"
+): {
+  id: string
+  name: string
+  metrics: AggregatedMetrics
+}[] {
+  const groups: Record<string, { name: string; rows: Partial<GoogleAdsDailyRow>[] }> = {}
+
+  for (const row of rows) {
+    let id: string
+    let name: string
+    switch (level) {
+      case "campaign":
+        id = row.campaign_id || "unknown"
+        name = row.campaign_name || id
+        break
+      case "ad_group":
+        id = row.ad_group_id || "unknown"
+        name = row.ad_group_name || id
+        break
+    }
+    if (!groups[id]) groups[id] = { name, rows: [] }
+    groups[id].rows.push(row)
+  }
+
+  return Object.entries(groups)
+    .map(([id, { name, rows: groupRows }]) => ({
+      id,
+      name,
+      metrics: aggregateGoogleAdsMetrics(groupRows),
+    }))
+    .sort((a, b) => b.metrics.spend - a.metrics.spend)
 }
 
 /** Derived metrics from aggregated totals */

@@ -16,9 +16,10 @@ import type { CpmrDataPoint } from "@/lib/utils/reach"
 type CpmrChartProps = {
   data: CpmrDataPoint[]
   height?: number
+  currency?: string
 }
 
-export default function CpmrChart({ data, height = 280 }: CpmrChartProps) {
+export default function CpmrChart({ data, height = 280, currency = "GBP" }: CpmrChartProps) {
   return (
     <ResponsiveContainer width="100%" height={height}>
       <ComposedChart data={data}>
@@ -34,7 +35,7 @@ export default function CpmrChart({ data, height = 280 }: CpmrChartProps) {
           tick={{ fill: "#737373", fontSize: 11 }}
           tickLine={false}
           axisLine={false}
-          tickFormatter={(v) => fmtCurrency(v)}
+          tickFormatter={(v) => fmtCurrency(v, currency)}
         />
         <Tooltip
           contentStyle={{
@@ -47,7 +48,7 @@ export default function CpmrChart({ data, height = 280 }: CpmrChartProps) {
           labelFormatter={fmtDateShort}
           formatter={(value: number, name: string) => {
             const label = name === "cpmr" ? "CPMr (per 1k reach)" : "CPM"
-            return [fmtCurrency(value), label]
+            return [fmtCurrency(value, currency), label]
           }}
         />
         <Legend

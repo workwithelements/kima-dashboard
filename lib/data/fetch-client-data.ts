@@ -4,7 +4,7 @@
  */
 
 import { createServiceClient } from "@/lib/supabase/server"
-import type { MetaDailyRow, MetaDemographicsRow, MetaPlacementsRow, Client } from "@/lib/utils/types"
+import type { MetaDailyRow, MetaDemographicsRow, MetaPlacementsRow, GoogleAdsDailyRow, Client, AdPlatform, DailySpendRow } from "@/lib/utils/types"
 
 /** Columns available in meta_daily_performance */
 const PERF_COLUMNS =
@@ -30,67 +30,73 @@ export async function fetchClientData(
 ): Promise<ClientData | null> {
   const supabase = createServiceClient()
 
-  // Fetch client
-  const { data: client } = await supabase
+  // Fetch client (try full select, fallback to minimal if columns don't exist)
+  let client: any = null
+  const { data: fullClient, error: clientError } = await supabase
     .from("clients")
-    .select("id, name, active")
+    .select("id, name, active, meta_account_id, google_ads_customer_id, monthly_budget, currency_code")
     .eq("id", clientId)
     .single()
 
-  if (!client) return null
-
-  // Fetch primary range
-  const { data: rows } = await supabase
-    .from("meta_daily_performance")
-    .select(PERF_COLUMNS)
-    .eq("client_id", clientId)
-    .gte("date", from)
-    .lte("date", to)
-    .order("date")
-
-  // Fetch comparison range if provided
-  let comparisonRows: Partial<MetaDailyRow>[] = []
-  if (compFrom && compTo) {
-    const { data: compRows } = await supabase
-      .from("meta_daily_performance")
-      .select(PERF_COLUMNS)
-      .eq("client_id", clientId)
-      .gte("date", compFrom)
-      .lte("date", compTo)
-      .order("date")
-
-    comparisonRows = compRows || []
+  if (clientError && !fullClient) {
+    const { data: fallback } = await supabase
+      .from("clients")
+      .select("id, name, active")
+      .eq("id", clientId)
+      .single()
+    if (!fallback) return null
+    client = { ...fallback, meta_account_id: null, google_ads_customer_id: null, monthly_budget: null, currency_code: "GBP" }
+  } else {
+    client = fullClient
   }
 
-  // Fetch baseline reach for Net New Reach calculation
-  // (cumulative reach in the 30 days before the range start)
+  if (!client) return null
+
+  // Pre-compute baseline date range
   const baselineStart = new Date(from + "T00:00:00")
   baselineStart.setDate(baselineStart.getDate() - 30)
   const baselineStartStr = baselineStart.toISOString().split("T")[0]
-
   const dayBefore = new Date(from + "T00:00:00")
   dayBefore.setDate(dayBefore.getDate() - 1)
   const baselineEndStr = dayBefore.toISOString().split("T")[0]
 
-  const { data: baselineRows } = await supabase
-    .from("meta_daily_performance")
-    .select("reach, impressions")
-    .eq("client_id", clientId)
-    .gte("date", baselineStartStr)
-    .lte("date", baselineEndStr)
+  // Fetch primary range, comparison range, and baseline reach ALL in parallel
+  const [primaryResult, compResult, baselineResult] = await Promise.all([
+    supabase
+      .from("meta_daily_performance")
+      .select(PERF_COLUMNS)
+      .eq("client_id", clientId)
+      .gte("date", from)
+      .lte("date", to)
+      .order("date"),
+    compFrom && compTo
+      ? supabase
+          .from("meta_daily_performance")
+          .select(PERF_COLUMNS)
+          .eq("client_id", clientId)
+          .gte("date", compFrom)
+          .lte("date", compTo)
+          .order("date")
+      : Promise.resolve({ data: [] as any[] }),
+    supabase
+      .from("meta_daily_performance")
+      .select("reach, impressions")
+      .eq("client_id", clientId)
+      .gte("date", baselineStartStr)
+      .lte("date", baselineEndStr),
+  ])
 
-  // Estimate baseline reach using simple sum (no frequency column available)
   let baselineReach = 0
-  if (baselineRows?.length) {
-    for (const row of baselineRows) {
+  if (baselineResult.data?.length) {
+    for (const row of baselineResult.data) {
       baselineReach += (row as { reach: number }).reach || 0
     }
   }
 
   return {
     client: client as Client,
-    rows: rows || [],
-    comparisonRows,
+    rows: primaryResult.data || [],
+    comparisonRows: (compResult.data || []) as Partial<MetaDailyRow>[],
     baselineReach,
   }
 }
@@ -101,28 +107,56 @@ export async function fetchClientData(
 export async function fetchClientsList(from: string, to: string) {
   const supabase = createServiceClient()
 
-  const { data: clients } = await supabase
+  const { data: clients, error: clientsError } = await supabase
     .from("clients")
-    .select("id, name, active")
+    .select("id, name, active, meta_account_id, google_ads_customer_id, monthly_budget, currency_code")
     .eq("active", true)
     .order("name")
 
-  if (!clients?.length) return []
+  // If the full select failed (columns may not exist), fall back to minimal select
+  let clientsList = clients
+  if (clientsError) {
+    const { data: fallback } = await supabase
+      .from("clients")
+      .select("id, name, active")
+      .eq("active", true)
+      .order("name")
+    if (!fallback?.length) return []
+    clientsList = fallback.map((c: any) => ({
+      ...c,
+      meta_account_id: null,
+      google_ads_customer_id: null,
+      monthly_budget: null,
+      currency_code: "GBP",
+    }))
+  }
 
-  // Fetch spend per client for the period
-  const { data: spendRows } = await supabase
-    .from("meta_daily_performance")
-    .select("client_id, spend, impressions, purchases, purchase_value")
-    .gte("date", from)
-    .lte("date", to)
+  if (!clientsList?.length) return []
 
-  // Aggregate spend by client
+  // Fetch spend per client from both Meta and Google Ads in parallel
+  // Wrap Google Ads query in .catch() in case the table doesn't exist yet
+  const [metaSpendResult, gaSpendResult] = await Promise.all([
+    supabase
+      .from("meta_daily_performance")
+      .select("client_id, spend, impressions, purchases, purchase_value")
+      .gte("date", from)
+      .lte("date", to),
+    Promise.resolve(
+      supabase
+        .from("google_ads_daily_performance")
+        .select("client_id, spend, impressions, clicks, conversions, conversion_value")
+        .gte("date", from)
+        .lte("date", to)
+    ).catch(() => ({ data: [] as any[] })),
+  ])
+
+  // Aggregate spend by client (combined across platforms)
   const spendByClient: Record<
     string,
     { spend: number; impressions: number; purchases: number; revenue: number }
   > = {}
 
-  for (const row of spendRows || []) {
+  for (const row of metaSpendResult.data || []) {
     if (!spendByClient[row.client_id]) {
       spendByClient[row.client_id] = { spend: 0, impressions: 0, purchases: 0, revenue: 0 }
     }
@@ -132,7 +166,17 @@ export async function fetchClientsList(from: string, to: string) {
     spendByClient[row.client_id].revenue += row.purchase_value || 0
   }
 
-  return clients.map((c) => ({
+  for (const row of gaSpendResult.data || []) {
+    if (!spendByClient[row.client_id]) {
+      spendByClient[row.client_id] = { spend: 0, impressions: 0, purchases: 0, revenue: 0 }
+    }
+    spendByClient[row.client_id].spend += row.spend || 0
+    spendByClient[row.client_id].impressions += row.impressions || 0
+    spendByClient[row.client_id].purchases += row.conversions || 0
+    spendByClient[row.client_id].revenue += row.conversion_value || 0
+  }
+
+  return clientsList.map((c) => ({
     ...c,
     spend: spendByClient[c.id]?.spend || 0,
     impressions: spendByClient[c.id]?.impressions || 0,
@@ -157,52 +201,50 @@ export async function fetchReachData(
 ) {
   const supabase = createServiceClient()
 
-  // Fetch client name
+  // Fetch client name + currency
   const { data: client } = await supabase
     .from("clients")
-    .select("id, name")
+    .select("id, name, currency_code")
     .eq("id", clientId)
     .single()
 
   if (!client) return null
 
-  // Fetch daily reach data for the range
-  const { data: rows } = await supabase
-    .from("meta_daily_performance")
-    .select("date, reach, impressions, spend")
-    .eq("client_id", clientId)
-    .gte("date", from)
-    .lte("date", to)
-    .order("date")
-
-  // Fetch baseline reach (sum of reach before range start) for corrected day-1 calculation
+  // Pre-compute baseline date range
   const dayBefore = new Date(from + "T00:00:00")
   dayBefore.setDate(dayBefore.getDate() - 1)
   const baselineEnd = dayBefore.toISOString().split("T")[0]
-
-  // Get the last 30 days before range as baseline
   const baselineStart = new Date(from + "T00:00:00")
   baselineStart.setDate(baselineStart.getDate() - 30)
   const baselineStartStr = baselineStart.toISOString().split("T")[0]
 
-  const { data: baselineRows } = await supabase
-    .from("meta_daily_performance")
-    .select("reach, impressions")
-    .eq("client_id", clientId)
-    .gte("date", baselineStartStr)
-    .lte("date", baselineEnd)
+  // Fetch daily data and baseline in parallel
+  const [rowsResult, baselineResult] = await Promise.all([
+    supabase
+      .from("meta_daily_performance")
+      .select("date, reach, impressions, spend")
+      .eq("client_id", clientId)
+      .gte("date", from)
+      .lte("date", to)
+      .order("date"),
+    supabase
+      .from("meta_daily_performance")
+      .select("reach, impressions")
+      .eq("client_id", clientId)
+      .gte("date", baselineStartStr)
+      .lte("date", baselineEnd),
+  ])
 
-  // Sum baseline reach
   let baselineReach = 0
-  if (baselineRows?.length) {
-    for (const row of baselineRows) {
+  if (baselineResult.data?.length) {
+    for (const row of baselineResult.data) {
       baselineReach += (row as { reach: number }).reach || 0
     }
   }
 
   return {
     client,
-    rows: rows || [],
+    rows: rowsResult.data || [],
     baselineReach,
   }
 }
@@ -221,13 +263,14 @@ export async function fetchCreativeData(
 
   const { data: client } = await supabase
     .from("clients")
-    .select("id, name")
+    .select("id, name, currency_code")
     .eq("id", clientId)
     .single()
 
   if (!client) return null
 
   // Fetch performance rows, thumbnails, and config in parallel
+  // meta_ad_metadata may not exist yet — wrap in catch to be safe
   const [perfResult, thumbResult, configResult] = await Promise.all([
     supabase
       .from("meta_daily_performance")
@@ -236,11 +279,13 @@ export async function fetchCreativeData(
       .gte("date", from)
       .lte("date", to)
       .order("date"),
-    supabase
-      .from("meta_ad_metadata")
-      .select("ad_id, creative_thumbnail_url")
-      .eq("client_id", clientId)
-      .not("creative_thumbnail_url", "is", null),
+    Promise.resolve(
+      supabase
+        .from("meta_ad_metadata")
+        .select("ad_id, creative_thumbnail_url")
+        .eq("client_id", clientId)
+        .not("creative_thumbnail_url", "is", null)
+    ).catch(() => ({ data: [] as any[] })),
     supabase
       .from("client_scorecard_config")
       .select("creative_previews_enabled")
@@ -286,7 +331,7 @@ export async function fetchBreakdownsData(
 
   const { data: client } = await supabase
     .from("clients")
-    .select("id, name")
+    .select("id, name, currency_code")
     .eq("id", clientId)
     .single()
 
@@ -325,3 +370,92 @@ export async function fetchBreakdownsData(
     placements: placementResult as MetaPlacementsRow[],
   }
 }
+
+/** Google Ads performance columns */
+const GA_PERF_COLUMNS =
+  "date, campaign_id, campaign_name, ad_group_id, ad_group_name, spend, impressions, clicks, conversions, conversion_value"
+
+/**
+ * Fetch Google Ads daily performance data for a client.
+ */
+export async function fetchGoogleAdsData(
+  clientId: string,
+  from: string,
+  to: string
+): Promise<GoogleAdsDailyRow[]> {
+  try {
+    const supabase = createServiceClient()
+
+    const { data, error } = await supabase
+      .from("google_ads_daily_performance")
+      .select(GA_PERF_COLUMNS)
+      .eq("client_id", clientId)
+      .gte("date", from)
+      .lte("date", to)
+      .order("date")
+
+    if (error) return []
+    return (data || []) as GoogleAdsDailyRow[]
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Fetch consolidated daily spend across Meta + Google Ads for a client.
+ * Used by pacing pages — platform-agnostic aggregation.
+ */
+export async function fetchConsolidatedSpend(
+  clientId: string,
+  from: string,
+  to: string
+): Promise<DailySpendRow[]> {
+  const supabase = createServiceClient()
+
+  // Run both queries in parallel (Google Ads table may not exist yet)
+  const [metaResult, gaResult] = await Promise.all([
+    supabase
+      .from("meta_daily_performance")
+      .select("date, spend")
+      .eq("client_id", clientId)
+      .gte("date", from)
+      .lte("date", to),
+    Promise.resolve(
+      supabase
+        .from("google_ads_daily_performance")
+        .select("date, spend")
+        .eq("client_id", clientId)
+        .gte("date", from)
+        .lte("date", to)
+    ).catch(() => ({ data: [] as any[] })),
+  ])
+
+  const rows: DailySpendRow[] = []
+
+  for (const r of metaResult.data || []) {
+    rows.push({ date: r.date, spend: r.spend || 0, platform: "meta" })
+  }
+  for (const r of gaResult.data || []) {
+    rows.push({ date: r.date, spend: r.spend || 0, platform: "google_ads" })
+  }
+
+  return rows
+}
+
+/**
+ * Sum DailySpendRows by date (across platforms) for pacing calculations.
+ */
+export function consolidateDailySpend(
+  rows: DailySpendRow[]
+): { date: string; spend: number }[] {
+  const byDate: Record<string, number> = {}
+  for (const r of rows) {
+    byDate[r.date] = (byDate[r.date] || 0) + r.spend
+  }
+  return Object.entries(byDate)
+    .map(([date, spend]) => ({ date, spend: Math.round(spend * 100) / 100 }))
+    .sort((a, b) => a.date.localeCompare(b.date))
+}
+
+// Re-export getClientPlatforms from types for backwards compat
+export { getClientPlatforms } from "@/lib/utils/types"

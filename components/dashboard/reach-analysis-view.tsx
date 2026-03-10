@@ -1,13 +1,31 @@
 "use client"
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
+import dynamic from "next/dynamic"
 import { Card, MetricCard } from "@/components/ui/card"
-import ReachChart from "@/components/charts/reach-chart"
-import SaturationGauge from "@/components/charts/saturation-gauge"
-import CpmrChart from "@/components/charts/cpmr-chart"
-import SaturationTimelineChart from "@/components/charts/saturation-timeline-chart"
 import DateRangePicker from "@/components/ui/date-range-picker"
 import { fmtNumber, fmtPercent, fmtCurrency } from "@/lib/utils/format"
+
+// Lazy-load heavy chart components
+const ChartPlaceholder = () => (
+  <div className="h-64 animate-pulse rounded bg-neutral-800/50" />
+)
+const ReachChart = dynamic(() => import("@/components/charts/reach-chart"), {
+  ssr: false,
+  loading: ChartPlaceholder,
+})
+const SaturationGauge = dynamic(
+  () => import("@/components/charts/saturation-gauge"),
+  { ssr: false, loading: ChartPlaceholder }
+)
+const CpmrChart = dynamic(() => import("@/components/charts/cpmr-chart"), {
+  ssr: false,
+  loading: ChartPlaceholder,
+})
+const SaturationTimelineChart = dynamic(
+  () => import("@/components/charts/saturation-timeline-chart"),
+  { ssr: false, loading: ChartPlaceholder }
+)
 import {
   dailyReachSeries,
   prepareReachData,
@@ -24,6 +42,7 @@ type Props = {
   preset: DatePreset
   from: string
   to: string
+  currency?: string
 }
 
 export default function ReachAnalysisView({
@@ -32,6 +51,7 @@ export default function ReachAnalysisView({
   preset,
   from,
   to,
+  currency = "GBP",
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -91,9 +111,8 @@ export default function ReachAnalysisView({
       ? reachData.reduce((sum, d) => sum + d.newReachPct, 0) / reachData.length
       : 0
 
-  // Cumulative reach (final)
-  const cumulativeReach =
-    reachData.length > 0 ? reachData[reachData.length - 1].totalReach : 0
+  // CPM
+  const cpm = totalImpressions > 0 ? (totalSpend / totalImpressions) * 1000 : 0
 
   return (
     <div className="space-y-6">
@@ -123,19 +142,13 @@ export default function ReachAnalysisView({
         />
         <MetricCard
           label="CPMr"
-          value={fmtCurrency(cpmr)}
+          value={fmtCurrency(cpmr, currency)}
           subValue="Cost per 1k reach"
         />
         <MetricCard
-          label="Saturation Score"
-          value={`${saturation.score}/100`}
-          subValue={
-            saturation.level === "low"
-              ? "Healthy"
-              : saturation.level === "moderate"
-                ? "Monitor"
-                : "Action needed"
-          }
+          label="CPM"
+          value={fmtCurrency(cpm, currency)}
+          subValue="Cost per 1k impressions"
         />
       </div>
 
@@ -165,7 +178,7 @@ export default function ReachAnalysisView({
             CPM vs CPMr
           </h2>
           {cpmrData.length > 0 ? (
-            <CpmrChart data={cpmrData} height={280} />
+            <CpmrChart data={cpmrData} height={280} currency={currency} />
           ) : (
             <p className="py-12 text-center text-xs text-neutral-500">
               No spend data available
@@ -188,35 +201,6 @@ export default function ReachAnalysisView({
         </Card>
       </div>
 
-      {/* Insights row */}
-      <div className="grid gap-3 lg:grid-cols-3">
-        <MetricCard
-          label="Cumulative Reach"
-          value={fmtNumber(cumulativeReach)}
-          subValue={`From baseline of ${fmtNumber(baselineReach)}`}
-        />
-        <MetricCard
-          label="Total Impressions"
-          value={fmtNumber(totalImpressions)}
-        />
-        <MetricCard
-          label="Reach Fatigue"
-          value={
-            fatigueDays >= 7
-              ? `${fatigueDays} days declining`
-              : fatigueDays >= 3
-                ? `${fatigueDays} days declining`
-                : "No fatigue detected"
-          }
-          subValue={
-            fatigueDays >= 7
-              ? "Consider refreshing creative"
-              : fatigueDays >= 3
-                ? "Monitoring trend"
-                : "New reach is stable"
-          }
-        />
-      </div>
     </div>
   )
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useRef, useEffect } from "react"
 import type { AggregatedMetrics, HierarchyLevel } from "@/lib/utils/types"
 import { deriveMetrics } from "@/lib/utils/aggregate"
 import { calculateFunnelStep, FUNNEL_STEP_DEFS } from "@/lib/utils/funnel-steps"
@@ -20,8 +20,84 @@ type ColumnDef = {
   format: (row: GroupRow) => string
 }
 
-/** Build columns dynamically based on configured funnel steps */
-function buildColumns(funnelSteps: string[]): ColumnDef[] {
+/** Extra metric definitions that can be toggled on/off via column picker */
+type ExtraMetricDef = {
+  key: string
+  label: string
+  getValue: (row: GroupRow, currency: string) => number
+  format: (row: GroupRow, currency: string) => string
+}
+
+const EXTRA_METRICS: ExtraMetricDef[] = [
+  {
+    key: "reach",
+    label: "Reach",
+    getValue: (row) => row.metrics.reach,
+    format: (row) => fmtNumber(row.metrics.reach),
+  },
+  {
+    key: "clicks",
+    label: "Clicks",
+    getValue: (row) => row.metrics.clicks,
+    format: (row) => fmtNumber(row.metrics.clicks),
+  },
+  {
+    key: "ctr",
+    label: "CTR",
+    getValue: (row) => deriveMetrics(row.metrics).ctr,
+    format: (row) => fmtPercent(deriveMetrics(row.metrics).ctr),
+  },
+  {
+    key: "cpm",
+    label: "CPM",
+    getValue: (row) => deriveMetrics(row.metrics).cpm,
+    format: (row, cur) => fmtCurrency(deriveMetrics(row.metrics).cpm, cur),
+  },
+  {
+    key: "cpc",
+    label: "CPC",
+    getValue: (row) => deriveMetrics(row.metrics).cpc,
+    format: (row, cur) => fmtCurrency(deriveMetrics(row.metrics).cpc, cur),
+  },
+  {
+    key: "purchases",
+    label: "Purchases",
+    getValue: (row) => row.metrics.purchases,
+    format: (row) => fmtNumber(row.metrics.purchases),
+  },
+  {
+    key: "revenue",
+    label: "Revenue",
+    getValue: (row) => row.metrics.revenue,
+    format: (row, cur) => fmtCurrency(row.metrics.revenue, cur),
+  },
+  {
+    key: "roas",
+    label: "ROAS",
+    getValue: (row) => deriveMetrics(row.metrics).roas,
+    format: (row) => fmtRoas(deriveMetrics(row.metrics).roas),
+  },
+  {
+    key: "frequency",
+    label: "Frequency",
+    getValue: (row) =>
+      row.metrics.reach > 0 ? row.metrics.impressions / row.metrics.reach : 0,
+    format: (row) => {
+      const freq =
+        row.metrics.reach > 0
+          ? row.metrics.impressions / row.metrics.reach
+          : 0
+      return freq > 0 ? `${freq.toFixed(2)}x` : "—"
+    },
+  },
+]
+
+/** Build columns dynamically based on configured funnel steps + extra columns */
+function buildColumns(
+  funnelSteps: string[],
+  extraCols: string[],
+  currency = "GBP"
+): ColumnDef[] {
   const cols: ColumnDef[] = [
     {
       key: "name",
@@ -34,7 +110,7 @@ function buildColumns(funnelSteps: string[]): ColumnDef[] {
       key: "spend",
       label: "Spend",
       getValue: (row) => row.metrics.spend,
-      format: (row) => fmtCurrency(row.metrics.spend),
+      format: (row) => fmtCurrency(row.metrics.spend, currency),
     },
     {
       key: "impressions",
@@ -75,14 +151,13 @@ function buildColumns(funnelSteps: string[]): ColumnDef[] {
       getValue: (row) => calculateFunnelStep(stepKey, row.metrics).costPer ?? 0,
       format: (row) => {
         const v = calculateFunnelStep(stepKey, row.metrics).costPer
-        return v !== null ? fmtCurrency(v) : "—"
+        return v !== null ? fmtCurrency(v, currency) : "—"
       },
     })
   }
 
-  // If no funnel steps, show default ROAS column
+  // If no funnel steps, show default ROAS columns
   if (funnelSteps.length === 0) {
-    const derived = (row: GroupRow) => deriveMetrics(row.metrics)
     cols.push(
       {
         key: "clicks",
@@ -93,8 +168,8 @@ function buildColumns(funnelSteps: string[]): ColumnDef[] {
       {
         key: "ctr",
         label: "CTR",
-        getValue: (row) => derived(row).ctr,
-        format: (row) => fmtPercent(derived(row).ctr),
+        getValue: (row) => deriveMetrics(row.metrics).ctr,
+        format: (row) => fmtPercent(deriveMetrics(row.metrics).ctr),
       },
       {
         key: "purchases",
@@ -106,15 +181,30 @@ function buildColumns(funnelSteps: string[]): ColumnDef[] {
         key: "revenue",
         label: "Revenue",
         getValue: (row) => row.metrics.revenue,
-        format: (row) => fmtCurrency(row.metrics.revenue),
+        format: (row) => fmtCurrency(row.metrics.revenue, currency),
       },
       {
         key: "roas",
         label: "ROAS",
-        getValue: (row) => derived(row).roas,
-        format: (row) => fmtRoas(derived(row).roas),
+        getValue: (row) => deriveMetrics(row.metrics).roas,
+        format: (row) => fmtRoas(deriveMetrics(row.metrics).roas),
       },
     )
+  }
+
+  // Append any extra metric columns the user has toggled on
+  // (skip if already present from funnel steps or defaults)
+  const existingKeys = new Set(cols.map((c) => c.key))
+  for (const key of extraCols) {
+    if (existingKeys.has(key)) continue
+    const def = EXTRA_METRICS.find((m) => m.key === key)
+    if (!def) continue
+    cols.push({
+      key: def.key,
+      label: def.label,
+      getValue: (row) => def.getValue(row, currency),
+      format: (row) => def.format(row, currency),
+    })
   }
 
   return cols
@@ -125,16 +215,40 @@ export default function PerformanceTable({
   level,
   onLevelChange,
   funnelSteps = [],
+  levelOptions,
+  currency = "GBP",
 }: {
   data: GroupRow[]
-  level: HierarchyLevel
-  onLevelChange: (level: HierarchyLevel) => void
+  level: string
+  onLevelChange: (level: any) => void
   funnelSteps?: string[]
+  /** Override the default level tabs (for Google Ads, which uses campaign/ad_group) */
+  levelOptions?: { key: string; label: string }[]
+  currency?: string
 }) {
   const [sortKey, setSortKey] = useState<string>("spend")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
+  const [extraCols, setExtraCols] = useState<string[]>([])
+  const [showColPicker, setShowColPicker] = useState(false)
+  const pickerRef = useRef<HTMLDivElement>(null)
 
-  const columns = useMemo(() => buildColumns(funnelSteps), [funnelSteps])
+  // Close picker on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setShowColPicker(false)
+      }
+    }
+    if (showColPicker) {
+      document.addEventListener("mousedown", handleClick)
+      return () => document.removeEventListener("mousedown", handleClick)
+    }
+  }, [showColPicker])
+
+  const columns = useMemo(
+    () => buildColumns(funnelSteps, extraCols, currency),
+    [funnelSteps, extraCols, currency]
+  )
 
   const sorted = useMemo(() => {
     const col = columns.find((c) => c.key === sortKey)
@@ -162,29 +276,118 @@ export default function PerformanceTable({
     }
   }
 
-  const levels: { key: HierarchyLevel; label: string }[] = [
+  function toggleExtraCol(key: string) {
+    setExtraCols((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    )
+  }
+
+  const levels = levelOptions || [
     { key: "campaign", label: "Campaigns" },
     { key: "adset", label: "Ad Sets" },
     { key: "ad", label: "Ads" },
   ]
 
+  // Determine which extra metrics are already shown by default columns
+  const defaultKeys = useMemo(() => {
+    const base = buildColumns(funnelSteps, [], currency)
+    return new Set(base.map((c) => c.key))
+  }, [funnelSteps, currency])
+
+  // Available extra metrics (those not already shown by default)
+  const availableExtras = EXTRA_METRICS.filter((m) => !defaultKeys.has(m.key))
+
   return (
     <div>
-      {/* Level tabs */}
-      <div className="mb-3 flex gap-1">
-        {levels.map((l) => (
-          <button
-            key={l.key}
-            onClick={() => onLevelChange(l.key)}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-              level === l.key
-                ? "bg-brand-lime/10 text-brand-lime"
-                : "text-neutral-400 hover:bg-neutral-800 hover:text-white"
-            }`}
-          >
-            {l.label}
-          </button>
-        ))}
+      {/* Level tabs + column picker */}
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex gap-1">
+          {levels.map((l) => (
+            <button
+              key={l.key}
+              onClick={() => onLevelChange(l.key)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                level === l.key
+                  ? "bg-brand-lime/10 text-brand-lime"
+                  : "text-neutral-400 hover:bg-neutral-800 hover:text-white"
+              }`}
+            >
+              {l.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Column picker */}
+        {availableExtras.length > 0 && (
+          <div className="relative" ref={pickerRef}>
+            <button
+              onClick={() => setShowColPicker(!showColPicker)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700 px-2.5 py-1.5 text-[11px] font-medium text-neutral-400 transition hover:border-neutral-600 hover:text-white"
+            >
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 4v16m8-8H4"
+                />
+              </svg>
+              Columns
+              {extraCols.length > 0 && (
+                <span className="rounded-full bg-brand-lime/20 px-1.5 text-[10px] text-brand-lime">
+                  {extraCols.length}
+                </span>
+              )}
+            </button>
+
+            {showColPicker && (
+              <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded-lg border border-neutral-700 bg-neutral-900 py-1 shadow-xl">
+                {availableExtras.map((m) => {
+                  const active = extraCols.includes(m.key)
+                  return (
+                    <button
+                      key={m.key}
+                      onClick={() => toggleExtraCol(m.key)}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-neutral-800"
+                    >
+                      <span
+                        className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
+                          active
+                            ? "border-brand-lime bg-brand-lime/20 text-brand-lime"
+                            : "border-neutral-600"
+                        }`}
+                      >
+                        {active && (
+                          <svg
+                            className="h-2.5 w-2.5"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={3}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M5 13l4 4L19 7"
+                            />
+                          </svg>
+                        )}
+                      </span>
+                      <span className={active ? "text-white" : "text-neutral-400"}>
+                        {m.label}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Table */}
@@ -227,9 +430,9 @@ export default function PerformanceTable({
                 {columns.map((col) => (
                   <td
                     key={col.key}
-                    className={`whitespace-nowrap px-3 py-2.5 text-xs tabular-nums ${
-                      col.align === "left" ? "text-left" : "text-right"
-                    } ${col.key === "name" ? "max-w-[200px] truncate font-medium text-white" : "text-neutral-300"}`}
+                    className={`px-3 py-2.5 text-xs tabular-nums ${
+                      col.align === "left" ? "text-left" : "text-right whitespace-nowrap"
+                    } ${col.key === "name" ? "max-w-[320px] truncate font-medium text-white" : "text-neutral-300"}`}
                     title={col.key === "name" ? row.name : undefined}
                   >
                     {col.format(row)}

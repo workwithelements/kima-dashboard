@@ -104,5 +104,24 @@ export function videoKPIs(metrics: VideoMetrics) {
       ? (metrics.p100 / metrics.threeSecViews) * 100
       : 0
 
-  return { hookRate, completionRate, holdRate }
+  // Estimate average watch % using trapezoidal integration of the retention
+  // curve (milestones at 0 %, 25 %, 50 %, 75 %, 95 %, 100 % of video duration).
+  let avgWatchPercent = 0
+  if (metrics.impressions > 0) {
+    const imp = metrics.impressions
+    const r25 = metrics.p25 / imp
+    const r50 = metrics.p50 / imp
+    const r75 = metrics.p75 / imp
+    const r95 = metrics.p95 / imp
+    const r100 = metrics.p100 / imp
+    avgWatchPercent =
+      (0.25 * (1 + r25) / 2 +
+        0.25 * (r25 + r50) / 2 +
+        0.25 * (r50 + r75) / 2 +
+        0.2 * (r75 + r95) / 2 +
+        0.05 * (r95 + r100) / 2) *
+      100
+  }
+
+  return { hookRate, completionRate, holdRate, avgWatchPercent }
 }
