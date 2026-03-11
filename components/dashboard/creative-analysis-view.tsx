@@ -27,12 +27,14 @@ import { fmtCurrency, fmtNumber, fmtPercent } from "@/lib/utils/format"
 import {
   classifyAllAds,
   countByClassification,
+  mergeClassificationWithFatigue,
+  getUnifiedStatusLabel,
   CLASSIFICATIONS,
   type ClassifiedAd,
   type ClassificationType,
 } from "@/lib/utils/creative-classification"
 import { isVideoAd } from "@/lib/utils/video-retention"
-import { detectFatigueAll, FATIGUE_CONFIG, type FatigueResult } from "@/lib/utils/fatigue-detection"
+import { detectFatigueAll, FATIGUE_CONFIG } from "@/lib/utils/fatigue-detection"
 import { calculateConcentration, CONCENTRATION_COLORS } from "@/lib/utils/spend-concentration"
 import type { MetaDailyRow, AdPlatform } from "@/lib/utils/types"
 import type { DatePreset } from "@/lib/utils/dates"
@@ -215,15 +217,27 @@ export default function CreativeAnalysisView({
     [filteredRows]
   )
 
+  // Fatigue detection
+  const fatigueMap = useMemo(() => {
+    const adIds = classifiedAds.map((a) => a.adId)
+    return detectFatigueAll(filteredRows, adIds, 7, to)
+  }, [classifiedAds, filteredRows, to])
+
+  // Enrich classified ads with fatigue status
+  const enrichedAds = useMemo(
+    () => mergeClassificationWithFatigue(classifiedAds, fatigueMap),
+    [classifiedAds, fatigueMap]
+  )
+
   // Counts by type
   const counts = useMemo(
-    () => countByClassification(classifiedAds),
-    [classifiedAds]
+    () => countByClassification(enrichedAds),
+    [enrichedAds]
   )
 
   // Filter by classification + tags
   const displayAds = useMemo(() => {
-    let ads = classifiedAds
+    let ads = enrichedAds
     if (activeFilters.size > 0) {
       ads = ads.filter((ad) => activeFilters.has(ad.classification.type))
     }
@@ -234,22 +248,16 @@ export default function CreativeAnalysisView({
       })
     }
     return ads
-  }, [classifiedAds, activeFilters, selectedTagFilters, adTagMap])
-
-  // Fatigue detection
-  const fatigueMap = useMemo(() => {
-    const adIds = classifiedAds.map((a) => a.adId)
-    return detectFatigueAll(filteredRows, adIds, 7, to)
-  }, [classifiedAds, filteredRows, to])
+  }, [enrichedAds, activeFilters, selectedTagFilters, adTagMap])
 
   // Video ads identification
   const videoAdIds = useMemo(() => {
     const ids = new Set<string>()
-    for (const ad of classifiedAds) {
+    for (const ad of enrichedAds) {
       if (isVideoAd(filteredRows, ad.adId)) ids.add(ad.adId)
     }
     return ids
-  }, [classifiedAds, filteredRows])
+  }, [enrichedAds, filteredRows])
 
   // Sort
   const sortedAds = useMemo(() => {
@@ -285,20 +293,20 @@ export default function CreativeAnalysisView({
   }, [displayAds, sortKey, sortDir])
 
   // Summary metrics
-  const totalCreatives = classifiedAds.length
-  const activeAds = classifiedAds.filter((a) => a.impressions > 0).length
+  const totalCreatives = enrichedAds.length
+  const activeAds = enrichedAds.filter((a) => a.impressions > 0).length
 
   // Spend concentration (HHI)
   const concentration = useMemo(
     () =>
       calculateConcentration(
-        classifiedAds.map((a) => ({
+        enrichedAds.map((a) => ({
           adId: a.adId,
           adName: a.adName,
           spend: a.spend,
         }))
       ),
-    [classifiedAds]
+    [enrichedAds]
   )
 
   // Build per-ad TagInfo lookup for card grid
@@ -681,7 +689,6 @@ export default function CreativeAnalysisView({
                     ads={section.ads}
                     thumbnails={thumbnails}
                     videoAdIds={videoAdIds}
-                    fatigueMap={fatigueMap}
                     rows={filteredRows}
                     currency={currency}
                     adTags={adTagsLookup}
@@ -693,7 +700,6 @@ export default function CreativeAnalysisView({
                     ads={section.ads}
                     tags={tags}
                     adTagMap={adTagMap}
-                    fatigueMap={fatigueMap}
                     currency={currency}
                     sortKey={sortKey}
                     sortDir={sortDir}
@@ -716,7 +722,6 @@ export default function CreativeAnalysisView({
             ads={sortedAds}
             thumbnails={thumbnails}
             videoAdIds={videoAdIds}
-            fatigueMap={fatigueMap}
             rows={filteredRows}
             currency={currency}
             adTags={adTagsLookup}
@@ -728,7 +733,6 @@ export default function CreativeAnalysisView({
             ads={sortedAds}
             tags={tags}
             adTagMap={adTagMap}
-            fatigueMap={fatigueMap}
             currency={currency}
             sortKey={sortKey}
             sortDir={sortDir}
@@ -763,7 +767,6 @@ export default function CreativeAnalysisView({
           ad={detailAd}
           thumbnailUrl={thumbnails[detailAd.adId]}
           isVideo={videoAdIds.has(detailAd.adId)}
-          fatigue={fatigueMap[detailAd.adId]}
           rows={filteredRows}
           currency={currency}
           tags={adTagsLookup[detailAd.adId]}
@@ -781,7 +784,6 @@ function CreativeTableInline({
   ads,
   tags,
   adTagMap,
-  fatigueMap,
   currency,
   sortKey,
   sortDir,
@@ -798,7 +800,6 @@ function CreativeTableInline({
   ads: ClassifiedAd[]
   tags: Tag[]
   adTagMap: Record<string, string[]>
-  fatigueMap: Record<string, FatigueResult>
   currency: string
   sortKey: SortKey
   sortDir: "asc" | "desc"
@@ -812,8 +813,8 @@ function CreativeTableInline({
   onAdClick?: (ad: ClassifiedAd) => void
   selectedMetrics?: CreativeMetricKey[]
 }) {
-  // Fixed columns: 4 (Name, AdSet, Classification, Tags) + dynamic metrics + Fatigue
-  const fixedColCount = 4 + selectedMetrics.length + 1
+  // Fixed columns: 4 (Name, AdSet, Classification, Tags) + dynamic metrics
+  const fixedColCount = 4 + selectedMetrics.length
 
   return (
     <Card>
@@ -839,7 +840,6 @@ function CreativeTableInline({
                   />
                 )
               })}
-              <th className="py-2 pr-3 font-medium text-center">Fatigue</th>
             </tr>
           </thead>
           <tbody>
@@ -866,9 +866,15 @@ function CreativeTableInline({
                   </td>
                   <td className="py-2.5 pr-3">
                     <span
-                      className={`inline-block rounded-md border px-2 py-0.5 text-[10px] font-medium ${def.bgColor}`}
+                      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-medium ${def.bgColor}`}
                     >
-                      {def.label}
+                      {getUnifiedStatusLabel(ad)}
+                      {ad.fatigueStatus && ad.fatigueStatus !== "healthy" && (
+                        <span
+                          className={`inline-block h-1.5 w-1.5 rounded-full ${FATIGUE_CONFIG.dot[ad.fatigueStatus]}`}
+                          title={ad.fatigueReason}
+                        />
+                      )}
                     </span>
                   </td>
                   <td className="py-2.5 pr-3">
@@ -932,22 +938,6 @@ function CreativeTableInline({
                       </td>
                     )
                   })}
-                  <td className="py-2.5 text-center">
-                    {(() => {
-                      const f = fatigueMap[ad.adId]
-                      if (!f || f.status === "healthy") return <span className="text-neutral-600">—</span>
-                      const cfg = FATIGUE_CONFIG
-                      return (
-                        <span
-                          className={`inline-flex items-center gap-1 text-[10px] font-medium ${cfg.color[f.status]}`}
-                          title={f.reason}
-                        >
-                          <span className={`inline-block h-1.5 w-1.5 rounded-full ${cfg.dot[f.status]}`} />
-                          {cfg.label[f.status]}
-                        </span>
-                      )
-                    })()}
-                  </td>
                 </tr>
               )
             })}
@@ -1108,7 +1098,6 @@ function CreativeDetailModal({
   ad,
   thumbnailUrl,
   isVideo,
-  fatigue,
   rows,
   currency,
   tags,
@@ -1117,7 +1106,6 @@ function CreativeDetailModal({
   ad: ClassifiedAd
   thumbnailUrl?: string
   isVideo: boolean
-  fatigue?: FatigueResult
   rows: Partial<MetaDailyRow>[]
   currency: string
   tags?: TagInfo[]
@@ -1176,19 +1164,16 @@ function CreativeDetailModal({
             </div>
           )}
           <span
-            className={`absolute top-3 left-3 text-xs font-semibold px-2.5 py-1 rounded-lg border backdrop-blur-sm ${cls.bgColor}`}
+            className={`absolute top-3 left-3 inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg border backdrop-blur-sm ${cls.bgColor}`}
           >
-            {cls.label}
+            {getUnifiedStatusLabel(ad)}
+            {ad.fatigueStatus && ad.fatigueStatus !== "healthy" && (
+              <span
+                className={`inline-block h-2 w-2 rounded-full ${FATIGUE_CONFIG.dot[ad.fatigueStatus]}`}
+                title={ad.fatigueReason}
+              />
+            )}
           </span>
-          {fatigue && fatigue.status !== "healthy" && (
-            <span
-              className={`absolute top-3 right-3 inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg bg-neutral-900/80 backdrop-blur-sm ${FATIGUE_CONFIG.color[fatigue.status]}`}
-              title={fatigue.reason}
-            >
-              <span className={`inline-block h-2 w-2 rounded-full ${FATIGUE_CONFIG.dot[fatigue.status]}`} />
-              {FATIGUE_CONFIG.label[fatigue.status]}
-            </span>
-          )}
         </div>
 
         {/* Content */}
@@ -1252,10 +1237,10 @@ function CreativeDetailModal({
           )}
 
           {/* Fatigue detail */}
-          {fatigue && fatigue.status !== "healthy" && (
+          {ad.fatigueStatus && ad.fatigueStatus !== "healthy" && (
             <div className="border-t border-neutral-800 pt-3">
               <p className="text-xs text-neutral-500 mb-1">Fatigue Analysis</p>
-              <p className="text-xs text-neutral-300">{fatigue.reason}</p>
+              <p className="text-xs text-neutral-300">{ad.fatigueReason}</p>
             </div>
           )}
         </div>

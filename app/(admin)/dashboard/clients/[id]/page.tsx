@@ -32,7 +32,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
   // Fetch performance data + scorecard config + Google Ads data in parallel
   const supabase = createServiceClient()
 
-  const [data, configRes, gaRows, gaCompRows, breakdownsData] = await Promise.all([
+  const [data, configRes, gaRows, gaCompRows, breakdownsData, annotationsRes] = await Promise.all([
     fetchClientData(
       params.id,
       range.from,
@@ -42,7 +42,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
     ),
     supabase
       .from("client_scorecard_config")
-      .select("funnel_steps")
+      .select("funnel_steps, key_action")
       .eq("client_id", params.id)
       .single(),
     fetchGoogleAdsData(params.id, range.from, range.to),
@@ -50,11 +50,25 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       ? fetchGoogleAdsData(params.id, compRange.from, compRange.to)
       : Promise.resolve([]),
     fetchBreakdownsData(params.id, range.from, range.to),
+    supabase
+      .from("annotations")
+      .select("id, date, text, created_at")
+      .eq("client_id", params.id)
+      .gte("date", range.from)
+      .lte("date", range.to)
+      .order("date"),
   ])
 
   if (!data) notFound()
 
   const funnelSteps = (configRes.data?.funnel_steps as string[]) || null
+  const keyAction = (configRes.data?.key_action as string) || null
+  const annotations = (annotationsRes.data || []).map((a: { id: string; date: string; text: string; created_at: string }) => ({
+    id: a.id,
+    date: a.date,
+    text: a.text,
+    created_at: a.created_at,
+  }))
 
   return (
     <ClientPerformanceView
@@ -69,8 +83,10 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       compareType={compareType}
       baselineReach={data.baselineReach}
       funnelSteps={funnelSteps}
+      keyAction={keyAction}
       demographics={breakdownsData?.demographics ?? []}
       placements={breakdownsData?.placements ?? []}
+      annotations={annotations}
     />
   )
 }

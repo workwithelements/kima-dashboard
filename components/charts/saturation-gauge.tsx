@@ -141,8 +141,24 @@ export default function SaturationGauge({ saturation }: SaturationGaugeProps) {
         Avg Frequency: <span className="text-neutral-300">{avgFrequency.toFixed(2)}x</span>
       </p>
 
+      {/* Info tooltip */}
+      <div className="group/tip relative mt-3 flex cursor-help items-center gap-1 text-[10px] text-neutral-500">
+        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 16v-4M12 8h.01" />
+        </svg>
+        <span>How is this calculated?</span>
+        <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-64 -translate-x-1/2 rounded-lg border border-neutral-700 bg-neutral-900 p-3 text-left text-[11px] leading-relaxed text-neutral-300 opacity-0 shadow-xl transition-opacity group-hover/tip:pointer-events-auto group-hover/tip:opacity-100">
+          <p className="mb-1.5 font-medium text-white">Saturation Score (0–100)</p>
+          <p className="mb-1">Measures audience fatigue risk from two factors:</p>
+          <p className="mb-0.5"><span className="text-neutral-400">Frequency (50%):</span> Avg ad frequency vs target of 3x</p>
+          <p className="mb-2"><span className="text-neutral-400">Cost Premium (50%):</span> CPM increase from repeated exposure</p>
+          <p className="text-neutral-500">0–30 Low · 30–60 Moderate · 60–100 High</p>
+        </div>
+      </div>
+
       {/* Zone legend */}
-      <div className="mt-4 flex gap-4 text-[10px] text-neutral-500">
+      <div className="mt-3 flex gap-4 text-[10px] text-neutral-500">
         <div className="flex items-center gap-1">
           <div className="h-2 w-2 rounded-full bg-green-500" />
           <span>0–30</span>

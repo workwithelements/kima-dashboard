@@ -8,9 +8,15 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
+  ReferenceLine,
   ResponsiveContainer,
 } from "recharts"
 import { fmtDateShort, fmtCurrency, fmtNumber } from "@/lib/utils/format"
+
+type AnnotationMarker = {
+  date: string
+  text: string
+}
 
 type MetricChartProps = {
   data: { date: string; value: number }[]
@@ -28,6 +34,8 @@ type MetricChartProps = {
   comparisonData?: { date: string; value: number }[]
   /** Label for the comparison line in tooltip */
   comparisonLabel?: string
+  /** Annotation markers to display as vertical reference lines */
+  annotations?: AnnotationMarker[]
 }
 
 export default function MetricChart({
@@ -39,6 +47,7 @@ export default function MetricChart({
   height = 300,
   comparisonData,
   comparisonLabel = "Previous Period",
+  annotations = [],
 }: MetricChartProps) {
   const formatter = (v: number) => {
     switch (format) {
@@ -114,6 +123,21 @@ export default function MetricChart({
           fillOpacity={0.08}
           strokeWidth={2}
         />
+        {annotations.map((a) => (
+          <ReferenceLine
+            key={a.date}
+            x={a.date}
+            stroke="#CDFF00"
+            strokeDasharray="3 3"
+            strokeOpacity={0.5}
+            label={{
+              value: "▼",
+              position: "top",
+              fill: "#CDFF00",
+              fontSize: 10,
+            }}
+          />
+        ))}
       </AreaChart>
     </ResponsiveContainer>
   )

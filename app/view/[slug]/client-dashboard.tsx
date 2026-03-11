@@ -15,6 +15,7 @@ import {
   fmtNumber,
   fmtPercent,
 } from "@/lib/utils/format"
+import AnnotationsBar, { type Annotation } from "@/components/ui/annotations-bar"
 import { aggregateMetrics, deriveMetrics, dailyFunnelSeries } from "@/lib/utils/aggregate"
 import {
   dailyReachSeries,
@@ -59,6 +60,8 @@ export default function ClientDashboard({
   reachRows,
   baselineReach,
   funnelSteps,
+  keyAction: _keyAction,
+  annotations: initialAnnotations = [],
   preset,
   from,
   to,
@@ -72,6 +75,8 @@ export default function ClientDashboard({
   reachRows: { date: string; reach: number; impressions: number }[]
   baselineReach: number
   funnelSteps: string[] | null
+  keyAction: string | null
+  annotations?: Annotation[]
   preset: string
   from: string
   to: string
@@ -322,7 +327,17 @@ export default function ClientDashboard({
                   color="#CDFF00"
                   format="currency"
                   height={260}
+                  annotations={initialAnnotations}
                 />
+                {initialAnnotations.length > 0 && (
+                  <AnnotationsBar
+                    annotations={initialAnnotations}
+                    clientId=""
+                    from={from}
+                    to={to}
+                    readOnly
+                  />
+                )}
               </Card>
 
               {steps.length > 0 && (

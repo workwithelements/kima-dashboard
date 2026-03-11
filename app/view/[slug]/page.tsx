@@ -94,11 +94,11 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     historicalDaily
   )
 
-  // Fetch funnel config + reach data in parallel
-  const [scorecardConfigRes, reachRes] = await Promise.all([
+  // Fetch funnel config + reach data + annotations in parallel
+  const [scorecardConfigRes, reachRes, annotationsRes] = await Promise.all([
     supabase
       .from("client_scorecard_config")
-      .select("funnel_steps")
+      .select("funnel_steps, key_action")
       .eq("client_id", client.id)
       .single(),
     supabase
@@ -108,10 +108,24 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
       .gte("date", from)
       .lte("date", to)
       .order("date"),
+    supabase
+      .from("annotations")
+      .select("id, date, text, created_at")
+      .eq("client_id", client.id)
+      .gte("date", from)
+      .lte("date", to)
+      .order("date"),
   ])
 
   const funnelSteps = (scorecardConfigRes.data?.funnel_steps as string[]) || null
+  const keyAction = (scorecardConfigRes.data?.key_action as string) || null
   const reachRows = reachRes.data || []
+  const annotations = (annotationsRes.data || []).map((a: { id: string; date: string; text: string; created_at: string }) => ({
+    id: a.id,
+    date: a.date,
+    text: a.text,
+    created_at: a.created_at,
+  }))
 
   // Baseline reach (30 days before range start)
   const dayBefore = new Date(from + "T00:00:00")
@@ -149,10 +163,12 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
       reachRows={reachRows}
       baselineReach={baselineReach}
       funnelSteps={funnelSteps}
+      keyAction={keyAction}
       preset={preset}
       from={from}
       to={to}
       tab={searchParams.tab || "performance"}
+      annotations={annotations}
     />
   )
 }

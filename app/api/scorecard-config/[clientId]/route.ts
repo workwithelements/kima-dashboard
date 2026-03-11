@@ -38,7 +38,7 @@ export async function PUT(
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const body = await request.json()
-  const { metric_ids, funnel_steps, creative_previews_enabled } = body
+  const { metric_ids, funnel_steps, creative_previews_enabled, key_action } = body
 
   // Build upsert payload — only include fields that were sent
   const payload: Record<string, unknown> = {
@@ -62,6 +62,10 @@ export async function PUT(
 
   if (creative_previews_enabled !== undefined) {
     payload.creative_previews_enabled = Boolean(creative_previews_enabled)
+  }
+
+  if (key_action !== undefined) {
+    payload.key_action = key_action || null
   }
 
   const { data, error } = await supabase

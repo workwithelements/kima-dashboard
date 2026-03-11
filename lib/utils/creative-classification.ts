@@ -9,6 +9,7 @@
 
 import type { MetaDailyRow } from "./types"
 import { parseAdName, type ParsedAdName } from "./ad-name-parser"
+import type { FatigueStatus, FatigueResult } from "./fatigue-detection"
 
 // --- Classification Types ---
 
@@ -50,6 +51,8 @@ export type ClassifiedAd = {
   postClickRate: number
   classification: ClassificationResult
   parsed?: ParsedAdName
+  fatigueStatus?: FatigueStatus
+  fatigueReason?: string
 }
 
 // --- Constants ---
@@ -410,6 +413,40 @@ export function classifyAllAds(
   // Sort by spend descending
   classified.sort((a, b) => b.spend - a.spend)
   return classified
+}
+
+/**
+ * Merge fatigue status into classified ads.
+ * Enriches each ad with fatigueStatus + fatigueReason fields.
+ */
+export function mergeClassificationWithFatigue(
+  ads: ClassifiedAd[],
+  fatigueMap: Record<string, FatigueResult>
+): ClassifiedAd[] {
+  return ads.map((ad) => {
+    const f = fatigueMap[ad.adId]
+    if (!f || f.status === "healthy") return ad
+    return { ...ad, fatigueStatus: f.status, fatigueReason: f.reason }
+  })
+}
+
+/**
+ * Get unified display label for classification + fatigue.
+ * Returns the classification label with optional fatigue suffix.
+ */
+export function getUnifiedStatusLabel(ad: ClassifiedAd): string {
+  const cls = CLASSIFICATIONS[ad.classification.type]
+  if (!ad.fatigueStatus || ad.fatigueStatus === "healthy") return cls.label
+  // Fatigue is redundant for losers and no-delivery
+  if (
+    ad.classification.type === "LOSER" ||
+    ad.classification.type === "LOSER_NON_CONTRIBUTING" ||
+    ad.classification.type === "LOSER_NO_DELIVERY"
+  ) {
+    return cls.label
+  }
+  const suffix = ad.fatigueStatus === "fatigued" ? "Fatigued" : "Fatigue Warning"
+  return `${cls.label} · ${suffix}`
 }
 
 /** Count ads by classification type */

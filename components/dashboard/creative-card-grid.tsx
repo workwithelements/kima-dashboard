@@ -4,9 +4,10 @@ import { useState } from "react"
 import Image from "next/image"
 import {
   CLASSIFICATIONS,
+  getUnifiedStatusLabel,
   type ClassifiedAd,
 } from "@/lib/utils/creative-classification"
-import { FATIGUE_CONFIG, type FatigueResult } from "@/lib/utils/fatigue-detection"
+import { FATIGUE_CONFIG } from "@/lib/utils/fatigue-detection"
 import MiniRetentionCurve from "@/components/charts/mini-retention-curve"
 import type { MetaDailyRow } from "@/lib/utils/types"
 import {
@@ -23,7 +24,6 @@ type Props = {
   ads: ClassifiedAd[]
   thumbnails: ThumbnailMap
   videoAdIds: Set<string>
-  fatigueMap: Record<string, FatigueResult>
   rows: Partial<MetaDailyRow>[]
   currency?: string
   /** Per-ad tag list, keyed by ad ID */
@@ -37,7 +37,6 @@ export default function CreativeCardGrid({
   ads,
   thumbnails,
   videoAdIds,
-  fatigueMap,
   rows,
   currency = "GBP",
   adTags = {},
@@ -52,7 +51,6 @@ export default function CreativeCardGrid({
           ad={ad}
           thumbnailUrl={thumbnails[ad.adId]}
           isVideo={videoAdIds.has(ad.adId)}
-          fatigue={fatigueMap[ad.adId]}
           rows={rows}
           currency={currency}
           tags={adTags[ad.adId]}
@@ -73,7 +71,6 @@ function CreativeCard({
   ad,
   thumbnailUrl,
   isVideo,
-  fatigue,
   rows,
   currency = "GBP",
   tags,
@@ -83,7 +80,6 @@ function CreativeCard({
   ad: ClassifiedAd
   thumbnailUrl?: string
   isVideo: boolean
-  fatigue?: FatigueResult
   rows: Partial<MetaDailyRow>[]
   currency?: string
   tags?: TagInfo[]
@@ -127,25 +123,18 @@ function CreativeCard({
           </div>
         )}
 
-        {/* Classification badge overlaid on thumbnail */}
+        {/* Classification badge overlaid on thumbnail (includes fatigue status) */}
         <span
-          className={`absolute top-2 left-2 text-[10px] font-semibold px-2 py-0.5 rounded-md border backdrop-blur-sm ${cls.bgColor}`}
+          className={`absolute top-2 left-2 inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-md border backdrop-blur-sm ${cls.bgColor}`}
         >
-          {cls.label}
-        </span>
-
-        {/* Fatigue indicator overlaid */}
-        {fatigue && fatigue.status !== "healthy" && (
-          <span
-            className={`absolute top-2 right-2 inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-neutral-900/80 backdrop-blur-sm ${FATIGUE_CONFIG.color[fatigue.status]}`}
-            title={fatigue.reason}
-          >
+          {getUnifiedStatusLabel(ad)}
+          {ad.fatigueStatus && ad.fatigueStatus !== "healthy" && (
             <span
-              className={`inline-block h-1.5 w-1.5 rounded-full ${FATIGUE_CONFIG.dot[fatigue.status]}`}
+              className={`inline-block h-1.5 w-1.5 rounded-full ${FATIGUE_CONFIG.dot[ad.fatigueStatus]}`}
+              title={ad.fatigueReason}
             />
-            {FATIGUE_CONFIG.label[fatigue.status]}
-          </span>
-        )}
+          )}
+        </span>
       </div>
 
       {/* Content */}

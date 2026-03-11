@@ -1,7 +1,7 @@
 "use client"
 
 import {
-  LineChart,
+  ComposedChart,
   Line,
   XAxis,
   YAxis,
@@ -99,9 +99,43 @@ export default function ConversionRatesChart({
     return def.rateLabel
   }
 
+  // Determine if we need dual Y-axes: check ratio of max values across series
+  const seriesMaxValues: { key: string; maxVal: number }[] = series
+    .map((s) => {
+      const vals = rateData
+        .map((d) => d[`${s.key}_rate`])
+        .filter((v): v is number => v !== null && typeof v === "number" && v > 0)
+      return { key: s.key, maxVal: vals.length > 0 ? Math.max(...vals) : 0 }
+    })
+    .filter((s) => s.maxVal > 0)
+
+  let useDualAxis = false
+  let highGroup: Set<string> = new Set()
+  let lowGroup: Set<string> = new Set()
+
+  if (seriesMaxValues.length >= 2) {
+    const allMaxes = seriesMaxValues.map((s) => s.maxVal).sort((a, b) => a - b)
+    const overallMax = allMaxes[allMaxes.length - 1]
+    const overallMin = allMaxes[0]
+
+    if (overallMax / overallMin > 10) {
+      useDualAxis = true
+      // Split at the median max value
+      const median = allMaxes[Math.floor(allMaxes.length / 2)]
+      for (const s of seriesMaxValues) {
+        if (s.maxVal >= median) highGroup.add(s.key)
+        else lowGroup.add(s.key)
+      }
+      // Edge case: if everything ended up in one group, don't use dual
+      if (highGroup.size === 0 || lowGroup.size === 0) {
+        useDualAxis = false
+      }
+    }
+  }
+
   return (
     <ResponsiveContainer width="100%" height={300}>
-      <LineChart data={rateData}>
+      <ComposedChart data={rateData}>
         <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
         <XAxis
           dataKey="date"
@@ -111,11 +145,22 @@ export default function ConversionRatesChart({
           tickFormatter={fmtDateShort}
         />
         <YAxis
+          yAxisId="left"
           tick={{ fill: "#737373", fontSize: 11 }}
           tickLine={false}
           axisLine={false}
           tickFormatter={(v) => `${v.toFixed(1)}%`}
         />
+        {useDualAxis && (
+          <YAxis
+            yAxisId="right"
+            orientation="right"
+            tick={{ fill: "#525252", fontSize: 11 }}
+            tickLine={false}
+            axisLine={false}
+            tickFormatter={(v) => `${v.toFixed(1)}%`}
+          />
+        )}
         <Tooltip
           contentStyle={{
             backgroundColor: "#171717",
@@ -139,26 +184,32 @@ export default function ConversionRatesChart({
           iconSize={8}
           formatter={(value: string) => {
             const stepKey = value.replace(/_rate$/, "")
+            const suffix = useDualAxis && lowGroup.has(stepKey) ? " (R)" : ""
             return (
               <span className="text-xs text-neutral-400">
-                {getProgressiveLabel(stepKey)}
+                {getProgressiveLabel(stepKey)}{suffix}
               </span>
             )
           }}
         />
-        {series.map((s, i) => (
-          <Line
-            key={`${s.key}_rate`}
-            type="monotone"
-            dataKey={`${s.key}_rate`}
-            stroke={RATE_COLORS[i % RATE_COLORS.length]}
-            strokeWidth={2}
-            dot={false}
-            activeDot={{ r: 4, strokeWidth: 0 }}
-            connectNulls
-          />
-        ))}
-      </LineChart>
+        {series.map((s, i) => {
+          const axisId = useDualAxis && lowGroup.has(s.key) ? "right" : "left"
+          return (
+            <Line
+              key={`${s.key}_rate`}
+              yAxisId={axisId}
+              type="monotone"
+              dataKey={`${s.key}_rate`}
+              stroke={RATE_COLORS[i % RATE_COLORS.length]}
+              strokeWidth={2}
+              strokeDasharray={useDualAxis && lowGroup.has(s.key) ? "6 3" : undefined}
+              dot={false}
+              activeDot={{ r: 4, strokeWidth: 0 }}
+              connectNulls
+            />
+          )
+        })}
+      </ComposedChart>
     </ResponsiveContainer>
   )
 }

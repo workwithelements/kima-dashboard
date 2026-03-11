@@ -24,6 +24,7 @@ import PlatformSelector, { type PlatformView } from "@/components/ui/platform-se
 import PerformanceTable from "@/components/tables/performance-table"
 import AdsSidebar, { type AdEntry } from "@/components/ui/ads-sidebar"
 import ScorecardConfigModal from "./scorecard-config-modal"
+import AnnotationsBar, { type Annotation } from "@/components/ui/annotations-bar"
 
 // Lazy-load heavy chart components (recharts ~200KB)
 const ChartPlaceholder = () => (
@@ -43,6 +44,10 @@ const FunnelBarChart = dynamic(
 )
 const ConversionRatesChart = dynamic(
   () => import("@/components/charts/conversion-rates-chart"),
+  { ssr: false, loading: ChartPlaceholder }
+)
+const CPAChart = dynamic(
+  () => import("@/components/charts/cpa-chart"),
   { ssr: false, loading: ChartPlaceholder }
 )
 const FunnelDropOffChart = dynamic(
@@ -73,10 +78,14 @@ type Props = {
   compareType: ComparisonType
   baselineReach?: number
   funnelSteps?: string[] | null
+  /** Key action step for CPA chart denominator */
+  keyAction?: string | null
   /** Demographics breakdown rows (Meta only) */
   demographics?: MetaDemographicsRow[]
   /** Placements breakdown rows (Meta only) */
   placements?: MetaPlacementsRow[]
+  /** Annotations / notes for this client in date range */
+  annotations?: Annotation[]
   /** Hide configure button (for public view) */
   readOnly?: boolean
 }
@@ -118,6 +127,8 @@ export default function ClientPerformanceView({
   compareType,
   baselineReach = 0,
   funnelSteps: initialSteps = null,
+  keyAction: initialKeyAction = null,
+  annotations: initialAnnotations = [],
   demographics = [],
   placements = [],
   readOnly = false,
@@ -127,9 +138,11 @@ export default function ClientPerformanceView({
   const [gaLevel, setGaLevel] = useState<"campaign" | "ad_group">("campaign")
   const [showConfig, setShowConfig] = useState(false)
   const [funnelSteps, setFunnelSteps] = useState<string[]>(initialSteps || [])
+  const [keyAction, setKeyAction] = useState<string | null>(initialKeyAction)
   const [breakdownTab, setBreakdownTab] = useState<"demographics" | "placements">("demographics")
   const [breakdownMetric, setBreakdownMetric] = useState<"spend" | "impressions" | "purchases">("spend")
   const [breakdownOpen, setBreakdownOpen] = useState(true)
+  const [annotations, setAnnotations] = useState<Annotation[]>(initialAnnotations)
 
   // Drill-down state for Meta performance table
   type DrillCrumb = { level: HierarchyLevel; id: string; name: string }
@@ -606,7 +619,16 @@ export default function ClientPerformanceView({
       {/* Charts */}
       <Card>
         <h2 className="mb-4 text-sm font-medium text-neutral-400">Daily Spend</h2>
-        <MetricChart data={spendSeries} label="Spend" color="#CDFF00" format="currency" height={260} currency={currency} comparisonData={compSpendSeries} comparisonLabel="Previous Period" />
+        <MetricChart data={spendSeries} label="Spend" color="#CDFF00" format="currency" height={260} currency={currency} comparisonData={compSpendSeries} comparisonLabel="Previous Period" annotations={annotations} />
+        <AnnotationsBar
+          annotations={annotations}
+          clientId={client.id}
+          from={from}
+          to={to}
+          onAdd={(a) => setAnnotations((prev) => [...prev, a].sort((x, y) => x.date.localeCompare(y.date)))}
+          onDelete={(id) => setAnnotations((prev) => prev.filter((a) => a.id !== id))}
+          readOnly={readOnly}
+        />
       </Card>
 
       {showFunnel && (
@@ -616,9 +638,6 @@ export default function ClientPerformanceView({
             <FunnelBarChart
               data={funnelSeries}
               series={funnelChartSeries}
-              spendByDate={spendByDate}
-              cpaStepKey={funnelSteps[funnelSteps.length - 1]}
-              currency={currency}
             />
           </Card>
 
@@ -632,6 +651,22 @@ export default function ClientPerformanceView({
             />
           </Card>
         </div>
+      )}
+
+      {/* CPA Chart (Meta only, when funnel steps exist) */}
+      {showFunnel && (
+        <Card>
+          <h2 className="mb-4 text-sm font-medium text-neutral-400">
+            Cost Per {FUNNEL_STEP_DEFS[keyAction || funnelSteps[funnelSteps.length - 1]]?.label || "Action"}
+          </h2>
+          <CPAChart
+            data={funnelSeries}
+            stepKey={keyAction || funnelSteps[funnelSteps.length - 1]}
+            stepLabel={FUNNEL_STEP_DEFS[keyAction || funnelSteps[funnelSteps.length - 1]]?.label || "Action"}
+            spendByDate={spendByDate}
+            currency={currency}
+          />
+        </Card>
       )}
 
       {/* Funnel drop-off (Meta only) */}
@@ -695,9 +730,11 @@ export default function ClientPerformanceView({
         <ScorecardConfigModal
           clientId={client.id}
           selectedSteps={funnelSteps}
+          keyAction={keyAction}
           onClose={() => setShowConfig(false)}
-          onSaved={(steps) => {
+          onSaved={(steps, newKeyAction) => {
             setFunnelSteps(steps)
+            setKeyAction(newKeyAction)
             setShowConfig(false)
           }}
         />

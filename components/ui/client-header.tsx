@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useSearchParams } from "next/navigation"
 
 type Props = {
   clientId: string
@@ -17,7 +17,10 @@ const TABS = [
 
 export default function ClientHeader({ clientId, clientName }: Props) {
   const pathname = usePathname()
+  const searchParams = useSearchParams()
   const basePath = `/dashboard/clients/${clientId}`
+  const qs = searchParams.toString()
+  const suffix = qs ? `?${qs}` : ""
 
   return (
     <div className="space-y-4">
@@ -36,11 +39,12 @@ export default function ClientHeader({ clientId, clientName }: Props) {
       {/* Tab bar */}
       <div className="flex gap-1 border-b border-neutral-800">
         {TABS.map((tab) => {
-          const href = basePath + tab.href
+          const href = basePath + tab.href + suffix
+          const tabPath = basePath + tab.href
           const isActive =
             tab.href === ""
               ? pathname === basePath
-              : pathname === href || pathname.startsWith(href + "/")
+              : pathname === tabPath || pathname.startsWith(tabPath + "/")
 
           return (
             <Link
