@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { createClient, createServiceClient } from "@/lib/supabase/server"
 
 /**
  * GET /api/scorecard-config/[clientId] — get scorecard config for a client
@@ -12,7 +12,8 @@ export async function GET(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const { data, error } = await supabase
+  const db = createServiceClient()
+  const { data, error } = await db
     .from("client_scorecard_config")
     .select("*")
     .eq("client_id", params.clientId)
@@ -33,6 +34,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: { clientId: string } }
 ) {
+  // Auth check with anon client (uses session cookies)
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -68,7 +70,9 @@ export async function PUT(
     payload.key_action = key_action || null
   }
 
-  const { data, error } = await supabase
+  // Use service client for the write to bypass RLS issues with upsert
+  const db = createServiceClient()
+  const { data, error } = await db
     .from("client_scorecard_config")
     .upsert(payload, { onConflict: "client_id" })
     .select()

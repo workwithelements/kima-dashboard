@@ -78,7 +78,8 @@ export default function ScorecardConfigModal({
       if (res.ok) {
         onSaved(selected, keyAction)
       } else {
-        alert("Failed to save configuration")
+        const errBody = await res.json().catch(() => ({}))
+        alert(`Failed to save configuration: ${errBody?.error || res.status}`)
       }
     } finally {
       setSaving(false)
