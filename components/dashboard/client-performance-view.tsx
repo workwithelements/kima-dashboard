@@ -640,6 +640,22 @@ export default function ClientPerformanceView({
         />
       </Card>
 
+      {/* CPA Chart (Meta only, when funnel steps exist) */}
+      {showFunnel && (
+        <Card>
+          <h2 className="mb-4 text-sm font-medium text-neutral-400">
+            Cost Per {FUNNEL_STEP_DEFS[keyAction || funnelSteps[funnelSteps.length - 1]]?.label || "Action"}
+          </h2>
+          <CPAChart
+            data={funnelSeries}
+            stepKey={keyAction || funnelSteps[funnelSteps.length - 1]}
+            stepLabel={FUNNEL_STEP_DEFS[keyAction || funnelSteps[funnelSteps.length - 1]]?.label || "Action"}
+            spendByDate={spendByDate}
+            currency={currency}
+          />
+        </Card>
+      )}
+
       {showFunnel && (
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
@@ -660,22 +676,6 @@ export default function ClientPerformanceView({
             />
           </Card>
         </div>
-      )}
-
-      {/* CPA Chart (Meta only, when funnel steps exist) */}
-      {showFunnel && (
-        <Card>
-          <h2 className="mb-4 text-sm font-medium text-neutral-400">
-            Cost Per {FUNNEL_STEP_DEFS[keyAction || funnelSteps[funnelSteps.length - 1]]?.label || "Action"}
-          </h2>
-          <CPAChart
-            data={funnelSeries}
-            stepKey={keyAction || funnelSteps[funnelSteps.length - 1]}
-            stepLabel={FUNNEL_STEP_DEFS[keyAction || funnelSteps[funnelSteps.length - 1]]?.label || "Action"}
-            spendByDate={spendByDate}
-            currency={currency}
-          />
-        </Card>
       )}
 
       {/* Funnel drop-off (Meta only) */}
