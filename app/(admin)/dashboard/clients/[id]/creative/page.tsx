@@ -38,6 +38,7 @@ export default async function CreativeAnalysisPage({ params, searchParams }: Pro
       previewsEnabled={data.previewsEnabled}
       currency={data.client.currency_code ?? "GBP"}
       platforms={platforms}
+      metaAccountId={data.client.meta_account_id ?? undefined}
     />
   )
 }

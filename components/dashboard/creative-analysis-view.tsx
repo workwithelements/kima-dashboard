@@ -53,6 +53,8 @@ type Props = {
   currency?: string
   /** Available platforms for this client (drives platform tabs) */
   platforms?: AdPlatform[]
+  /** Meta ad account ID for Ads Manager links */
+  metaAccountId?: string
 }
 
 type SortKey =
@@ -86,6 +88,7 @@ export default function CreativeAnalysisView({
   previewsEnabled = false,
   currency = "GBP",
   platforms = ["meta"],
+  metaAccountId,
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -770,6 +773,7 @@ export default function CreativeAnalysisView({
           rows={filteredRows}
           currency={currency}
           tags={adTagsLookup[detailAd.adId]}
+          metaAccountId={metaAccountId}
           onClose={() => setDetailAd(null)}
         />
       )}
@@ -1101,6 +1105,7 @@ function CreativeDetailModal({
   rows,
   currency,
   tags,
+  metaAccountId,
   onClose,
 }: {
   ad: ClassifiedAd
@@ -1109,6 +1114,7 @@ function CreativeDetailModal({
   rows: Partial<MetaDailyRow>[]
   currency: string
   tags?: TagInfo[]
+  metaAccountId?: string
   onClose: () => void
 }) {
   const cls = CLASSIFICATIONS[ad.classification.type]
@@ -1141,23 +1147,25 @@ function CreativeDetailModal({
         </button>
 
         {/* Thumbnail */}
-        <div className="aspect-video bg-neutral-800 relative flex items-center justify-center">
+        <div className="bg-neutral-800 relative flex items-center justify-center overflow-hidden" style={{ minHeight: 200, maxHeight: 400 }}>
           {thumbnailUrl ? (
             <img
               src={thumbnailUrl}
               alt={ad.adName}
-              className="h-full w-full object-contain"
+              className="w-full object-contain"
+              style={{ maxHeight: 400, imageRendering: "auto" }}
+              loading="eager"
             />
           ) : (
-            <div className="text-neutral-600 text-sm">
+            <div className="text-neutral-600 text-sm py-20">
               {isVideo ? "🎬" : "🖼"} No preview
             </div>
           )}
           {/* Video play icon overlay */}
           {isVideo && thumbnailUrl && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="h-10 w-10 rounded-full bg-black/50 flex items-center justify-center backdrop-blur-sm">
-                <svg className="h-5 w-5 text-white ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+              <div className="h-12 w-12 rounded-full bg-black/50 flex items-center justify-center backdrop-blur-sm">
+                <svg className="h-6 w-6 text-white ml-0.5" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M8 5v14l11-7z" />
                 </svg>
               </div>
@@ -1188,7 +1196,9 @@ function CreativeDetailModal({
                 <p className="text-xs text-neutral-500 mt-1">{ad.adsetName}</p>
               </div>
               <a
-                href={`https://www.facebook.com/ads/library/?id=${ad.adId}`}
+                href={metaAccountId
+                  ? `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${metaAccountId}&search_value=${encodeURIComponent(ad.adName)}`
+                  : `https://www.facebook.com/ads/library/?id=${ad.adId}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-neutral-800 px-2.5 py-1.5 text-[11px] font-medium text-neutral-300 transition hover:bg-neutral-700 hover:text-white"

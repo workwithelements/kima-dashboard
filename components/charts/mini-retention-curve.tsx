@@ -120,8 +120,7 @@ export default function MiniRetentionCurve({
   // ── X-axis / tooltip labels ─────────────────────────────────
   const tooltipLabel = (idx: number) => {
     const lbl = points[idx]?.label ?? ""
-    if (lbl === "Impr.") return "Impressions"
-    if (lbl === "3s") return "3s Play"
+    if (lbl === "Views") return "Video Views"
     return lbl
   }
 
@@ -163,8 +162,7 @@ export default function MiniRetentionCurve({
       <svg
         viewBox={`0 0 ${W} ${H}`}
         className="w-full select-none"
-        style={{ height: 100 }}
-        preserveAspectRatio="none"
+        style={{ aspectRatio: `${W}/${H}` }}
         onMouseLeave={() => setHoverIdx(null)}
       >
         {/* Y-axis gridlines + labels */}

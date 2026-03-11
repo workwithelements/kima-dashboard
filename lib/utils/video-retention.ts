@@ -53,20 +53,19 @@ export function aggregateVideoMetrics(
 
 /**
  * Calculate a retention curve from aggregated video metrics.
- * Returns an array of points from impressions -> 3s -> 25% -> ... -> 100%.
- * Each point shows the percentage of original impressions retained.
+ * Returns an array of points from Video Views (3s) -> 25% -> ... -> 100%.
+ * Each point shows the percentage of video viewers (3s) retained at that milestone.
  */
 export function calculateRetentionCurve(
   metrics: VideoMetrics
 ): RetentionPoint[] {
-  const base = metrics.impressions
+  const base = metrics.threeSecViews
   if (base === 0) return []
 
   const rate = (v: number) => (v / base) * 100
 
   return [
-    { label: "Impr.", percent: 100, viewers: base },
-    { label: "3s", percent: rate(metrics.threeSecViews), viewers: metrics.threeSecViews },
+    { label: "Views", percent: 100, viewers: base },
     { label: "25%", percent: rate(metrics.p25), viewers: metrics.p25 },
     { label: "50%", percent: rate(metrics.p50), viewers: metrics.p50 },
     { label: "75%", percent: rate(metrics.p75), viewers: metrics.p75 },
@@ -96,8 +95,8 @@ export function videoKPIs(metrics: VideoMetrics) {
       ? (metrics.threeSecViews / metrics.impressions) * 100
       : 0
   const completionRate =
-    metrics.impressions > 0
-      ? (metrics.p100 / metrics.impressions) * 100
+    metrics.threeSecViews > 0
+      ? (metrics.p100 / metrics.threeSecViews) * 100
       : 0
   const holdRate =
     metrics.threeSecViews > 0
@@ -105,15 +104,15 @@ export function videoKPIs(metrics: VideoMetrics) {
       : 0
 
   // Estimate average watch % using trapezoidal integration of the retention
-  // curve (milestones at 0 %, 25 %, 50 %, 75 %, 95 %, 100 % of video duration).
+  // curve based on video views (3s), milestones at 25%, 50%, 75%, 95%, 100%.
   let avgWatchPercent = 0
-  if (metrics.impressions > 0) {
-    const imp = metrics.impressions
-    const r25 = metrics.p25 / imp
-    const r50 = metrics.p50 / imp
-    const r75 = metrics.p75 / imp
-    const r95 = metrics.p95 / imp
-    const r100 = metrics.p100 / imp
+  if (metrics.threeSecViews > 0) {
+    const base = metrics.threeSecViews
+    const r25 = metrics.p25 / base
+    const r50 = metrics.p50 / base
+    const r75 = metrics.p75 / base
+    const r95 = metrics.p95 / base
+    const r100 = metrics.p100 / base
     avgWatchPercent =
       (0.25 * (1 + r25) / 2 +
         0.25 * (r25 + r50) / 2 +

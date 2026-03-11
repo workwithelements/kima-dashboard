@@ -49,7 +49,7 @@ export default function VideoRetentionChart({ rows, selectedAds }: Props) {
 
     // Merge into unified chart data
     // Each point has: label, ad1, ad2, ...
-    const labels = ["Impr.", "3s", "25%", "50%", "75%", "95%", "100%"]
+    const labels = ["Views", "25%", "50%", "75%", "95%", "100%"]
     const chartData = labels.map((label, i) => {
       const point: Record<string, string | number> = { label }
       for (const c of curves) {
