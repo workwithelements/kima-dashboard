@@ -111,6 +111,23 @@ const HIGH_VOLUME_CONV = 8
 const HIGH_DELIVERY_SHARE = 20 // Percentage
 const VIABLE_SPEND_CEILING = 150
 
+// --- Key Action Mapping ---
+
+/** Map key_action string to the corresponding MetaDailyRow field value */
+function getConversionValue(row: Partial<MetaDailyRow>, keyAction?: string): number {
+  switch (keyAction) {
+    case "unique_link_clicks": return row.unique_link_clicks || 0
+    case "landing_page_views": return row.landing_page_views || 0
+    case "adds_to_cart": return row.adds_to_cart || 0
+    case "checkouts_initiated": return row.checkouts_initiated || 0
+    case "registrations_completed": return row.registrations_completed || 0
+    case "app_installs": return row.app_installs || 0
+    case "mobile_app_registrations": return row.mobile_app_registrations || 0
+    case "purchases":
+    default: return row.purchases || 0
+  }
+}
+
 // --- Helpers ---
 
 type AdSetMedian = {
@@ -253,7 +270,8 @@ function classifyAd(
  * Groups by ad_id to aggregate, then by adset for peer comparison.
  */
 export function classifyAllAds(
-  rows: Partial<MetaDailyRow>[]
+  rows: Partial<MetaDailyRow>[],
+  keyAction?: string
 ): ClassifiedAd[] {
   // Step 1: Aggregate rows by ad_id
   const adMap = new Map<
@@ -279,12 +297,13 @@ export function classifyAllAds(
     const adId = row.ad_id
     if (!adId) continue
 
+    const convValue = getConversionValue(row, keyAction)
     const existing = adMap.get(adId)
     if (existing) {
       existing.spend += row.spend || 0
       existing.impressions += row.impressions || 0
       existing.clicks += row.unique_link_clicks || 0
-      existing.conversions += row.purchases || 0
+      existing.conversions += convValue
       existing.revenue += row.purchase_value || 0
       existing.landingPageViews += row.landing_page_views || 0
       existing.addsToCart += row.adds_to_cart || 0
@@ -299,7 +318,7 @@ export function classifyAllAds(
         spend: row.spend || 0,
         impressions: row.impressions || 0,
         clicks: row.unique_link_clicks || 0,
-        conversions: row.purchases || 0,
+        conversions: convValue,
         revenue: row.purchase_value || 0,
         landingPageViews: row.landing_page_views || 0,
         addsToCart: row.adds_to_cart || 0,

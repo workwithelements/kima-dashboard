@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
+import { createPortal } from "react-dom"
 import Image from "next/image"
 import {
   CLASSIFICATIONS,
@@ -8,7 +9,6 @@ import {
   type ClassifiedAd,
 } from "@/lib/utils/creative-classification"
 import { FATIGUE_CONFIG } from "@/lib/utils/fatigue-detection"
-import MiniRetentionCurve from "@/components/charts/mini-retention-curve"
 import type { MetaDailyRow } from "@/lib/utils/types"
 import {
   CREATIVE_METRICS,
@@ -28,9 +28,15 @@ type Props = {
   currency?: string
   /** Per-ad tag list, keyed by ad ID */
   adTags?: Record<string, TagInfo[]>
+  /** All available tags for assignment */
+  allTags?: TagInfo[]
   onAdClick?: (ad: ClassifiedAd) => void
   /** Which metrics to display on cards (default: 6 standard metrics) */
   selectedMetrics?: CreativeMetricKey[]
+  /** Assign a tag to an ad */
+  onAssignTag?: (adId: string, tagId: string) => void
+  /** Remove a tag from an ad */
+  onRemoveTag?: (adId: string, tagId: string) => void
 }
 
 export default function CreativeCardGrid({
@@ -40,8 +46,11 @@ export default function CreativeCardGrid({
   rows,
   currency = "GBP",
   adTags = {},
+  allTags = [],
   onAdClick,
   selectedMetrics = DEFAULT_CARD_METRICS,
+  onAssignTag,
+  onRemoveTag,
 }: Props) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -51,11 +60,13 @@ export default function CreativeCardGrid({
           ad={ad}
           thumbnailUrl={thumbnails[ad.adId]}
           isVideo={videoAdIds.has(ad.adId)}
-          rows={rows}
           currency={currency}
           tags={adTags[ad.adId]}
+          allTags={allTags}
           onClick={() => onAdClick?.(ad)}
           selectedMetrics={selectedMetrics}
+          onAssignTag={onAssignTag}
+          onRemoveTag={onRemoveTag}
         />
       ))}
       {ads.length === 0 && (
@@ -71,23 +82,32 @@ function CreativeCard({
   ad,
   thumbnailUrl,
   isVideo,
-  rows,
   currency = "GBP",
   tags,
+  allTags = [],
   onClick,
   selectedMetrics,
+  onAssignTag,
+  onRemoveTag,
 }: {
   ad: ClassifiedAd
   thumbnailUrl?: string
   isVideo: boolean
-  rows: Partial<MetaDailyRow>[]
   currency?: string
   tags?: TagInfo[]
+  allTags?: TagInfo[]
   onClick?: () => void
   selectedMetrics: CreativeMetricKey[]
+  onAssignTag?: (adId: string, tagId: string) => void
+  onRemoveTag?: (adId: string, tagId: string) => void
 }) {
   const [imgError, setImgError] = useState(false)
+  const [showTagDropdown, setShowTagDropdown] = useState(false)
+  const [tagAnchor, setTagAnchor] = useState<DOMRect | null>(null)
   const cls = CLASSIFICATIONS[ad.classification.type]
+
+  const assignedTagIds = new Set((tags || []).map((t) => t.id))
+  const unassignedTags = allTags.filter((t) => !assignedTagIds.has(t.id))
 
   return (
     <div
@@ -108,7 +128,7 @@ function CreativeCard({
           />
         ) : (
           <div className="text-neutral-600 text-xs text-center px-4">
-            {isVideo ? "🎬" : "🖼"} No preview
+            {isVideo ? "\ud83c\udfa5" : "\ud83d\uddbc"} No preview
           </div>
         )}
 
@@ -153,19 +173,58 @@ function CreativeCard({
           >
             {ad.adsetName}
           </p>
-          {tags && tags.length > 0 && (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {tags.map((tag) => (
-                <span
-                  key={tag.id}
-                  className="inline-block rounded-full px-1.5 py-px text-[9px] font-medium text-black"
-                  style={{ backgroundColor: tag.color }}
-                >
-                  {tag.name}
-                </span>
-              ))}
-            </div>
-          )}
+          {/* Tags with assignment */}
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            {tags && tags.map((tag) => (
+              <span
+                key={tag.id}
+                className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-px text-[9px] font-medium text-black"
+                style={{ backgroundColor: tag.color }}
+              >
+                {tag.name}
+                {onRemoveTag && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onRemoveTag(ad.adId, tag.id)
+                    }}
+                    className="ml-0.5 opacity-60 hover:opacity-100"
+                    title="Remove tag"
+                  >
+                    &times;
+                  </button>
+                )}
+              </span>
+            ))}
+            {onAssignTag && allTags.length > 0 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setTagAnchor(e.currentTarget.getBoundingClientRect())
+                  setShowTagDropdown((v) => !v)
+                }}
+                className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-neutral-700 text-[10px] text-neutral-500 transition hover:border-neutral-500 hover:text-neutral-300"
+                title="Add tag"
+              >
+                +
+              </button>
+            )}
+            {showTagDropdown && tagAnchor && (
+              <CardTagDropdown
+                tags={unassignedTags}
+                onSelect={(tagId) => {
+                  onAssignTag?.(ad.adId, tagId)
+                  setShowTagDropdown(false)
+                  setTagAnchor(null)
+                }}
+                onClose={() => {
+                  setShowTagDropdown(false)
+                  setTagAnchor(null)
+                }}
+                anchorRect={tagAnchor}
+              />
+            )}
+          </div>
         </div>
 
         {/* Primary metrics — dynamic based on selectedMetrics */}
@@ -181,17 +240,69 @@ function CreativeCard({
             )
           })}
         </div>
-
-        {/* Inline video retention curve */}
-        {isVideo && (
-          <div className="border-t border-neutral-800 pt-2">
-            <p className="text-[10px] text-neutral-500 mb-1">Video Retention</p>
-            <MiniRetentionCurve rows={rows} adId={ad.adId} />
-          </div>
-        )}
       </div>
     </div>
   )
+}
+
+/** Portal-based tag dropdown for card grid (escapes overflow clipping) */
+function CardTagDropdown({
+  tags,
+  onSelect,
+  onClose,
+  anchorRect,
+}: {
+  tags: TagInfo[]
+  onSelect: (tagId: string) => void
+  onClose: () => void
+  anchorRect: DOMRect
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClick(e: globalThis.MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        onClose()
+      }
+    }
+    document.addEventListener("mousedown", handleClick)
+    return () => document.removeEventListener("mousedown", handleClick)
+  }, [onClose])
+
+  const style: React.CSSProperties = {
+    position: "fixed",
+    top: Math.min(anchorRect.bottom + 4, window.innerHeight - 200),
+    left: Math.min(anchorRect.left, window.innerWidth - 170),
+    zIndex: 50,
+  }
+
+  const content =
+    tags.length === 0 ? (
+      <div ref={ref} className="w-36 rounded-lg border border-neutral-700 bg-neutral-800 p-2 shadow-xl" style={style}>
+        <p className="text-xs text-neutral-500">No more tags</p>
+      </div>
+    ) : (
+      <div ref={ref} className="w-40 rounded-lg border border-neutral-700 bg-neutral-800 py-1 shadow-xl" style={style}>
+        {tags.map((tag) => (
+          <button
+            key={tag.id}
+            onClick={(e) => {
+              e.stopPropagation()
+              onSelect(tag.id)
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-neutral-300 transition hover:bg-neutral-700"
+          >
+            <span
+              className="inline-block h-2.5 w-2.5 rounded-full"
+              style={{ backgroundColor: tag.color }}
+            />
+            {tag.name}
+          </button>
+        ))}
+      </div>
+    )
+
+  return createPortal(content, document.body)
 }
 
 function MetricItem({ label, value }: { label: string; value: string }) {

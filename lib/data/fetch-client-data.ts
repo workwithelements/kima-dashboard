@@ -269,9 +269,9 @@ export async function fetchCreativeData(
 
   if (!client) return null
 
-  // Fetch performance rows, thumbnails, and config in parallel
+  // Fetch performance rows, thumbnails, config, and breakdowns in parallel
   // meta_ad_metadata may not exist yet — wrap in catch to be safe
-  const [perfResult, thumbResult, configResult] = await Promise.all([
+  const [perfResult, thumbResult, configResult, demoResult, placementResult] = await Promise.all([
     supabase
       .from("meta_daily_performance")
       .select(PERF_COLUMNS)
@@ -288,9 +288,25 @@ export async function fetchCreativeData(
     ).catch(() => ({ data: [] as any[] })),
     supabase
       .from("client_scorecard_config")
-      .select("creative_previews_enabled")
+      .select("creative_previews_enabled, key_action")
       .eq("client_id", clientId)
       .single(),
+    Promise.resolve(
+      supabase
+        .from("meta_daily_demographics")
+        .select(DEMO_COLUMNS)
+        .eq("client_id", clientId)
+        .gte("date", from)
+        .lte("date", to)
+    ).then(r => (r.data || []) as MetaDemographicsRow[]).catch(() => [] as MetaDemographicsRow[]),
+    Promise.resolve(
+      supabase
+        .from("meta_daily_placements")
+        .select(PLACEMENT_COLUMNS)
+        .eq("client_id", clientId)
+        .gte("date", from)
+        .lte("date", to)
+    ).then(r => (r.data || []) as MetaPlacementsRow[]).catch(() => [] as MetaPlacementsRow[]),
   ])
 
   // Build thumbnail map: ad_id -> url
@@ -302,12 +318,16 @@ export async function fetchCreativeData(
   }
 
   const previewsEnabled = configResult.data?.creative_previews_enabled ?? false
+  const keyAction = configResult.data?.key_action ?? undefined
 
   return {
     client,
     rows: perfResult.data || [],
     thumbnails,
     previewsEnabled,
+    keyAction,
+    demographics: demoResult,
+    placements: placementResult,
   }
 }
 

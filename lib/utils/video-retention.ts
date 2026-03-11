@@ -62,7 +62,7 @@ export function calculateRetentionCurve(
   const base = metrics.threeSecViews
   if (base === 0) return []
 
-  const rate = (v: number) => (v / base) * 100
+  const rate = (v: number) => Math.min((v / base) * 100, 100)
 
   return [
     { label: "Views", percent: 100, viewers: base },
@@ -108,11 +108,11 @@ export function videoKPIs(metrics: VideoMetrics) {
   let avgWatchPercent = 0
   if (metrics.threeSecViews > 0) {
     const base = metrics.threeSecViews
-    const r25 = metrics.p25 / base
-    const r50 = metrics.p50 / base
-    const r75 = metrics.p75 / base
-    const r95 = metrics.p95 / base
-    const r100 = metrics.p100 / base
+    const r25 = Math.min(metrics.p25 / base, 1)
+    const r50 = Math.min(metrics.p50 / base, 1)
+    const r75 = Math.min(metrics.p75 / base, 1)
+    const r95 = Math.min(metrics.p95 / base, 1)
+    const r100 = Math.min(metrics.p100 / base, 1)
     avgWatchPercent =
       (0.25 * (1 + r25) / 2 +
         0.25 * (r25 + r50) / 2 +

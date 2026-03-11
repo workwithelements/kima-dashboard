@@ -36,7 +36,7 @@ import {
 import { isVideoAd } from "@/lib/utils/video-retention"
 import { detectFatigueAll, FATIGUE_CONFIG } from "@/lib/utils/fatigue-detection"
 import { calculateConcentration, CONCENTRATION_COLORS } from "@/lib/utils/spend-concentration"
-import type { MetaDailyRow, AdPlatform } from "@/lib/utils/types"
+import type { MetaDailyRow, AdPlatform, MetaDemographicsRow, MetaPlacementsRow } from "@/lib/utils/types"
 import type { DatePreset } from "@/lib/utils/dates"
 import PlatformSelector, { type PlatformView } from "@/components/ui/platform-selector"
 
@@ -55,6 +55,12 @@ type Props = {
   platforms?: AdPlatform[]
   /** Meta ad account ID for Ads Manager links */
   metaAccountId?: string
+  /** Key action from scorecard config — drives classification conversion metric */
+  keyAction?: string
+  /** Per-ad demographic breakdown rows */
+  demographics?: MetaDemographicsRow[]
+  /** Per-ad placement breakdown rows */
+  placements?: MetaPlacementsRow[]
 }
 
 type SortKey =
@@ -89,6 +95,9 @@ export default function CreativeAnalysisView({
   currency = "GBP",
   platforms = ["meta"],
   metaAccountId,
+  keyAction,
+  demographics = [],
+  placements = [],
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -216,8 +225,8 @@ export default function CreativeAnalysisView({
 
   // Classify all ads
   const classifiedAds = useMemo(
-    () => classifyAllAds(filteredRows),
-    [filteredRows]
+    () => classifyAllAds(filteredRows, keyAction),
+    [filteredRows, keyAction]
   )
 
   // Fatigue detection
@@ -528,20 +537,26 @@ export default function CreativeAnalysisView({
                   <button
                     key={type}
                     onClick={() => toggleFilter(type)}
-                    className="relative flex items-center justify-center transition-opacity hover:opacity-80"
+                    className="group relative flex items-center justify-center transition-opacity hover:opacity-80"
                     style={{
                       width: `${pct}%`,
                       backgroundColor: def.color,
                       minWidth: count > 0 ? "24px" : 0,
                       opacity: activeFilters.size === 0 || activeFilters.has(type) ? 1 : 0.3,
                     }}
-                    title={`${def.label}: ${count} (${pct.toFixed(0)}%)`}
                   >
                     {pct > 8 && (
                       <span className="text-xs font-medium text-black">
                         {count}
                       </span>
                     )}
+                    {/* Tooltip */}
+                    <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
+                      <p className="text-xs font-semibold text-neutral-100">{def.label}</p>
+                      <p className="text-[10px] text-neutral-400 mt-0.5">{def.description}</p>
+                      <p className="text-[10px] text-neutral-500 mt-0.5">{count} creative{count !== 1 ? "s" : ""} ({pct.toFixed(0)}%)</p>
+                      <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-neutral-700" />
+                    </div>
                   </button>
                 )
               })}
@@ -552,11 +567,12 @@ export default function CreativeAnalysisView({
                 const count = counts[type]
                 if (count === 0) return null
                 const def = CLASSIFICATIONS[type]
+                const pct = (count / totalCreatives) * 100
                 return (
                   <button
                     key={type}
                     onClick={() => toggleFilter(type)}
-                    className={`flex items-center gap-1.5 text-xs transition-opacity ${
+                    className={`group relative flex items-center gap-1.5 text-xs transition-opacity ${
                       activeFilters.size === 0 || activeFilters.has(type)
                         ? "opacity-100"
                         : "opacity-40"
@@ -569,6 +585,13 @@ export default function CreativeAnalysisView({
                     <span className="text-neutral-300">
                       {def.label} ({count})
                     </span>
+                    {/* Tooltip */}
+                    <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
+                      <p className="text-xs font-semibold text-neutral-100">{def.label}</p>
+                      <p className="text-[10px] text-neutral-400 mt-0.5">{def.description}</p>
+                      <p className="text-[10px] text-neutral-500 mt-0.5">{count} creative{count !== 1 ? "s" : ""} ({pct.toFixed(0)}%)</p>
+                      <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-neutral-700" />
+                    </div>
                   </button>
                 )
               })}
@@ -695,8 +718,11 @@ export default function CreativeAnalysisView({
                     rows={filteredRows}
                     currency={currency}
                     adTags={adTagsLookup}
+                    allTags={tags}
                     onAdClick={setDetailAd}
                     selectedMetrics={cardMetrics}
+                    onAssignTag={assignTag}
+                    onRemoveTag={removeTag}
                   />
                 ) : (
                   <CreativeTableInline
@@ -728,8 +754,11 @@ export default function CreativeAnalysisView({
             rows={filteredRows}
             currency={currency}
             adTags={adTagsLookup}
+            allTags={tags}
             onAdClick={setDetailAd}
             selectedMetrics={cardMetrics}
+            onAssignTag={assignTag}
+            onRemoveTag={removeTag}
           />
         ) : (
           <CreativeTableInline
@@ -774,6 +803,8 @@ export default function CreativeAnalysisView({
           currency={currency}
           tags={adTagsLookup[detailAd.adId]}
           metaAccountId={metaAccountId}
+          demographics={demographics}
+          placements={placements}
           onClose={() => setDetailAd(null)}
         />
       )}
@@ -1106,6 +1137,8 @@ function CreativeDetailModal({
   currency,
   tags,
   metaAccountId,
+  demographics = [],
+  placements = [],
   onClose,
 }: {
   ad: ClassifiedAd
@@ -1115,6 +1148,8 @@ function CreativeDetailModal({
   currency: string
   tags?: TagInfo[]
   metaAccountId?: string
+  demographics?: MetaDemographicsRow[]
+  placements?: MetaPlacementsRow[]
   onClose: () => void
 }) {
   const cls = CLASSIFICATIONS[ad.classification.type]
@@ -1253,10 +1288,155 @@ function CreativeDetailModal({
               <p className="text-xs text-neutral-300">{ad.fatigueReason}</p>
             </div>
           )}
+
+          {/* Placement breakdown */}
+          <AdPlacementBreakdown placements={placements} adId={ad.adId} currency={currency} />
+
+          {/* Demographic breakdown */}
+          <AdDemographicBreakdown demographics={demographics} adId={ad.adId} currency={currency} />
         </div>
       </div>
     </div>,
     document.body
+  )
+}
+
+/** Placement breakdown for a single ad in the detail modal */
+function AdPlacementBreakdown({
+  placements,
+  adId,
+  currency,
+}: {
+  placements: MetaPlacementsRow[]
+  adId: string
+  currency: string
+}) {
+  const adPlacements = placements.filter((p) => p.ad_id === adId)
+  if (adPlacements.length === 0) return null
+
+  // Aggregate by platform + position
+  const agg = new Map<string, { spend: number; impressions: number; clicks: number }>()
+  for (const p of adPlacements) {
+    const key = `${p.publisher_platform || "unknown"} · ${p.platform_position || "unknown"}`
+    const existing = agg.get(key) || { spend: 0, impressions: 0, clicks: 0 }
+    existing.spend += p.spend || 0
+    existing.impressions += p.impressions || 0
+    existing.clicks += p.unique_link_clicks || 0
+    agg.set(key, existing)
+  }
+
+  const sorted = Array.from(agg.entries()).sort((a, b) => b[1].spend - a[1].spend)
+  const maxSpend = sorted[0]?.[1].spend || 1
+
+  return (
+    <div className="border-t border-neutral-800 pt-3">
+      <p className="text-xs text-neutral-500 mb-2">Placement Breakdown</p>
+      <div className="space-y-1.5">
+        {sorted.slice(0, 8).map(([key, data]) => (
+          <div key={key}>
+            <div className="flex items-center justify-between text-[10px] mb-0.5">
+              <span className="text-neutral-300 truncate mr-2">{key}</span>
+              <span className="text-neutral-400 tabular-nums shrink-0">
+                {fmtCurrency(data.spend, currency)}
+              </span>
+            </div>
+            <div className="h-1.5 rounded-full bg-neutral-800 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-blue-500/60"
+                style={{ width: `${(data.spend / maxSpend) * 100}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** Demographic breakdown for a single ad in the detail modal */
+function AdDemographicBreakdown({
+  demographics,
+  adId,
+  currency,
+}: {
+  demographics: MetaDemographicsRow[]
+  adId: string
+  currency: string
+}) {
+  const adDemo = demographics.filter((d) => d.ad_id === adId)
+  if (adDemo.length === 0) return null
+
+  // Aggregate by age group
+  const ageGroups = new Map<string, { male: number; female: number; unknown: number }>()
+  for (const d of adDemo) {
+    const age = d.age || "Unknown"
+    const existing = ageGroups.get(age) || { male: 0, female: 0, unknown: 0 }
+    const spend = d.spend || 0
+    if (d.gender === "male") existing.male += spend
+    else if (d.gender === "female") existing.female += spend
+    else existing.unknown += spend
+    ageGroups.set(age, existing)
+  }
+
+  // Sort by standard age order
+  const ageOrder = ["13-17", "18-24", "25-34", "35-44", "45-54", "55-64", "65+"]
+  const sorted = Array.from(ageGroups.entries()).sort((a, b) => {
+    const ia = ageOrder.indexOf(a[0])
+    const ib = ageOrder.indexOf(b[0])
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
+  })
+
+  const maxTotal = Math.max(...sorted.map(([, d]) => d.male + d.female + d.unknown), 1)
+
+  return (
+    <div className="border-t border-neutral-800 pt-3">
+      <p className="text-xs text-neutral-500 mb-2">Demographic Breakdown</p>
+      <div className="space-y-1.5">
+        {sorted.map(([age, data]) => {
+          const total = data.male + data.female + data.unknown
+          return (
+            <div key={age}>
+              <div className="flex items-center justify-between text-[10px] mb-0.5">
+                <span className="text-neutral-300 w-10">{age}</span>
+                <span className="text-neutral-400 tabular-nums">{fmtCurrency(total, currency)}</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-neutral-800 overflow-hidden flex">
+                {data.male > 0 && (
+                  <div
+                    className="h-full bg-blue-500/70"
+                    style={{ width: `${(data.male / maxTotal) * 100}%` }}
+                    title={`Male: ${fmtCurrency(data.male, currency)}`}
+                  />
+                )}
+                {data.female > 0 && (
+                  <div
+                    className="h-full bg-pink-500/70"
+                    style={{ width: `${(data.female / maxTotal) * 100}%` }}
+                    title={`Female: ${fmtCurrency(data.female, currency)}`}
+                  />
+                )}
+                {data.unknown > 0 && (
+                  <div
+                    className="h-full bg-neutral-600/70"
+                    style={{ width: `${(data.unknown / maxTotal) * 100}%` }}
+                    title={`Unknown: ${fmtCurrency(data.unknown, currency)}`}
+                  />
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {/* Legend */}
+      <div className="flex items-center gap-3 mt-2">
+        <div className="flex items-center gap-1 text-[10px] text-neutral-400">
+          <span className="inline-block h-2 w-2 rounded-sm bg-blue-500/70" /> Male
+        </div>
+        <div className="flex items-center gap-1 text-[10px] text-neutral-400">
+          <span className="inline-block h-2 w-2 rounded-sm bg-pink-500/70" /> Female
+        </div>
+      </div>
+    </div>
   )
 }
 
