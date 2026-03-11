@@ -46,9 +46,9 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     return <PasswordGate slug={slug} clientName={client.name} />
   }
 
-  // Date range — default to last 30 days
-  const preset = searchParams.preset || "last_30d"
-  let from = searchParams.from || daysAgo(29)
+  // Date range — default to month-to-date
+  const preset = searchParams.preset || "this_month"
+  let from = searchParams.from || monthStart()
   let to = searchParams.to || today()
 
   if (preset === "last_7d") {

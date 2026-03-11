@@ -6,15 +6,30 @@ import SpendChart from "@/components/charts/spend-chart"
 import ClientsOverviewTable from "@/components/tables/clients-overview-table"
 import { aggregateMetrics, deriveMetrics, dailySpendSeries } from "@/lib/utils/aggregate"
 import { fmtCurrency, fmtNumber, fmtRoas } from "@/lib/utils/format"
-import { daysAgo, today, monthStart } from "@/lib/utils/dates"
+import { getPresetRange } from "@/lib/utils/dates"
+import type { DatePreset } from "@/lib/utils/dates"
 import { FUNNEL_STEP_DEFS } from "@/lib/utils/funnel-steps"
+import OverviewDatePicker from "@/components/ui/overview-date-picker"
 
-export default async function DashboardPage() {
+type Props = {
+  searchParams: {
+    preset?: string
+    from?: string
+    to?: string
+  }
+}
+
+export default async function DashboardPage({ searchParams }: Props) {
   const supabase = createServiceClient()
 
-  const mtdFrom = monthStart()
-  const chartFrom = daysAgo(29)
-  const toDate = today()
+  // Resolve date range from search params — default to this_month
+  const preset = (searchParams.preset || "this_month") as DatePreset
+  const range = searchParams.from && searchParams.to
+    ? { from: searchParams.from, to: searchParams.to }
+    : getPresetRange(preset)
+
+  const fromDate = range.from
+  const toDate = range.to
 
   // Fetch clients, scorecard configs, and performance data in parallel
   const [clientsResult, configResult, perfResult] = await Promise.all([
@@ -31,7 +46,7 @@ export default async function DashboardPage() {
       .select(
         "date, client_id, spend, impressions, reach, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, checkouts_initiated, purchases, purchase_value, app_installs"
       )
-      .gte("date", chartFrom)
+      .gte("date", fromDate)
       .lte("date", toDate)
       .order("date"),
   ])
@@ -47,18 +62,15 @@ export default async function DashboardPage() {
     keyActionMap[cfg.client_id] = steps?.[0] || null
   }
 
-  // Split rows: MTD for KPIs + table, full 30d for chart + sparklines
-  const mtdRows = allRows.filter((r) => r.date >= mtdFrom)
-
-  // MTD totals for KPI cards
-  const totals = aggregateMetrics(mtdRows)
+  // Totals for KPI cards (same date range as chart)
+  const totals = aggregateMetrics(allRows)
   const derived = deriveMetrics(totals)
   const cpmr = totals.reach > 0 ? (totals.spend / totals.reach) * 1000 : 0
 
-  // Spend chart data (last 30 days)
-  const spendData = dailySpendSeries(allRows, chartFrom, toDate)
+  // Spend chart data
+  const spendData = dailySpendSeries(allRows, fromDate, toDate)
 
-  // Per-client MTD aggregation (spend + all funnel step columns)
+  // Per-client aggregation (spend + all funnel step columns)
   const STEP_COLS = [
     "unique_link_clicks",
     "landing_page_views",
@@ -70,7 +82,7 @@ export default async function DashboardPage() {
   ] as const
 
   const clientAgg: Record<string, Record<string, number>> = {}
-  for (const row of mtdRows) {
+  for (const row of allRows) {
     const cid = row.client_id
     if (!cid) continue
     if (!clientAgg[cid]) clientAgg[cid] = { spend: 0 }
@@ -80,7 +92,7 @@ export default async function DashboardPage() {
     }
   }
 
-  // Per-client daily spend for sparklines (last 30 days)
+  // Per-client daily spend for sparklines
   const clientDailySpend: Record<string, Record<string, number>> = {}
   for (const row of allRows) {
     const cid = row.client_id
@@ -100,7 +112,7 @@ export default async function DashboardPage() {
     const keyActionCount = keyActionKey ? (agg[keyActionKey] || 0) : 0
     const costPerKeyAction = keyActionCount > 0 ? spend / keyActionCount : 0
 
-    // Build sparkline data (sorted daily spend over last 30d)
+    // Build sparkline data (sorted daily spend)
     const dailyMap = clientDailySpend[c.id] || {}
     const dailySpend = Object.entries(dailyMap)
       .sort(([a], [b]) => a.localeCompare(b))
@@ -117,13 +129,26 @@ export default async function DashboardPage() {
     }
   })
 
+  // Preset label for subtitle
+  const presetLabels: Record<string, string> = {
+    today: "Today",
+    last_7d: "Last 7 days",
+    last_30d: "Last 30 days",
+    this_month: "Month to date",
+    last_month: "Last month",
+  }
+  const rangeLabel = presetLabels[preset] || `${fromDate} — ${toDate}`
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Dashboard</h1>
-        <p className="text-sm text-neutral-400">
-          Month to date &middot; All clients &middot; Meta Ads
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Dashboard</h1>
+          <p className="text-sm text-neutral-400">
+            {rangeLabel} &middot; All clients &middot; Meta Ads
+          </p>
+        </div>
+        <OverviewDatePicker preset={preset} />
       </div>
 
       {/* Top-level KPIs */}
@@ -143,7 +168,7 @@ export default async function DashboardPage() {
       {/* Spend chart */}
       <Card>
         <h2 className="mb-4 text-sm font-medium text-neutral-400">
-          Daily Spend (Last 30 Days)
+          Daily Spend
         </h2>
         <SpendChart data={spendData} />
       </Card>

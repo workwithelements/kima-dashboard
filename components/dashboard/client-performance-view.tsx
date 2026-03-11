@@ -203,22 +203,31 @@ export default function ClientPerformanceView({
 
   const compDerived = useMemo(() => deriveMetrics(compMetrics), [compMetrics])
 
-  // Net New Reach (Meta only)
-  const netNewReach = useMemo(() => {
+  // Avg Daily New Reach (Meta only)
+  const numDays = useMemo(() => {
+    const start = new Date(from + "T00:00:00")
+    const end = new Date(to + "T00:00:00")
+    return Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1)
+  }, [from, to])
+
+  const avgDailyNewReach = useMemo(() => {
     if (!isMeta && !isAll) return 0
     const dailyRows = filteredRows
       .filter((r) => r.reach != null)
       .map((r) => ({ reach: r.reach || 0, impressions: r.impressions || 0 }))
-    return calculateNetNewReach(dailyRows, baselineReach)
-  }, [filteredRows, baselineReach, platform])
+    const total = calculateNetNewReach(dailyRows, baselineReach)
+    return Math.round(total / numDays)
+  }, [filteredRows, baselineReach, platform, numDays])
 
-  const compNetNewReach = useMemo(() => {
+  const compAvgDailyNewReach = useMemo(() => {
     if (!isMeta || compareType === "none" || filteredCompRows.length === 0) return 0
     const dailyRows = filteredCompRows
       .filter((r) => r.reach != null)
       .map((r) => ({ reach: r.reach || 0, impressions: r.impressions || 0 }))
-    return calculateNetNewReach(dailyRows, 0)
-  }, [filteredCompRows, compareType, platform])
+    const total = calculateNetNewReach(dailyRows, 0)
+    // Use same numDays for comparison (approximate)
+    return Math.round(total / numDays)
+  }, [filteredCompRows, compareType, platform, numDays])
 
   // Chart data — daily spend series
   const spendSeries = useMemo(() => {
@@ -473,9 +482,9 @@ export default function ClientPerformanceView({
         />
         {showReach ? (
           <MetricCard
-            label="Net New Reach"
-            value={fmtNumber(netNewReach)}
-            delta={delta(netNewReach, compNetNewReach)}
+            label="Avg. Daily New Reach"
+            value={fmtNumber(avgDailyNewReach)}
+            delta={delta(avgDailyNewReach, compAvgDailyNewReach)}
           />
         ) : (
           <MetricCard
@@ -683,7 +692,7 @@ export default function ClientPerformanceView({
           onClick={() => setBreakdownOpen((v) => !v)}
           className="flex w-full items-center justify-between"
         >
-          <h2 className="text-sm font-medium text-neutral-400">Breakdown</h2>
+          <h2 className="text-sm font-medium text-neutral-400">Overview</h2>
           <svg
             className={`h-4 w-4 text-neutral-500 transition-transform ${breakdownOpen ? "rotate-180" : ""}`}
             fill="none"
@@ -722,6 +731,7 @@ export default function ClientPerformanceView({
           currency={currency}
           selectedAdSets={selectedAdSets}
           allAdSets={adsets.length}
+          funnelSteps={funnelSteps}
         />
       )}
 
@@ -757,21 +767,54 @@ type BreakdownsSectionProps = {
   currency: string
   selectedAdSets: string[]
   allAdSets: number
+  funnelSteps: string[]
 }
 
-type DemoAgg = {
+/** Fields available in demographics/placements breakdown data */
+const BREAKDOWN_AVAILABLE_FIELDS = new Set([
+  "spend", "impressions", "reach", "unique_link_clicks", "landing_page_views", "purchases", "purchase_value",
+])
+
+type BreakdownAgg = {
   spend: number
   impressions: number
   purchases: number
   purchase_value: number
   unique_link_clicks: number
+  landing_page_views: number
+  reach: number
 }
 
-const BREAKDOWN_METRIC_OPTIONS: { value: "spend" | "impressions" | "purchases"; label: string }[] = [
-  { value: "spend", label: "Spend" },
-  { value: "impressions", label: "Impressions" },
-  { value: "purchases", label: "Purchases" },
-]
+const EMPTY_BREAKDOWN_AGG: BreakdownAgg = {
+  spend: 0, impressions: 0, purchases: 0, purchase_value: 0,
+  unique_link_clicks: 0, landing_page_views: 0, reach: 0,
+}
+
+/** Breakdown metric options — always show Spend + Impressions, plus any funnel steps available in breakdown data */
+function getBreakdownMetricOptions(funnelSteps: string[]): { value: string; label: string }[] {
+  const options: { value: string; label: string }[] = [
+    { value: "spend", label: "Spend" },
+    { value: "impressions", label: "Impressions" },
+  ]
+  for (const stepKey of funnelSteps) {
+    if (BREAKDOWN_AVAILABLE_FIELDS.has(stepKey)) {
+      const def = FUNNEL_STEP_DEFS[stepKey]
+      if (def && !options.some(o => o.value === stepKey)) {
+        options.push({ value: stepKey, label: def.label })
+      }
+    }
+  }
+  // Always include purchases if not already (from funnel)
+  if (!options.some(o => o.value === "purchases")) {
+    options.push({ value: "purchases", label: "Purchases" })
+  }
+  return options
+}
+
+/** Get the raw field name from a breakdown row given a metric key */
+function getBreakdownValue(row: Record<string, any>, metricKey: string): number {
+  return (row[metricKey] || 0) as number
+}
 
 function BreakdownsSection({
   demographics,
@@ -783,6 +826,7 @@ function BreakdownsSection({
   currency,
   selectedAdSets,
   allAdSets,
+  funnelSteps,
 }: BreakdownsSectionProps) {
   // Sidebar state for showing top ads per breakdown dimension
   const [sidebarData, setSidebarData] = useState<{
@@ -790,6 +834,15 @@ function BreakdownsSection({
     metric: string
     ads: AdEntry[]
   } | null>(null)
+
+  // Build metric options based on funnel steps
+  const metricOptions = useMemo(() => getBreakdownMetricOptions(funnelSteps), [funnelSteps])
+
+  // Get the funnel steps that are available in breakdown data
+  const availableFunnelSteps = useMemo(
+    () => funnelSteps.filter(s => BREAKDOWN_AVAILABLE_FIELDS.has(s)),
+    [funnelSteps]
+  )
 
   // Filter breakdowns by selected ad sets
   const filteredDemographics = useMemo(() => {
@@ -804,66 +857,75 @@ function BreakdownsSection({
 
   // Demographics summary table
   const demoTable = useMemo(() => {
-    const agg = new Map<string, DemoAgg>()
+    const agg = new Map<string, BreakdownAgg>()
     for (const r of filteredDemographics) {
       const key = `${r.age}|${r.gender}`
-      const existing = agg.get(key) || { spend: 0, impressions: 0, purchases: 0, purchase_value: 0, unique_link_clicks: 0 }
+      const existing = agg.get(key) || { ...EMPTY_BREAKDOWN_AGG }
       existing.spend += r.spend || 0
       existing.impressions += r.impressions || 0
       existing.purchases += r.purchases || 0
       existing.purchase_value += r.purchase_value || 0
       existing.unique_link_clicks += r.unique_link_clicks || 0
+      existing.landing_page_views += r.landing_page_views || 0
+      existing.reach += r.reach || 0
       agg.set(key, existing)
     }
     return Array.from(agg.entries())
       .map(([key, vals]) => {
         const [age, gender] = key.split("|")
-        const cpa = vals.purchases > 0 ? vals.spend / vals.purchases : null
-        const roas = vals.spend > 0 ? vals.purchase_value / vals.spend : 0
-        const ctr = vals.impressions > 0 ? (vals.unique_link_clicks / vals.impressions) * 100 : 0
-        return { age, gender, ...vals, cpa, roas, ctr }
+        return { age, gender, ...vals }
       })
       .sort((a, b) => b.spend - a.spend)
   }, [filteredDemographics])
 
   // Placements summary table
   const placementTable = useMemo(() => {
-    const agg = new Map<string, DemoAgg & { platform: string; position: string }>()
+    const agg = new Map<string, BreakdownAgg & { platform: string; position: string }>()
     for (const r of filteredPlacements) {
       const key = `${r.publisher_platform}|${r.platform_position}`
       const existing = agg.get(key) || {
         platform: r.publisher_platform,
         position: r.platform_position,
-        spend: 0, impressions: 0, purchases: 0, purchase_value: 0, unique_link_clicks: 0,
+        ...EMPTY_BREAKDOWN_AGG,
       }
       existing.spend += r.spend || 0
       existing.impressions += r.impressions || 0
       existing.purchases += r.purchases || 0
       existing.purchase_value += r.purchase_value || 0
       existing.unique_link_clicks += r.unique_link_clicks || 0
+      existing.landing_page_views += r.landing_page_views || 0
+      existing.reach += r.reach || 0
       agg.set(key, existing)
     }
     return Array.from(agg.values())
-      .map((vals) => {
-        const cpm = vals.impressions > 0 ? (vals.spend / vals.impressions) * 1000 : 0
-        const cpa = vals.purchases > 0 ? vals.spend / vals.purchases : null
-        return { ...vals, cpm, cpa }
-      })
       .sort((a, b) => b.spend - a.spend)
   }, [filteredPlacements])
 
   const fmtPlatform = (s: string) =>
     s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
 
-  const metricLabel = metric === "spend" ? "Spend" : metric === "impressions" ? "Impressions" : "Purchases"
+  const metricLabel = metricOptions.find(o => o.value === metric)?.label || metric
+
+  // Helper: compute derived metrics for a breakdown row
+  function deriveBreakdown(vals: BreakdownAgg) {
+    return {
+      ctr: vals.impressions > 0 ? (vals.unique_link_clicks / vals.impressions) * 100 : 0,
+      cpm: vals.impressions > 0 ? (vals.spend / vals.impressions) * 1000 : 0,
+      cpc: vals.unique_link_clicks > 0 ? vals.spend / vals.unique_link_clicks : null,
+      cpa: vals.purchases > 0 ? vals.spend / vals.purchases : null,
+      roas: vals.spend > 0 ? vals.purchase_value / vals.spend : 0,
+      landingRate: vals.impressions > 0 ? (vals.landing_page_views / vals.impressions) * 100 : 0,
+      convRate: vals.unique_link_clicks > 0 ? (vals.purchases / vals.unique_link_clicks) * 100 : 0,
+    }
+  }
 
   // Build ads sidebar from a subset of breakdown rows
-  function buildAdEntries(rows: { ad_id?: string; ad_name?: string; spend?: number; impressions?: number; purchases?: number }[]): AdEntry[] {
+  function buildAdEntries(rows: Record<string, any>[]): AdEntry[] {
     const agg = new Map<string, { name: string; value: number }>()
     for (const r of rows) {
       if (!r.ad_id) continue
       const existing = agg.get(r.ad_id) || { name: r.ad_name || r.ad_id, value: 0 }
-      existing.value += (r[metric] || 0)
+      existing.value += getBreakdownValue(r, metric)
       agg.set(r.ad_id, existing)
     }
     const entries = Array.from(agg.entries())
@@ -894,6 +956,63 @@ function BreakdownsSection({
     })
   }
 
+  /** Build dynamic table columns based on funnel steps */
+  function renderFunnelColumns(vals: BreakdownAgg, derived: ReturnType<typeof deriveBreakdown>) {
+    const cols: React.ReactNode[] = []
+    for (const stepKey of availableFunnelSteps) {
+      const def = FUNNEL_STEP_DEFS[stepKey]
+      if (!def) continue
+      const count = getBreakdownValue(vals, stepKey)
+      const costPer = count > 0 ? vals.spend / count : null
+      cols.push(
+        <td key={`${stepKey}-count`} className="py-2 pr-4 text-right text-neutral-300">
+          {fmtNumber(count)}
+        </td>
+      )
+      cols.push(
+        <td key={`${stepKey}-cost`} className="py-2 pr-4 text-right text-neutral-300">
+          {costPer !== null ? fmtCurrency(costPer, currency) : "—"}
+        </td>
+      )
+    }
+    // Always show ROAS at the end if purchases are in the funnel
+    if (availableFunnelSteps.includes("purchases")) {
+      cols.push(
+        <td key="roas" className="py-2 text-right text-neutral-300">
+          {derived.roas.toFixed(2)}x
+        </td>
+      )
+    }
+    return cols
+  }
+
+  /** Build dynamic table headers based on funnel steps */
+  function renderFunnelHeaders() {
+    const headers: React.ReactNode[] = []
+    for (const stepKey of availableFunnelSteps) {
+      const def = FUNNEL_STEP_DEFS[stepKey]
+      if (!def) continue
+      headers.push(
+        <th key={`${stepKey}-count`} className="pb-2 pr-4 font-medium text-right">
+          {def.label}
+        </th>
+      )
+      headers.push(
+        <th key={`${stepKey}-cost`} className="pb-2 pr-4 font-medium text-right">
+          {def.costLabel}
+        </th>
+      )
+    }
+    if (availableFunnelSteps.includes("purchases")) {
+      headers.push(
+        <th key="roas" className="pb-2 font-medium text-right">
+          ROAS
+        </th>
+      )
+    }
+    return headers
+  }
+
   return (
     <Card>
       {/* Header with tabs + metric selector */}
@@ -919,10 +1038,10 @@ function BreakdownsSection({
 
         <select
           value={metric}
-          onChange={(e) => onMetricChange(e.target.value as "spend" | "impressions" | "purchases")}
+          onChange={(e) => onMetricChange(e.target.value as any)}
           className="rounded-lg border border-neutral-700 bg-neutral-800/50 px-3 py-1.5 text-xs text-neutral-300 transition hover:border-neutral-600"
         >
-          {BREAKDOWN_METRIC_OPTIONS.map((o) => (
+          {metricOptions.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
@@ -939,7 +1058,7 @@ function BreakdownsSection({
             <div className="space-y-4">
               <div>
                 <p className="mb-2 text-xs text-neutral-500">{metricLabel} by Age &amp; Gender</p>
-                <DemographicsChart rows={filteredDemographics} metric={metric} onBarClick={handleDemoBarClick} />
+                <DemographicsChart rows={filteredDemographics} metric={metric as any} onBarClick={handleDemoBarClick} />
               </div>
 
               <div className="overflow-x-auto">
@@ -951,24 +1070,23 @@ function BreakdownsSection({
                       <th className="pb-2 pr-4 font-medium text-right">Spend</th>
                       <th className="pb-2 pr-4 font-medium text-right">Impressions</th>
                       <th className="pb-2 pr-4 font-medium text-right">CTR</th>
-                      <th className="pb-2 pr-4 font-medium text-right">Purchases</th>
-                      <th className="pb-2 pr-4 font-medium text-right">CPA</th>
-                      <th className="pb-2 font-medium text-right">ROAS</th>
+                      {renderFunnelHeaders()}
                     </tr>
                   </thead>
                   <tbody>
-                    {demoTable.map((row, i) => (
-                      <tr key={i} className="border-b border-neutral-800/50 hover:bg-neutral-800/30">
-                        <td className="py-2 pr-4 text-neutral-300">{row.age}</td>
-                        <td className="py-2 pr-4 capitalize text-neutral-300">{row.gender}</td>
-                        <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(row.spend, currency)}</td>
-                        <td className="py-2 pr-4 text-right text-neutral-300">{fmtNumber(row.impressions)}</td>
-                        <td className="py-2 pr-4 text-right text-neutral-300">{fmtPercent(row.ctr)}</td>
-                        <td className="py-2 pr-4 text-right text-neutral-300">{fmtNumber(row.purchases)}</td>
-                        <td className="py-2 pr-4 text-right text-neutral-300">{row.cpa !== null ? fmtCurrency(row.cpa, currency) : "—"}</td>
-                        <td className="py-2 text-right text-neutral-300">{row.roas.toFixed(2)}x</td>
-                      </tr>
-                    ))}
+                    {demoTable.map((row, i) => {
+                      const d = deriveBreakdown(row)
+                      return (
+                        <tr key={i} className="border-b border-neutral-800/50 hover:bg-neutral-800/30">
+                          <td className="py-2 pr-4 text-neutral-300">{row.age}</td>
+                          <td className="py-2 pr-4 capitalize text-neutral-300">{row.gender}</td>
+                          <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(row.spend, currency)}</td>
+                          <td className="py-2 pr-4 text-right text-neutral-300">{fmtNumber(row.impressions)}</td>
+                          <td className="py-2 pr-4 text-right text-neutral-300">{fmtPercent(d.ctr)}</td>
+                          {renderFunnelColumns(row, d)}
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -989,11 +1107,11 @@ function BreakdownsSection({
               <div className="grid gap-4 lg:grid-cols-2">
                 <div>
                   <p className="mb-2 text-xs text-neutral-500">{metricLabel} by Platform</p>
-                  <PlacementsChart rows={filteredPlacements} groupBy="publisher_platform" metric={metric} onBarClick={(raw) => handlePlacementBarClick("publisher_platform", raw)} />
+                  <PlacementsChart rows={filteredPlacements} groupBy="publisher_platform" metric={metric as any} onBarClick={(raw) => handlePlacementBarClick("publisher_platform", raw)} />
                 </div>
                 <div>
                   <p className="mb-2 text-xs text-neutral-500">{metricLabel} by Position</p>
-                  <PlacementsChart rows={filteredPlacements} groupBy="platform_position" metric={metric} onBarClick={(raw) => handlePlacementBarClick("platform_position", raw)} />
+                  <PlacementsChart rows={filteredPlacements} groupBy="platform_position" metric={metric as any} onBarClick={(raw) => handlePlacementBarClick("platform_position", raw)} />
                 </div>
               </div>
 
@@ -1006,22 +1124,23 @@ function BreakdownsSection({
                       <th className="pb-2 pr-4 font-medium text-right">Spend</th>
                       <th className="pb-2 pr-4 font-medium text-right">Impressions</th>
                       <th className="pb-2 pr-4 font-medium text-right">CPM</th>
-                      <th className="pb-2 pr-4 font-medium text-right">Purchases</th>
-                      <th className="pb-2 font-medium text-right">CPA</th>
+                      {renderFunnelHeaders()}
                     </tr>
                   </thead>
                   <tbody>
-                    {placementTable.map((row, i) => (
-                      <tr key={i} className="border-b border-neutral-800/50 hover:bg-neutral-800/30">
-                        <td className="py-2 pr-4 text-neutral-300">{fmtPlatform(row.platform)}</td>
-                        <td className="py-2 pr-4 text-neutral-300">{fmtPlatform(row.position)}</td>
-                        <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(row.spend, currency)}</td>
-                        <td className="py-2 pr-4 text-right text-neutral-300">{fmtNumber(row.impressions)}</td>
-                        <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(row.cpm, currency)}</td>
-                        <td className="py-2 pr-4 text-right text-neutral-300">{fmtNumber(row.purchases)}</td>
-                        <td className="py-2 text-right text-neutral-300">{row.cpa !== null ? fmtCurrency(row.cpa, currency) : "—"}</td>
-                      </tr>
-                    ))}
+                    {placementTable.map((row, i) => {
+                      const d = deriveBreakdown(row)
+                      return (
+                        <tr key={i} className="border-b border-neutral-800/50 hover:bg-neutral-800/30">
+                          <td className="py-2 pr-4 text-neutral-300">{fmtPlatform(row.platform)}</td>
+                          <td className="py-2 pr-4 text-neutral-300">{fmtPlatform(row.position)}</td>
+                          <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(row.spend, currency)}</td>
+                          <td className="py-2 pr-4 text-right text-neutral-300">{fmtNumber(row.impressions)}</td>
+                          <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(d.cpm, currency)}</td>
+                          {renderFunnelColumns(row, d)}
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>

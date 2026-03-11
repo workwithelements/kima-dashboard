@@ -20,7 +20,7 @@ type Props = {
 
 export default async function ClientDetailPage({ params, searchParams }: Props) {
   // Resolve date range from search params
-  const preset = (searchParams.preset || "last_30d") as DatePreset
+  const preset = (searchParams.preset || "this_month") as DatePreset
   const range = searchParams.from && searchParams.to
     ? { from: searchParams.from, to: searchParams.to }
     : getPresetRange(preset)
