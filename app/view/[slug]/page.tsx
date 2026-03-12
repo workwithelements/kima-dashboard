@@ -72,6 +72,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     .gte("date", from)
     .lte("date", to)
     .order("date")
+    .limit(10000)
 
   // Fetch pacing data — current month spend + 90-day historical (Meta + Google Ads)
   const now = new Date()
@@ -107,7 +108,8 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
       .eq("client_id", client.id)
       .gte("date", from)
       .lte("date", to)
-      .order("date"),
+      .order("date")
+      .limit(10000),
     supabase
       .from("annotations")
       .select("id, date, text, created_at")
@@ -141,6 +143,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     .eq("client_id", client.id)
     .gte("date", baselineStartStr)
     .lte("date", baselineEnd)
+    .limit(10000)
 
   let baselineReach = 0
   if (baselineRows?.length) {

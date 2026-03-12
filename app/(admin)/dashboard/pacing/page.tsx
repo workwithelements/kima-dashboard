@@ -53,7 +53,8 @@ export default async function PacingOverviewPage() {
       .select("date, client_id, spend")
       .gte("date", monthStart())
       .lte("date", today())
-      .order("date"),
+      .order("date")
+      .limit(10000),
     Promise.resolve(
       supabase
         .from("google_ads_daily_performance")
@@ -61,13 +62,15 @@ export default async function PacingOverviewPage() {
         .gte("date", monthStart())
         .lte("date", today())
         .order("date")
+        .limit(10000)
     ).catch(() => ({ data: [] as any[] })),
     supabase
       .from("meta_daily_performance")
       .select("date, client_id, spend")
       .gte("date", daysAgo(90))
       .lte("date", today())
-      .order("date"),
+      .order("date")
+      .limit(50000),
     Promise.resolve(
       supabase
         .from("google_ads_daily_performance")
@@ -75,6 +78,7 @@ export default async function PacingOverviewPage() {
         .gte("date", daysAgo(90))
         .lte("date", today())
         .order("date")
+        .limit(50000)
     ).catch(() => ({ data: [] as any[] })),
   ])
 

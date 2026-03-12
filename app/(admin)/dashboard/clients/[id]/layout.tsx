@@ -13,7 +13,7 @@ export default async function ClientLayout({
 
   const { data: client } = await supabase
     .from("clients")
-    .select("id, name")
+    .select("id, name, slug")
     .eq("id", params.id)
     .single()
 
@@ -21,7 +21,7 @@ export default async function ClientLayout({
 
   return (
     <div className="space-y-6">
-      <ClientHeader clientId={client.id} clientName={client.name} />
+      <ClientHeader clientId={client.id} clientName={client.name} slug={client.slug} />
       {children}
     </div>
   )

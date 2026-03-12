@@ -48,7 +48,8 @@ export default async function DashboardPage({ searchParams }: Props) {
       )
       .gte("date", fromDate)
       .lte("date", toDate)
-      .order("date"),
+      .order("date")
+      .limit(10000),
   ])
 
   const clients = clientsResult.data || []

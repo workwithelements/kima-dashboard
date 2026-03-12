@@ -1,11 +1,14 @@
 "use client"
 
+import { useState } from "react"
 import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
+import ShareSettingsModal from "@/components/dashboard/share-settings-modal"
 
 type Props = {
   clientId: string
   clientName: string
+  slug?: string
 }
 
 const TABS = [
@@ -15,12 +18,14 @@ const TABS = [
   { label: "Reach Analysis", href: "/reach" },
 ]
 
-export default function ClientHeader({ clientId, clientName }: Props) {
+export default function ClientHeader({ clientId, clientName, slug }: Props) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const basePath = `/dashboard/clients/${clientId}`
   const qs = searchParams.toString()
   const suffix = qs ? `?${qs}` : ""
+
+  const [showShare, setShowShare] = useState(false)
 
   return (
     <div className="space-y-4">
@@ -34,6 +39,19 @@ export default function ClientHeader({ clientId, clientName }: Props) {
           </svg>
         </Link>
         <h1 className="text-2xl font-semibold">{clientName}</h1>
+
+        {/* Share button */}
+        {slug && (
+          <button
+            onClick={() => setShowShare(true)}
+            className="rounded-lg p-1.5 text-neutral-500 transition hover:bg-neutral-800 hover:text-white"
+            title="Share settings"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Tab bar */}
@@ -61,6 +79,15 @@ export default function ClientHeader({ clientId, clientName }: Props) {
           )
         })}
       </div>
+
+      {/* Share settings modal */}
+      {showShare && slug && (
+        <ShareSettingsModal
+          clientId={clientId}
+          slug={slug}
+          onClose={() => setShowShare(false)}
+        />
+      )}
     </div>
   )
 }

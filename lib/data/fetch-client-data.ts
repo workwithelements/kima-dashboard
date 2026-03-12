@@ -68,7 +68,8 @@ export async function fetchClientData(
       .eq("client_id", clientId)
       .gte("date", from)
       .lte("date", to)
-      .order("date"),
+      .order("date")
+      .limit(10000),
     compFrom && compTo
       ? supabase
           .from("meta_daily_performance")
@@ -77,13 +78,15 @@ export async function fetchClientData(
           .gte("date", compFrom)
           .lte("date", compTo)
           .order("date")
+          .limit(10000)
       : Promise.resolve({ data: [] as any[] }),
     supabase
       .from("meta_daily_performance")
       .select("reach, impressions")
       .eq("client_id", clientId)
       .gte("date", baselineStartStr)
-      .lte("date", baselineEndStr),
+      .lte("date", baselineEndStr)
+      .limit(10000),
   ])
 
   let baselineReach = 0
@@ -140,7 +143,8 @@ export async function fetchClientsList(from: string, to: string) {
       .from("meta_daily_performance")
       .select("client_id, spend, impressions, purchases, purchase_value")
       .gte("date", from)
-      .lte("date", to),
+      .lte("date", to)
+      .limit(10000),
     Promise.resolve(
       supabase
         .from("google_ads_daily_performance")
@@ -228,13 +232,15 @@ export async function fetchReachData(
       .eq("client_id", clientId)
       .gte("date", from)
       .lte("date", to)
-      .order("date"),
+      .order("date")
+      .limit(10000),
     supabase
       .from("meta_daily_performance")
       .select("reach, impressions")
       .eq("client_id", clientId)
       .gte("date", baselineStartStr)
-      .lte("date", baselineEnd),
+      .lte("date", baselineEnd)
+      .limit(10000),
   ]
 
   // Add comparison range query if provided
@@ -247,6 +253,7 @@ export async function fetchReachData(
         .gte("date", compFrom)
         .lte("date", compTo)
         .order("date")
+        .limit(10000)
     )
   }
 
@@ -300,7 +307,8 @@ export async function fetchCreativeData(
       .eq("client_id", clientId)
       .gte("date", from)
       .lte("date", to)
-      .order("date"),
+      .order("date")
+      .limit(10000),
     Promise.resolve(
       supabase
         .from("meta_ad_metadata")
@@ -320,6 +328,7 @@ export async function fetchCreativeData(
         .eq("client_id", clientId)
         .gte("date", from)
         .lte("date", to)
+        .limit(10000)
     ).then(r => (r.data || []) as MetaDemographicsRow[]).catch(() => [] as MetaDemographicsRow[]),
     Promise.resolve(
       supabase
@@ -328,6 +337,7 @@ export async function fetchCreativeData(
         .eq("client_id", clientId)
         .gte("date", from)
         .lte("date", to)
+        .limit(10000)
     ).then(r => (r.data || []) as MetaPlacementsRow[]).catch(() => [] as MetaPlacementsRow[]),
   ])
 
@@ -392,6 +402,7 @@ export async function fetchBreakdownsData(
         .gte("date", from)
         .lte("date", to)
         .order("date")
+        .limit(10000)
     )
       .then((r) => (r.data || []) as MetaDemographicsRow[])
       .catch(() => [] as MetaDemographicsRow[]),
@@ -403,6 +414,7 @@ export async function fetchBreakdownsData(
         .gte("date", from)
         .lte("date", to)
         .order("date")
+        .limit(10000)
     )
       .then((r) => (r.data || []) as MetaPlacementsRow[])
       .catch(() => [] as MetaPlacementsRow[]),
@@ -437,6 +449,7 @@ export async function fetchGoogleAdsData(
       .gte("date", from)
       .lte("date", to)
       .order("date")
+      .limit(10000)
 
     if (error) return []
     return (data || []) as GoogleAdsDailyRow[]
@@ -463,7 +476,8 @@ export async function fetchConsolidatedSpend(
       .select("date, spend")
       .eq("client_id", clientId)
       .gte("date", from)
-      .lte("date", to),
+      .lte("date", to)
+      .limit(10000),
     Promise.resolve(
       supabase
         .from("google_ads_daily_performance")
@@ -471,6 +485,7 @@ export async function fetchConsolidatedSpend(
         .eq("client_id", clientId)
         .gte("date", from)
         .lte("date", to)
+        .limit(10000)
     ).catch(() => ({ data: [] as any[] })),
   ])
 
