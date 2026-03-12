@@ -66,14 +66,30 @@ export function aggregateVideoMetrics(
 export function calculateRetentionCurve(
   metrics: VideoMetrics
 ): RetentionPoint[] {
-  const base = metrics.videoPlays
+  // Use videoPlays as the base when available; fall back to threeSecViews
+  // (video_plays column may be 0 for historical data before the sync populates it)
+  const hasPlays = metrics.videoPlays > 0
+  const base = hasPlays ? metrics.videoPlays : metrics.threeSecViews
   if (base === 0) return []
 
   const rate = (v: number) => Math.min(100, (v / base) * 100)
 
+  // When we have video plays, show full curve starting from plays
+  if (hasPlays) {
+    return [
+      { label: "Plays", percent: 100, viewers: base },
+      { label: "3s", percent: rate(metrics.threeSecViews), viewers: metrics.threeSecViews },
+      { label: "25%", percent: rate(metrics.p25), viewers: metrics.p25 },
+      { label: "50%", percent: rate(metrics.p50), viewers: metrics.p50 },
+      { label: "75%", percent: rate(metrics.p75), viewers: metrics.p75 },
+      { label: "95%", percent: rate(metrics.p95), viewers: metrics.p95 },
+      { label: "100%", percent: rate(metrics.p100), viewers: metrics.p100 },
+    ]
+  }
+
+  // Fallback: start from 3s views when video_plays not yet synced
   return [
-    { label: "Plays", percent: 100, viewers: base },
-    { label: "3s", percent: rate(metrics.threeSecViews), viewers: metrics.threeSecViews },
+    { label: "3s", percent: 100, viewers: base },
     { label: "25%", percent: rate(metrics.p25), viewers: metrics.p25 },
     { label: "50%", percent: rate(metrics.p50), viewers: metrics.p50 },
     { label: "75%", percent: rate(metrics.p75), viewers: metrics.p75 },
@@ -102,39 +118,46 @@ export function isVideoAd(
  * Derived video KPIs.
  */
 export function videoKPIs(metrics: VideoMetrics) {
-  // Hook rate: what % of video plays led to a 3s view
+  // Use videoPlays as base; fall back to threeSecViews if not yet synced
+  const base = metrics.videoPlays > 0 ? metrics.videoPlays : metrics.threeSecViews
+
+  // Hook rate: what % of video plays led to a 3s view (only meaningful with plays data)
   const hookRate =
     metrics.videoPlays > 0
       ? (metrics.threeSecViews / metrics.videoPlays) * 100
       : 0
 
-  // Completion rate: of those who started playing, who finished (p100)
+  // Completion rate: of those who started, who finished (p100)
   const completionRate =
-    metrics.videoPlays > 0
-      ? (metrics.p100 / metrics.videoPlays) * 100
-      : 0
+    base > 0 ? (metrics.p100 / base) * 100 : 0
 
   // Hold rate: same as completion rate (retained alias)
   const holdRate = completionRate
 
   // Estimate average watch % using trapezoidal integration of the retention curve
   let avgWatchPercent = 0
-  if (metrics.videoPlays > 0) {
-    const base = metrics.videoPlays
-    const rPlays = 1
+  if (base > 0) {
     const r3s = Math.min(1, metrics.threeSecViews / base)
     const r25 = Math.min(1, metrics.p25 / base)
     const r50 = Math.min(1, metrics.p50 / base)
     const r75 = Math.min(1, metrics.p75 / base)
     const r100 = Math.min(1, metrics.p100 / base)
-    // Approximate integration across the video duration milestones
-    // Segments: 0-3s(~5%), 3s-25%, 25-50%, 50-75%, 75-100%
-    avgWatchPercent =
-      5 * (rPlays + r3s) / 2 +
-      20 * (r3s + r25) / 2 +
-      25 * (r25 + r50) / 2 +
-      25 * (r50 + r75) / 2 +
-      25 * (r75 + r100) / 2
+    if (metrics.videoPlays > 0) {
+      // Full curve: plays → 3s → 25% → ... → 100%
+      avgWatchPercent =
+        5 * (1 + r3s) / 2 +
+        20 * (r3s + r25) / 2 +
+        25 * (r25 + r50) / 2 +
+        25 * (r50 + r75) / 2 +
+        25 * (r75 + r100) / 2
+    } else {
+      // Fallback curve: 3s → 25% → ... → 100%
+      avgWatchPercent =
+        25 * (1 + r25) / 2 +
+        25 * (r25 + r50) / 2 +
+        25 * (r50 + r75) / 2 +
+        25 * (r75 + r100) / 2
+    }
   }
 
   return { hookRate, completionRate, holdRate, avgWatchPercent, videoPlays: metrics.videoPlays }
