@@ -2,6 +2,11 @@
  * Video retention analysis utilities.
  * Aggregates video milestone metrics and computes retention curves
  * based on Meta's video_p25/p50/p75/p95/p100 watched actions.
+ *
+ * Data source mapping:
+ *  - videoPlays = video_play_actions (video starts) OR actions→video_view (3s views) as fallback
+ *  - threeSecViews = actions→video_view (3-second views) OR video_thruplay_watched_actions (15s) as fallback
+ *  - p25/p50/p75/p95/p100 = video_pXX_watched_actions
  */
 
 import type { MetaDailyRow } from "./types"
