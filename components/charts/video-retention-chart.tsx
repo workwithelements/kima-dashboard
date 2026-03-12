@@ -49,9 +49,10 @@ export default function VideoRetentionChart({ rows, selectedAds }: Props) {
 
     // Merge into unified chart data
     // Each point has: label, ad1, ad2, ...
-    const labels = ["Views", "25%", "50%", "75%", "95%", "100%"]
-    const chartData = labels.map((label, i) => {
-      const point: Record<string, string | number> = { label }
+    // Use labels from the first curve (all curves have the same milestones)
+    const firstCurve = curves[0]?.curve ?? []
+    const chartData = firstCurve.map((_, i) => {
+      const point: Record<string, string | number> = { label: firstCurve[i].label }
       for (const c of curves) {
         const p = c.curve[i]
         point[c.ad.adId] = p ? Number(p.percent.toFixed(1)) : 0
@@ -66,6 +67,7 @@ export default function VideoRetentionChart({ rows, selectedAds }: Props) {
       completionRate: c.kpis.completionRate,
       holdRate: c.kpis.holdRate,
       impressions: c.metrics.impressions,
+      videoPlays: c.metrics.videoPlays,
       threeSecViews: c.metrics.threeSecViews,
     }))
 
@@ -116,8 +118,8 @@ export default function VideoRetentionChart({ rows, selectedAds }: Props) {
                 <span className="ml-1 text-neutral-200">{fmtPercent(k.completionRate, 1)}</span>
               </div>
               <div>
-                <span className="text-neutral-500">Hold</span>
-                <span className="ml-1 text-neutral-200">{fmtPercent(k.holdRate, 1)}</span>
+                <span className="text-neutral-500">Plays</span>
+                <span className="ml-1 text-neutral-200">{fmtNumber(k.videoPlays)}</span>
               </div>
             </div>
           </div>

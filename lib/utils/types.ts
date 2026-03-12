@@ -24,6 +24,7 @@ export type MetaDailyRow = {
   purchase_value: number
   app_installs: number
   mobile_app_registrations: number
+  video_plays: number
   video_3s_views: number
   video_p25: number
   video_p50: number
