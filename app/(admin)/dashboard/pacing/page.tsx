@@ -27,7 +27,7 @@ export default async function PacingOverviewPage() {
   // Fetch all active clients with budgets
   const { data: clients } = await supabase
     .from("clients")
-    .select("id, name, monthly_budget, currency_code")
+    .select("id, name, currency_code")
     .eq("active", true)
     .order("name")
 
@@ -117,7 +117,7 @@ export default async function PacingOverviewPage() {
     currency: (c as any).currency_code ?? "GBP",
     pacing: calculatePacing(
       currentByClient[c.id] || [],
-      c.monthly_budget || null,
+      (c as any).monthly_budget || null,
       year,
       month,
       historicalByClient[c.id]

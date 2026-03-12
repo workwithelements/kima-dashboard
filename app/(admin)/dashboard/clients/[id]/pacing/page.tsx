@@ -21,11 +21,12 @@ export default async function ClientPacingPage({ params }: Props) {
   // Fetch client
   const { data: client } = await supabase
     .from("clients")
-    .select("id, name, monthly_budget, currency_code")
+    .select("id, name, currency_code")
     .eq("id", params.id)
     .single()
 
   if (!client) notFound()
+  const clientWithBudget = { ...client, monthly_budget: null as number | null }
 
   const currency = (client as any).currency_code ?? "GBP"
   const now = new Date()
@@ -44,7 +45,7 @@ export default async function ClientPacingPage({ params }: Props) {
   // Calculate pacing
   const pacing = calculatePacing(
     dailySpend,
-    client.monthly_budget || null,
+    clientWithBudget.monthly_budget || null,
     year,
     month,
     historicalDaily
@@ -120,7 +121,7 @@ export default async function ClientPacingPage({ params }: Props) {
       </div>
 
       {/* Info about budget */}
-      {!client.monthly_budget && (
+      {!clientWithBudget.monthly_budget && (
         <Card className="border-amber-900/50 bg-amber-950/20">
           <div className="flex items-start gap-3">
             <span className="text-amber-500">⚠️</span>

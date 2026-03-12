@@ -34,7 +34,7 @@ export async function fetchClientData(
   let client: any = null
   const { data: fullClient, error: clientError } = await supabase
     .from("clients")
-    .select("id, name, active, meta_account_id, google_ads_customer_id, monthly_budget, currency_code")
+    .select("id, name, active, meta_account_id, google_ads_customer_id, currency_code")
     .eq("id", clientId)
     .single()
 
@@ -47,7 +47,7 @@ export async function fetchClientData(
     if (!fallback) return null
     client = { ...fallback, meta_account_id: null, google_ads_customer_id: null, monthly_budget: null, currency_code: "GBP" }
   } else {
-    client = fullClient
+    client = { ...fullClient, monthly_budget: (fullClient as any)?.monthly_budget ?? null }
   }
 
   if (!client) return null
@@ -112,7 +112,7 @@ export async function fetchClientsList(from: string, to: string) {
 
   const { data: clients, error: clientsError } = await supabase
     .from("clients")
-    .select("id, name, active, meta_account_id, google_ads_customer_id, monthly_budget, currency_code")
+    .select("id, name, active, meta_account_id, google_ads_customer_id, currency_code")
     .eq("active", true)
     .order("name")
 

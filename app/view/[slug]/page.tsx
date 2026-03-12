@@ -25,7 +25,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
   // Look up client by slug
   const { data: client } = await supabase
     .from("clients")
-    .select("id, name, view_password_hash, slug, monthly_budget")
+    .select("id, name, view_password_hash, slug")
     .eq("slug", slug)
     .single()
 
@@ -89,7 +89,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
 
   const pacing = calculatePacing(
     dailySpend,
-    client.monthly_budget || null,
+    (client as any).monthly_budget || null,
     year,
     month,
     historicalDaily
@@ -161,7 +161,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
       clientName={client.name}
       data={metaRows || []}
       pacing={pacing}
-      monthlyBudget={client.monthly_budget || null}
+      monthlyBudget={(client as any).monthly_budget || null}
       currentMonthDailySpend={dailySpend}
       reachRows={reachRows}
       baselineReach={baselineReach}
