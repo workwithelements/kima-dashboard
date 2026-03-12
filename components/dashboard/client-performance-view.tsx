@@ -54,6 +54,10 @@ const FunnelDropOffChart = dynamic(
   () => import("@/components/charts/funnel-drop-off-chart"),
   { ssr: false, loading: ChartPlaceholder }
 )
+const PlatformCPAChart = dynamic(
+  () => import("@/components/charts/platform-cpa-chart"),
+  { ssr: false, loading: ChartPlaceholder }
+)
 const DemographicsChart = dynamic(
   () => import("@/components/charts/demographics-chart"),
   { ssr: false, loading: ChartPlaceholder }
@@ -389,6 +393,74 @@ export default function ClientPerformanceView({
   // Show reach only for Meta (or all with Meta)
   const showReach = isMeta
 
+  // "All Platforms" key action: resolve field + label for the conversion metric
+  const allKeyActionStep = keyAction || (funnelSteps.length > 0 ? funnelSteps[funnelSteps.length - 1] : null)
+  const allKeyActionDef = allKeyActionStep ? FUNNEL_STEP_DEFS[allKeyActionStep] : null
+  const allKeyActionField = allKeyActionDef?.field || "purchases"
+  const allKeyActionLabel = allKeyActionDef?.label || "Conversions"
+  const allKeyActionCostLabel = allKeyActionDef?.costLabel || "CPA"
+
+  // "All Platforms" key action count (Meta uses configured funnel step, Google Ads always uses "conversions" → purchases)
+  const allMetaKeyCount = (metrics as Record<string, number>)[allKeyActionField] || 0
+  const gaMetrics = useMemo(() => aggregateGoogleAdsMetrics(googleAdsRows), [googleAdsRows])
+  const allGoogleKeyCount = gaMetrics.purchases // Google "conversions" always mapped to purchases
+  const allTotalKeyCount = allMetaKeyCount + allGoogleKeyCount
+  const allCpa = allTotalKeyCount > 0 ? metrics.spend / allTotalKeyCount : 0
+
+  // Platform CPA chart data (stacked conversions by platform + CPA line)
+  const platformCpaData = useMemo(() => {
+    if (!isAll) return []
+
+    // Map meta conversions by date using key action field
+    const metaByDate: Record<string, { spend: number; conversions: number }> = {}
+    for (const r of filteredRows) {
+      if (!r.date) continue
+      if (!metaByDate[r.date]) metaByDate[r.date] = { spend: 0, conversions: 0 }
+      metaByDate[r.date].spend += r.spend || 0
+      metaByDate[r.date].conversions += ((r as Record<string, any>)[allKeyActionStep || "purchases"] || 0)
+    }
+
+    // Map google conversions by date
+    const googleByDate: Record<string, { spend: number; conversions: number }> = {}
+    for (const r of googleAdsRows) {
+      if (!r.date) continue
+      if (!googleByDate[r.date]) googleByDate[r.date] = { spend: 0, conversions: 0 }
+      googleByDate[r.date].spend += r.spend || 0
+      googleByDate[r.date].conversions += r.conversions || 0
+    }
+
+    // Collect all dates
+    const allDates = new Set([...Object.keys(metaByDate), ...Object.keys(googleByDate)])
+    const sorted = Array.from(allDates).sort()
+
+    // Build enriched data
+    const enriched = sorted.map((date) => {
+      const meta = metaByDate[date] || { spend: 0, conversions: 0 }
+      const google = googleByDate[date] || { spend: 0, conversions: 0 }
+      const totalConversions = meta.conversions + google.conversions
+      const totalSpend = meta.spend + google.spend
+      const cpa = totalConversions > 0 ? totalSpend / totalConversions : null
+      return {
+        date,
+        metaConversions: meta.conversions,
+        googleConversions: google.conversions,
+        totalConversions,
+        cpa,
+        rolling: null as number | null,
+      }
+    })
+
+    // Compute 7-day rolling average CPA
+    return enriched.map((d, i) => {
+      const window = enriched.slice(Math.max(0, i - 6), i + 1)
+      const validCpa = window.filter((w) => w.cpa !== null).map((w) => w.cpa!)
+      const rolling = validCpa.length > 0
+        ? validCpa.reduce((a, b) => a + b, 0) / validCpa.length
+        : null
+      return { ...d, rolling }
+    })
+  }, [filteredRows, googleAdsRows, platform, allKeyActionStep])
+
   // Table level options based on platform
   const tableLevelOptions = useMemo(() => {
     if (isGoogleAds) {
@@ -671,18 +743,19 @@ export default function ClientPerformanceView({
         </div>
       )}
 
-      {/* "All" platforms summary */}
+      {/* "All" platforms summary — key metric conversions + CPA */}
       {isAll && (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <MetricCard
-            label="Clicks"
-            value={fmtNumber(metrics.clicks)}
-            delta={delta(metrics.clicks, compMetrics.clicks)}
+            label={`Total ${allKeyActionLabel}`}
+            value={fmtNumber(allTotalKeyCount)}
+            subValue={`Meta: ${fmtNumber(allMetaKeyCount)} · Google: ${fmtNumber(allGoogleKeyCount)}`}
+            delta={delta(metrics.purchases, compMetrics.purchases)}
           />
           <MetricCard
-            label="Conversions"
-            value={fmtNumber(metrics.purchases)}
-            delta={delta(metrics.purchases, compMetrics.purchases)}
+            label={allKeyActionCostLabel}
+            value={allCpa > 0 ? fmtCurrency(allCpa, currency) : "\u2014"}
+            invertDelta
           />
           <MetricCard
             label="Revenue"
@@ -711,6 +784,20 @@ export default function ClientPerformanceView({
           readOnly={readOnly}
         />
       </Card>
+
+      {/* Platform CPA chart (All Platforms view) */}
+      {isAll && platformCpaData.length > 0 && (
+        <Card>
+          <h2 className="mb-4 text-sm font-medium text-neutral-400">
+            Cost Per {allKeyActionLabel} by Platform
+          </h2>
+          <PlatformCPAChart
+            data={platformCpaData}
+            conversionLabel={allKeyActionLabel}
+            currency={currency}
+          />
+        </Card>
+      )}
 
       {/* CPA Chart (Meta only, when funnel steps exist) */}
       {showFunnel && (() => {

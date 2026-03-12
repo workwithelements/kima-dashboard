@@ -3,7 +3,6 @@ export const dynamic = "force-dynamic"
 import { fetchCreativeData } from "@/lib/data/fetch-client-data"
 import { getPresetRange } from "@/lib/utils/dates"
 import type { DatePreset } from "@/lib/utils/dates"
-import { getClientPlatforms } from "@/lib/utils/types"
 import CreativeAnalysisView from "@/components/dashboard/creative-analysis-view"
 import { notFound } from "next/navigation"
 
@@ -25,8 +24,6 @@ export default async function CreativeAnalysisPage({ params, searchParams }: Pro
   const data = await fetchCreativeData(params.id, range.from, range.to)
   if (!data) notFound()
 
-  const platforms = getClientPlatforms(data.client as any)
-
   return (
     <CreativeAnalysisView
       rows={data.rows}
@@ -37,7 +34,6 @@ export default async function CreativeAnalysisPage({ params, searchParams }: Pro
       thumbnails={data.thumbnails}
       previewsEnabled={data.previewsEnabled}
       currency={data.client.currency_code ?? "GBP"}
-      platforms={platforms}
       metaAccountId={data.client.meta_account_id ?? undefined}
       keyAction={data.keyAction}
       funnelSteps={data.funnelSteps}

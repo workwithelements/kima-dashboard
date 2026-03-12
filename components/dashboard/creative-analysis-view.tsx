@@ -37,9 +37,8 @@ import { isVideoAd } from "@/lib/utils/video-retention"
 import { FUNNEL_STEP_DEFS, type FunnelStepDef } from "@/lib/utils/funnel-steps"
 import { detectFatigueAll, FATIGUE_CONFIG } from "@/lib/utils/fatigue-detection"
 import { calculateConcentration, CONCENTRATION_COLORS } from "@/lib/utils/spend-concentration"
-import type { MetaDailyRow, AdPlatform, MetaDemographicsRow, MetaPlacementsRow } from "@/lib/utils/types"
+import type { MetaDailyRow, MetaDemographicsRow, MetaPlacementsRow } from "@/lib/utils/types"
 import type { DatePreset } from "@/lib/utils/dates"
-import PlatformSelector, { type PlatformView } from "@/components/ui/platform-selector"
 
 type ThumbnailMap = Record<string, string> // ad_id -> thumbnail_url
 
@@ -52,8 +51,6 @@ type Props = {
   thumbnails?: ThumbnailMap
   previewsEnabled?: boolean
   currency?: string
-  /** Available platforms for this client (drives platform tabs) */
-  platforms?: AdPlatform[]
   /** Meta ad account ID for Ads Manager links */
   metaAccountId?: string
   /** Key action from scorecard config — drives classification conversion metric */
@@ -96,7 +93,6 @@ export default function CreativeAnalysisView({
   thumbnails = {},
   previewsEnabled = false,
   currency = "GBP",
-  platforms = ["meta"],
   metaAccountId,
   keyAction,
   demographics = [],
@@ -107,7 +103,6 @@ export default function CreativeAnalysisView({
   const pathname = usePathname()
   const searchParams = useSearchParams()
 
-  const [platform, setPlatform] = useState<PlatformView>("meta")
   const [sortKey, setSortKey] = useState<SortKey>("spend")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
   const [activeFilters, setActiveFilters] = useState<Set<ClassificationType>>(
@@ -419,11 +414,6 @@ export default function CreativeAnalysisView({
           <h2 className="text-sm font-medium text-neutral-400">
             Creative Analysis
           </h2>
-          <PlatformSelector
-            platforms={platforms}
-            selected={platform}
-            onChange={setPlatform}
-          />
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <AdSetSelector
@@ -441,23 +431,8 @@ export default function CreativeAnalysisView({
         </div>
       </div>
 
-      {/* Google Ads blank state */}
-      {platform === "google_ads" && (
-        <Card className="flex flex-col items-center justify-center py-20 text-center">
-          <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-neutral-800">
-            <svg className="h-8 w-8 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v13.5A1.5 1.5 0 003.75 21z" />
-            </svg>
-          </div>
-          <h3 className="text-base font-medium text-neutral-300">Google Ads Creative Analysis</h3>
-          <p className="mt-2 max-w-sm text-sm text-neutral-500">
-            Creative analysis for Google Ads is coming soon. Connect your Google Ads account to see ad creative performance here.
-          </p>
-        </Card>
-      )}
-
       {/* Meta creative analysis content */}
-      {platform !== "google_ads" && <>
+      {<>
 
       {/* Tag filters */}
       {tags.length > 0 && (
