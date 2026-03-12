@@ -468,7 +468,7 @@ function ReachTabContent({
 
   const totalReach = reachRows.reduce((sum, r) => sum + (r.reach || 0), 0)
   const totalImpressions = reachRows.reduce((sum, r) => sum + (r.impressions || 0), 0)
-  const saturation = calculateSaturation(totalImpressions, totalReach, reachData)
+  const saturation = calculateSaturation(totalImpressions, totalReach, 0, reachData)
   const fatigueDays = detectReachFatigue(reachData)
 
   const totalNewReach = reachData.reduce((sum, d) => sum + d.newReach, 0)

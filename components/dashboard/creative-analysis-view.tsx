@@ -34,6 +34,7 @@ import {
   type ClassificationType,
 } from "@/lib/utils/creative-classification"
 import { isVideoAd } from "@/lib/utils/video-retention"
+import { FUNNEL_STEP_DEFS, type FunnelStepDef } from "@/lib/utils/funnel-steps"
 import { detectFatigueAll, FATIGUE_CONFIG } from "@/lib/utils/fatigue-detection"
 import { calculateConcentration, CONCENTRATION_COLORS } from "@/lib/utils/spend-concentration"
 import type { MetaDailyRow, AdPlatform, MetaDemographicsRow, MetaPlacementsRow } from "@/lib/utils/types"
@@ -61,6 +62,8 @@ type Props = {
   demographics?: MetaDemographicsRow[]
   /** Per-ad placement breakdown rows */
   placements?: MetaPlacementsRow[]
+  /** Configured funnel steps from scorecard config */
+  funnelSteps?: string[]
 }
 
 type SortKey =
@@ -98,6 +101,7 @@ export default function CreativeAnalysisView({
   keyAction,
   demographics = [],
   placements = [],
+  funnelSteps = ["unique_link_clicks", "purchases"],
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -177,15 +181,17 @@ export default function CreativeAnalysisView({
 
   async function removeTag(adId: string, tagId: string) {
     try {
-      await fetch("/api/creative-ad-tags", {
+      const res = await fetch("/api/creative-ad-tags", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ad_id: adId, tag_id: tagId }),
       })
-      setAdTagMap((prev) => ({
-        ...prev,
-        [adId]: (prev[adId] || []).filter((t) => t !== tagId),
-      }))
+      if (res.ok) {
+        setAdTagMap((prev) => ({
+          ...prev,
+          [adId]: (prev[adId] || []).filter((t) => t !== tagId),
+        }))
+      }
     } catch { /* ignore */ }
   }
 
@@ -232,8 +238,8 @@ export default function CreativeAnalysisView({
   // Fatigue detection
   const fatigueMap = useMemo(() => {
     const adIds = classifiedAds.map((a) => a.adId)
-    return detectFatigueAll(filteredRows, adIds, 7, to)
-  }, [classifiedAds, filteredRows, to])
+    return detectFatigueAll(filteredRows, adIds, 7, to, keyAction)
+  }, [classifiedAds, filteredRows, to, keyAction])
 
   // Enrich classified ads with fatigue status
   const enrichedAds = useMemo(
@@ -805,6 +811,8 @@ export default function CreativeAnalysisView({
           metaAccountId={metaAccountId}
           demographics={demographics}
           placements={placements}
+          funnelSteps={funnelSteps}
+          keyAction={keyAction}
           onClose={() => setDetailAd(null)}
         />
       )}
@@ -1139,6 +1147,8 @@ function CreativeDetailModal({
   metaAccountId,
   demographics = [],
   placements = [],
+  funnelSteps = ["unique_link_clicks", "purchases"],
+  keyAction,
   onClose,
 }: {
   ad: ClassifiedAd
@@ -1150,6 +1160,8 @@ function CreativeDetailModal({
   metaAccountId?: string
   demographics?: MetaDemographicsRow[]
   placements?: MetaPlacementsRow[]
+  funnelSteps?: string[]
+  keyAction?: string
   onClose: () => void
 }) {
   const cls = CLASSIFICATIONS[ad.classification.type]
@@ -1260,18 +1272,72 @@ function CreativeDetailModal({
             )}
           </div>
 
-          {/* Metrics grid */}
+          {/* Core metrics */}
           <div className="grid grid-cols-3 gap-3">
             <DetailMetric label="Spend" value={fmtCurrency(ad.spend, currency)} />
             <DetailMetric label="Impressions" value={fmtNumber(ad.impressions)} />
-            <DetailMetric label="Clicks" value={fmtNumber(ad.clicks)} />
-            <DetailMetric label="Conversions" value={fmtNumber(ad.conversions)} />
-            <DetailMetric label="CPA" value={ad.cpa !== null ? fmtCurrency(ad.cpa, currency) : "—"} />
-            <DetailMetric label="CVR" value={fmtPercent(ad.cvr * 100, 2)} />
             <DetailMetric label="Revenue" value={fmtCurrency(ad.revenue, currency)} />
             <DetailMetric label="ROAS" value={roas > 0 ? `${roas.toFixed(2)}x` : "—"} />
             <DetailMetric label="Spend Share" value={fmtPercent(ad.spendShare, 1)} />
           </div>
+
+          {/* Dynamic funnel metrics */}
+          {(() => {
+            // Map ClassifiedAd fields to AggregatedMetrics-like object for funnel calcs
+            const adMetrics: Record<string, number> = {
+              spend: ad.spend,
+              impressions: ad.impressions,
+              clicks: ad.clicks,
+              purchases: ad.conversions,
+              landingPageViews: ad.landingPageViews ?? 0,
+              addsToCart: ad.addsToCart ?? 0,
+              checkoutsInitiated: ad.checkoutsInitiated ?? 0,
+              registrationsCompleted: ad.registrationsCompleted ?? 0,
+              appInstalls: ad.appInstalls ?? 0,
+              mobileAppRegistrations: ad.mobileAppRegistrations ?? 0,
+            }
+
+            return (
+              <div className="space-y-2">
+                <p className="text-[10px] text-neutral-500 uppercase tracking-wider">Funnel Metrics</p>
+                <div className="grid grid-cols-3 gap-3">
+                  {funnelSteps.map((stepKey, i) => {
+                    const def = FUNNEL_STEP_DEFS[stepKey]
+                    if (!def) return null
+                    const count = adMetrics[def.field as string] ?? 0
+                    // Rate denominator: use previous step in the funnel if available
+                    const prevStepKey = i > 0 ? funnelSteps[i - 1] : undefined
+                    const prevDef = prevStepKey ? FUNNEL_STEP_DEFS[prevStepKey] : undefined
+                    const denomField = prevDef ? prevDef.field : def.rateDenominator
+                    const denominator = adMetrics[denomField as string] ?? 0
+                    const rate = denominator > 0 ? (count / denominator) * def.rateMultiplier : null
+                    const costPer = count > 0 ? ad.spend / count : null
+                    const isKey = stepKey === keyAction
+
+                    return (
+                      <div key={stepKey} className="col-span-3 grid grid-cols-3 gap-3">
+                        <DetailMetric
+                          label={def.label}
+                          value={fmtNumber(count)}
+                          highlight={isKey}
+                        />
+                        <DetailMetric
+                          label={def.rateLabel}
+                          value={rate !== null ? fmtPercent(rate, def.rateDecimals ?? 1) : "—"}
+                          highlight={isKey}
+                        />
+                        <DetailMetric
+                          label={def.costLabel}
+                          value={costPer !== null ? fmtCurrency(costPer, currency) : "—"}
+                          highlight={isKey}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })()}
 
           {/* Video retention */}
           {isVideo && (
@@ -1311,8 +1377,18 @@ function AdPlacementBreakdown({
   adId: string
   currency: string
 }) {
-  const adPlacements = placements.filter((p) => p.ad_id === adId)
-  if (adPlacements.length === 0) return null
+  // Try ad-level first, then fall back to adset-level data
+  let adPlacements = placements.filter((p) => p.ad_id === adId)
+  let levelLabel = ""
+  if (adPlacements.length === 0) {
+    // No ad-level data — show a note
+    return (
+      <div className="border-t border-neutral-800 pt-3">
+        <p className="text-xs text-neutral-500 mb-2">Placement Breakdown</p>
+        <p className="text-[11px] text-neutral-600 italic">No placement data available for this ad</p>
+      </div>
+    )
+  }
 
   // Aggregate by platform + position
   const agg = new Map<string, { spend: number; impressions: number; clicks: number }>()
@@ -1364,7 +1440,14 @@ function AdDemographicBreakdown({
   currency: string
 }) {
   const adDemo = demographics.filter((d) => d.ad_id === adId)
-  if (adDemo.length === 0) return null
+  if (adDemo.length === 0) {
+    return (
+      <div className="border-t border-neutral-800 pt-3">
+        <p className="text-xs text-neutral-500 mb-2">Demographic Breakdown</p>
+        <p className="text-[11px] text-neutral-600 italic">No demographic data available for this ad</p>
+      </div>
+    )
+  }
 
   // Aggregate by age group
   const ageGroups = new Map<string, { male: number; female: number; unknown: number }>()
@@ -1440,11 +1523,11 @@ function AdDemographicBreakdown({
   )
 }
 
-function DetailMetric({ label, value }: { label: string; value: string }) {
+function DetailMetric({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return (
-    <div className="rounded-lg bg-neutral-800/50 px-3 py-2">
-      <p className="text-[10px] text-neutral-500">{label}</p>
-      <p className="text-sm font-medium tabular-nums text-neutral-100">{value}</p>
+    <div className={`rounded-lg px-3 py-2 ${highlight ? "bg-[#CDFF00]/10 ring-1 ring-[#CDFF00]/30" : "bg-neutral-800/50"}`}>
+      <p className={`text-[10px] ${highlight ? "text-[#CDFF00]/70" : "text-neutral-500"}`}>{label}</p>
+      <p className={`text-sm font-medium tabular-nums ${highlight ? "text-[#CDFF00]" : "text-neutral-100"}`}>{value}</p>
     </div>
   )
 }

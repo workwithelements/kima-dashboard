@@ -53,23 +53,27 @@ export function aggregateVideoMetrics(
 
 /**
  * Calculate a retention curve from aggregated video metrics.
- * Returns an array of points from Video Views (3s) -> 25% -> ... -> 100%.
- * Each point shows the percentage of video viewers (3s) retained at that milestone.
+ * Uses impressions as the base to create a natural funnel:
+ * Impressions (100%) -> 3s Views (hook rate) -> 25% -> ... -> 100%.
+ *
+ * We use impressions rather than 3s views as the base because Meta's
+ * video milestone counts can exceed 3s views (due to replays, autoplay
+ * counting differences), which would create artificially inflated percentages.
  */
 export function calculateRetentionCurve(
   metrics: VideoMetrics
 ): RetentionPoint[] {
-  const base = metrics.threeSecViews
-  if (base === 0) return []
+  const base = metrics.impressions
+  if (base === 0 || metrics.threeSecViews === 0) return []
 
-  const rate = (v: number) => Math.min((v / base) * 100, 100)
+  const rate = (v: number) => (v / base) * 100
 
   return [
-    { label: "Views", percent: 100, viewers: base },
+    { label: "Impr.", percent: 100, viewers: base },
+    { label: "3s", percent: rate(metrics.threeSecViews), viewers: metrics.threeSecViews },
     { label: "25%", percent: rate(metrics.p25), viewers: metrics.p25 },
     { label: "50%", percent: rate(metrics.p50), viewers: metrics.p50 },
     { label: "75%", percent: rate(metrics.p75), viewers: metrics.p75 },
-    { label: "95%", percent: rate(metrics.p95), viewers: metrics.p95 },
     { label: "100%", percent: rate(metrics.p100), viewers: metrics.p100 },
   ]
 }
@@ -104,21 +108,22 @@ export function videoKPIs(metrics: VideoMetrics) {
       : 0
 
   // Estimate average watch % using trapezoidal integration of the retention
-  // curve based on video views (3s), milestones at 25%, 50%, 75%, 95%, 100%.
+  // curve based on impressions as the base, milestones at 3s, 25%, 50%, 75%, 100%.
   let avgWatchPercent = 0
-  if (metrics.threeSecViews > 0) {
-    const base = metrics.threeSecViews
-    const r25 = Math.min(metrics.p25 / base, 1)
-    const r50 = Math.min(metrics.p50 / base, 1)
-    const r75 = Math.min(metrics.p75 / base, 1)
-    const r95 = Math.min(metrics.p95 / base, 1)
-    const r100 = Math.min(metrics.p100 / base, 1)
+  if (metrics.impressions > 0 && metrics.threeSecViews > 0) {
+    const base = metrics.impressions
+    const r3s = metrics.threeSecViews / base
+    const r25 = metrics.p25 / base
+    const r50 = metrics.p50 / base
+    const r75 = metrics.p75 / base
+    const r100 = metrics.p100 / base
+    // Weight segments by their proportion of the video
+    // 0-25%, 25-50%, 50-75%, 75-100%
     avgWatchPercent =
-      (0.25 * (1 + r25) / 2 +
+      (0.25 * (r3s + r25) / 2 +
         0.25 * (r25 + r50) / 2 +
         0.25 * (r50 + r75) / 2 +
-        0.2 * (r75 + r95) / 2 +
-        0.05 * (r95 + r100) / 2) *
+        0.25 * (r75 + r100) / 2) *
       100
   }
 

@@ -5,6 +5,21 @@
 
 import type { MetaDailyRow } from "./types"
 
+/** Map key_action string to the corresponding MetaDailyRow field value */
+function getConversionValue(row: Partial<MetaDailyRow>, keyAction?: string): number {
+  switch (keyAction) {
+    case "unique_link_clicks": return row.unique_link_clicks || 0
+    case "landing_page_views": return row.landing_page_views || 0
+    case "adds_to_cart": return row.adds_to_cart || 0
+    case "checkouts_initiated": return row.checkouts_initiated || 0
+    case "registrations_completed": return row.registrations_completed || 0
+    case "app_installs": return row.app_installs || 0
+    case "mobile_app_registrations": return row.mobile_app_registrations || 0
+    case "purchases":
+    default: return row.purchases || 0
+  }
+}
+
 export type FatigueStatus = "healthy" | "warning" | "fatigued"
 
 export type FatigueResult = {
@@ -41,7 +56,8 @@ export function detectFatigue(
   allRows: Partial<MetaDailyRow>[],
   adId: string,
   recentDays: number = 7,
-  rangeEnd?: string
+  rangeEnd?: string,
+  keyAction?: string
 ): FatigueResult {
   const adRows = allRows.filter((r) => r.ad_id === adId)
   if (adRows.length === 0) {
@@ -62,9 +78,9 @@ export function detectFatigue(
 
   // Aggregate
   const recentSpend = recentRows.reduce((s, r) => s + (r.spend || 0), 0)
-  const recentConv = recentRows.reduce((s, r) => s + (r.purchases || 0), 0)
+  const recentConv = recentRows.reduce((s, r) => s + getConversionValue(r, keyAction), 0)
   const lifetimeSpend = lifetimeRows.reduce((s, r) => s + (r.spend || 0), 0)
-  const lifetimeConv = lifetimeRows.reduce((s, r) => s + (r.purchases || 0), 0)
+  const lifetimeConv = lifetimeRows.reduce((s, r) => s + getConversionValue(r, keyAction), 0)
 
   const recentCPA = recentConv > 0 ? recentSpend / recentConv : null
   const lifetimeCPA = lifetimeConv > 0 ? lifetimeSpend / lifetimeConv : null
@@ -112,11 +128,12 @@ export function detectFatigueAll(
   allRows: Partial<MetaDailyRow>[],
   adIds: string[],
   recentDays?: number,
-  rangeEnd?: string
+  rangeEnd?: string,
+  keyAction?: string
 ): Record<string, FatigueResult> {
   const results: Record<string, FatigueResult> = {}
   for (const adId of adIds) {
-    results[adId] = detectFatigue(allRows, adId, recentDays, rangeEnd)
+    results[adId] = detectFatigue(allRows, adId, recentDays, rangeEnd, keyAction)
   }
   return results
 }

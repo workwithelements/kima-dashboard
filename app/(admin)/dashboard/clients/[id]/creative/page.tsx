@@ -40,6 +40,7 @@ export default async function CreativeAnalysisPage({ params, searchParams }: Pro
       platforms={platforms}
       metaAccountId={data.client.meta_account_id ?? undefined}
       keyAction={data.keyAction}
+      funnelSteps={data.funnelSteps}
       demographics={data.demographics}
       placements={data.placements}
     />

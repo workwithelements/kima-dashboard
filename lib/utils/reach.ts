@@ -23,6 +23,15 @@ export type SaturationResult = {
   level: "low" | "moderate" | "high"
   label: string
   avgFrequency: number
+  /** Component breakdown for the 3-factor score */
+  components: {
+    /** Frequency pressure — how close to 8x cap (0–100) */
+    frequency: number
+    /** CPM/CPMr efficiency gap — cost of repeat impressions (0–100) */
+    efficiency: number
+    /** Trend decline — is new reach declining? (0–100) */
+    trend: number
+  }
 }
 
 /**
@@ -75,26 +84,63 @@ export function prepareReachData(
 }
 
 /**
- * Calculate saturation score (0–100).
+ * Calculate saturation score (0–100) using a 3-component weighted formula.
  *
- * Formula from V1 SaturationAnalysis:
- *   saturation = min(100, max(0, (avgFrequency / 3) × 50 + (saturationPremium / 100) × 50))
+ * Saturation = (0.40 × F_score) + (0.35 × E_score) + (0.25 × T_score)
+ *
+ * F_score (Frequency Pressure, 40%):
+ *   min(100, (avgFrequency / 8) × 100)
+ *   How many times the average user sees ads. Capped at 8x = fully saturated.
+ *
+ * E_score (Efficiency Gap, 35%):
+ *   min(100, ((CPMr - CPM) / CPMr) × 100)
+ *   Cost gap between impression and reach. 0 = perfect, 100 = all repeat.
+ *   Essentially 1 - (1/frequency) but using cost data captures auction dynamics.
+ *
+ * T_score (Trend Decline, 25%):
+ *   min(100, max(0, decline × 200))
+ *   Is new reach declining over time? 50%+ decline = max score.
  *
  * Zones:
- *   0–30:  Low (green)   — Healthy reach, room to grow
- *   30–60: Moderate (amber) — Monitor frequency
- *   60–100: High (red)   — Audience fatigue, refresh needed
+ *   0–25:  Low (green)    — Healthy reach, room to grow
+ *   26–55: Moderate (amber) — Monitor frequency and efficiency
+ *   56–100: High (red)    — Audience fatigue, refresh needed
+ *
+ * When trend data is unavailable, weights redistribute to F=0.55, E=0.45.
  */
 export function calculateSaturation(
   totalImpressions: number,
   totalReach: number,
+  totalSpend: number,
   reachData?: PreparedReachPoint[]
 ): SaturationResult {
-  const avgFrequency = totalReach > 0 ? totalImpressions / totalReach : 0
+  // Edge case: insufficient data
+  if (totalReach === 0 || totalImpressions === 0) {
+    return {
+      score: 0,
+      level: "low",
+      label: "Insufficient data",
+      avgFrequency: 0,
+      components: { frequency: 0, efficiency: 0, trend: 0 },
+    }
+  }
 
-  // Calculate saturation premium based on declining new reach %
-  let saturationPremium = 0
+  const avgFrequency = totalImpressions / totalReach
+
+  // --- F_score: Frequency pressure (cap at 8x) ---
+  const fScore = Math.min(100, (avgFrequency / 8) * 100)
+
+  // --- E_score: CPM/CPMr efficiency gap ---
+  const cpm = totalImpressions > 0 ? (totalSpend / totalImpressions) * 1000 : 0
+  const cpmr = totalReach > 0 ? (totalSpend / totalReach) * 1000 : 0
+  const eScore = cpmr > 0 ? Math.min(100, ((cpmr - cpm) / cpmr) * 100) : 0
+
+  // --- T_score: New reach trend decline ---
+  let tScore = 0
+  let hasTrendData = false
+
   if (reachData && reachData.length >= 7) {
+    hasTrendData = true
     const firstHalf = reachData.slice(0, Math.floor(reachData.length / 2))
     const secondHalf = reachData.slice(Math.floor(reachData.length / 2))
 
@@ -103,30 +149,31 @@ export function calculateSaturation(
     const secondAvgNewPct =
       secondHalf.reduce((sum, d) => sum + d.newReachPct, 0) / secondHalf.length
 
-    // If new reach % is declining, that contributes to saturation
     if (firstAvgNewPct > 0) {
-      const decline = ((firstAvgNewPct - secondAvgNewPct) / firstAvgNewPct) * 100
-      saturationPremium = Math.max(0, decline)
+      const declineRatio = (firstAvgNewPct - secondAvgNewPct) / firstAvgNewPct
+      // Normalize: 50% decline = score 100, scale linearly
+      tScore = Math.min(100, Math.max(0, declineRatio * 200))
     }
   }
 
-  const score = Math.min(
-    100,
-    Math.max(
-      0,
-      (avgFrequency / 3) * 50 + (saturationPremium / 100) * 50
-    )
-  )
+  // --- Weighted score ---
+  let score: number
+  if (hasTrendData) {
+    score = 0.4 * fScore + 0.35 * eScore + 0.25 * tScore
+  } else {
+    // No trend data — redistribute weights
+    score = 0.55 * fScore + 0.45 * eScore
+  }
 
-  const roundedScore = Math.round(score)
+  const roundedScore = Math.round(Math.min(100, Math.max(0, score)))
 
   let level: SaturationResult["level"]
   let label: string
 
-  if (roundedScore <= 30) {
+  if (roundedScore <= 25) {
     level = "low"
     label = "Low saturation — healthy new reach"
-  } else if (roundedScore <= 60) {
+  } else if (roundedScore <= 55) {
     level = "moderate"
     label = "Moderate saturation — monitor frequency"
   } else {
@@ -139,6 +186,11 @@ export function calculateSaturation(
     level,
     label,
     avgFrequency: Math.round(avgFrequency * 100) / 100,
+    components: {
+      frequency: Math.round(fScore),
+      efficiency: Math.round(eScore),
+      trend: Math.round(tScore),
+    },
   }
 }
 
@@ -246,12 +298,13 @@ export function rollingSaturationSeries(
     const windowSlice = dailyReach.slice(i - windowDays + 1, i + 1)
     const windowImpressions = windowSlice.reduce((s, d) => s + d.impressions, 0)
     const windowReach = windowSlice.reduce((s, d) => s + d.reach, 0)
+    const windowSpend = windowSlice.reduce((s, d) => s + (d.spend || 0), 0)
 
     // Prepare reach data for the window to calculate decline
     const windowBaseline = i >= windowDays ? baselineReach : 0
     const prepared = prepareReachData(windowSlice, windowBaseline)
 
-    const sat = calculateSaturation(windowImpressions, windowReach, prepared)
+    const sat = calculateSaturation(windowImpressions, windowReach, windowSpend, prepared)
     result.push({ date: dailyReach[i].date, score: sat.score })
   }
 

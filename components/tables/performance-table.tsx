@@ -156,6 +156,16 @@ function buildColumns(
     })
   }
 
+  // When funnel steps are configured, always show CPM after the funnel columns
+  if (funnelSteps.length > 0) {
+    cols.push({
+      key: "cpm",
+      label: "CPM",
+      getValue: (row) => deriveMetrics(row.metrics).cpm,
+      format: (row) => fmtCurrency(deriveMetrics(row.metrics).cpm, currency),
+    })
+  }
+
   // If no funnel steps, show default ROAS columns
   if (funnelSteps.length === 0) {
     cols.push(

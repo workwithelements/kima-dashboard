@@ -42,7 +42,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
     ),
     supabase
       .from("client_scorecard_config")
-      .select("funnel_steps, key_action")
+      .select("funnel_steps, key_action, contribution_margin_pct")
       .eq("client_id", params.id)
       .single(),
     fetchGoogleAdsData(params.id, range.from, range.to),
@@ -63,6 +63,9 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
 
   const funnelSteps = (configRes.data?.funnel_steps as string[]) || null
   const keyAction = (configRes.data?.key_action as string) || null
+  const contributionMarginPct = configRes.data?.contribution_margin_pct != null
+    ? Number(configRes.data.contribution_margin_pct)
+    : null
   const annotations = (annotationsRes.data || []).map((a: { id: string; date: string; text: string; created_at: string }) => ({
     id: a.id,
     date: a.date,
@@ -84,6 +87,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       baselineReach={data.baselineReach}
       funnelSteps={funnelSteps}
       keyAction={keyAction}
+      contributionMarginPct={contributionMarginPct}
       demographics={breakdownsData?.demographics ?? []}
       placements={breakdownsData?.placements ?? []}
       annotations={annotations}

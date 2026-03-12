@@ -11,20 +11,25 @@ type Props = {
   clientId: string
   selectedSteps: string[]
   keyAction?: string | null
+  contributionMarginPct?: number | null
   onClose: () => void
-  onSaved: (steps: string[], keyAction: string | null) => void
+  onSaved: (steps: string[], keyAction: string | null, contributionMarginPct: number | null) => void
 }
 
 export default function ScorecardConfigModal({
   clientId,
   selectedSteps: initialSteps,
   keyAction: initialKeyAction,
+  contributionMarginPct: initialCmPct = null,
   onClose,
   onSaved,
 }: Props) {
   const [selected, setSelected] = useState<string[]>(initialSteps)
   const [keyAction, setKeyAction] = useState<string | null>(
     initialKeyAction ?? (initialSteps.length > 0 ? initialSteps[initialSteps.length - 1] : null)
+  )
+  const [cmPct, setCmPct] = useState<string>(
+    initialCmPct != null ? String(initialCmPct) : ""
   )
   const [saving, setSaving] = useState(false)
 
@@ -70,13 +75,23 @@ export default function ScorecardConfigModal({
   async function handleSave() {
     setSaving(true)
     try {
+      const cmVal = cmPct.trim() === "" ? null : Number(cmPct)
+      if (cmVal !== null && (isNaN(cmVal) || cmVal < 0 || cmVal > 100)) {
+        alert("Contribution margin must be between 0 and 100")
+        setSaving(false)
+        return
+      }
       const res = await fetch(`/api/scorecard-config/${clientId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ funnel_steps: selected, key_action: keyAction }),
+        body: JSON.stringify({
+          funnel_steps: selected,
+          key_action: keyAction,
+          contribution_margin_pct: cmVal,
+        }),
       })
       if (res.ok) {
-        onSaved(selected, keyAction)
+        onSaved(selected, keyAction, cmVal)
       } else {
         const errBody = await res.json().catch(() => ({}))
         alert(`Failed to save configuration: ${errBody?.error || res.status}`)
@@ -218,6 +233,31 @@ export default function ScorecardConfigModal({
             </div>
           </div>
         )}
+
+        {/* Contribution Margin % */}
+        <div className="mt-5 rounded-lg border border-neutral-800 bg-neutral-800/30 p-3">
+          <label className="flex items-center justify-between">
+            <div>
+              <span className="text-xs font-medium text-neutral-400">Contribution Margin %</span>
+              <p className="mt-0.5 text-[10px] text-neutral-600">
+                CM3 = Revenue &times; CM% &minus; Ad Spend
+              </p>
+            </div>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={0.1}
+                value={cmPct}
+                onChange={(e) => setCmPct(e.target.value)}
+                placeholder="—"
+                className="w-16 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-right text-sm text-white placeholder-neutral-600 focus:border-brand-lime focus:outline-none"
+              />
+              <span className="text-xs text-neutral-500">%</span>
+            </div>
+          </label>
+        </div>
 
         {/* Actions */}
         <div className="mt-6 flex justify-end gap-3">

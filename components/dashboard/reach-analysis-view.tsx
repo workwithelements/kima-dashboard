@@ -4,7 +4,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import dynamic from "next/dynamic"
 import { Card, MetricCard } from "@/components/ui/card"
 import DateRangePicker from "@/components/ui/date-range-picker"
-import { fmtNumber, fmtPercent, fmtCurrency } from "@/lib/utils/format"
+import { fmtNumber, fmtPercent, fmtCurrency, fmtDelta } from "@/lib/utils/format"
 
 // Lazy-load heavy chart components
 const ChartPlaceholder = () => (
@@ -36,13 +36,16 @@ import {
 } from "@/lib/utils/reach"
 import type { DatePreset } from "@/lib/utils/dates"
 
+type ReachRow = { date: string; reach: number; impressions: number; spend?: number }
+
 type Props = {
-  rows: { date: string; reach: number; impressions: number; spend?: number }[]
+  rows: ReachRow[]
   baselineReach: number
   preset: DatePreset
   from: string
   to: string
   currency?: string
+  comparisonRows?: ReachRow[]
 }
 
 export default function ReachAnalysisView({
@@ -52,6 +55,7 @@ export default function ReachAnalysisView({
   from,
   to,
   currency = "GBP",
+  comparisonRows = [],
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -73,22 +77,60 @@ export default function ReachAnalysisView({
     router.push(`${pathname}?${params.toString()}`)
   }
 
-  // Prepare data
+  // — Primary period data —
   const dailyReach = dailyReachSeries(rows)
   const reachData = prepareReachData(dailyReach, baselineReach)
 
-  // Aggregate totals
   const totalReach = rows.reduce((sum, r) => sum + (r.reach || 0), 0)
   const totalImpressions = rows.reduce((sum, r) => sum + (r.impressions || 0), 0)
   const totalSpend = rows.reduce((sum, r) => sum + (r.spend || 0), 0)
 
-  // Saturation
-  const saturation = calculateSaturation(totalImpressions, totalReach, reachData)
+  const saturation = calculateSaturation(totalImpressions, totalReach, totalSpend, reachData)
 
-  // CPMr
   const cpmr = totalReach > 0 ? (totalSpend / totalReach) * 1000 : 0
+  const cpm = totalImpressions > 0 ? (totalSpend / totalImpressions) * 1000 : 0
 
-  // CPM vs CPMr series
+  const totalNewReach = reachData.reduce((sum, d) => sum + d.newReach, 0)
+  const avgNewReachPct =
+    reachData.length > 0
+      ? reachData.reduce((sum, d) => sum + d.newReachPct, 0) / reachData.length
+      : 0
+
+  // — Comparison period data —
+  const hasComparison = comparisonRows.length > 0
+  let compTotalReach = 0
+  let compTotalImpressions = 0
+  let compTotalSpend = 0
+  let compAvgNewReachPct = 0
+  let compFrequency = 0
+  let compCpmr = 0
+  let compCpm = 0
+
+  if (hasComparison) {
+    compTotalReach = comparisonRows.reduce((sum, r) => sum + (r.reach || 0), 0)
+    compTotalImpressions = comparisonRows.reduce((sum, r) => sum + (r.impressions || 0), 0)
+    compTotalSpend = comparisonRows.reduce((sum, r) => sum + (r.spend || 0), 0)
+
+    const compDailyReach = dailyReachSeries(comparisonRows)
+    const compReachData = prepareReachData(compDailyReach, 0)
+    compAvgNewReachPct =
+      compReachData.length > 0
+        ? compReachData.reduce((sum, d) => sum + d.newReachPct, 0) / compReachData.length
+        : 0
+
+    compFrequency = compTotalReach > 0 ? compTotalImpressions / compTotalReach : 0
+    compCpmr = compTotalReach > 0 ? (compTotalSpend / compTotalReach) * 1000 : 0
+    compCpm = compTotalImpressions > 0 ? (compTotalSpend / compTotalImpressions) * 1000 : 0
+  }
+
+  // Deltas
+  const reachDelta = hasComparison ? fmtDelta(totalReach, compTotalReach) : null
+  const newReachPctDelta = hasComparison ? fmtDelta(avgNewReachPct, compAvgNewReachPct) : null
+  const freqDelta = hasComparison ? fmtDelta(saturation.avgFrequency, compFrequency) : null
+  const cpmrDelta = hasComparison ? fmtDelta(cpmr, compCpmr) : null
+  const cpmDelta = hasComparison ? fmtDelta(cpm, compCpm) : null
+
+  // — Charts data —
   const cpmrData = dailyCpmrSeries(
     rows.map((r) => ({
       date: r.date,
@@ -98,21 +140,8 @@ export default function ReachAnalysisView({
     }))
   )
 
-  // Rolling saturation series
   const saturationTimeline = rollingSaturationSeries(dailyReach, baselineReach, 7)
-
-  // Fatigue detection
   const fatigueDays = detectReachFatigue(reachData)
-
-  // New reach summary
-  const totalNewReach = reachData.reduce((sum, d) => sum + d.newReach, 0)
-  const avgNewReachPct =
-    reachData.length > 0
-      ? reachData.reduce((sum, d) => sum + d.newReachPct, 0) / reachData.length
-      : 0
-
-  // CPM
-  const cpm = totalImpressions > 0 ? (totalSpend / totalImpressions) * 1000 : 0
 
   return (
     <div className="space-y-6">
@@ -130,25 +159,36 @@ export default function ReachAnalysisView({
 
       {/* Scorecards */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <MetricCard label="Total Reach" value={fmtNumber(totalReach)} />
+        <MetricCard
+          label="Total Reach"
+          value={fmtNumber(totalReach)}
+          delta={reachDelta}
+        />
         <MetricCard
           label="Est. New Reach %"
           value={fmtPercent(avgNewReachPct, 1)}
           subValue={`${fmtNumber(totalNewReach)} new users`}
+          delta={newReachPctDelta}
         />
         <MetricCard
           label="Avg Frequency"
           value={`${saturation.avgFrequency.toFixed(2)}x`}
+          delta={freqDelta}
+          invertDelta
         />
         <MetricCard
           label="CPMr"
           value={fmtCurrency(cpmr, currency)}
           subValue="Cost per 1k reach"
+          delta={cpmrDelta}
+          invertDelta
         />
         <MetricCard
           label="CPM"
           value={fmtCurrency(cpm, currency)}
           subValue="Cost per 1k impressions"
+          delta={cpmDelta}
+          invertDelta
         />
       </div>
 

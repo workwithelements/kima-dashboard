@@ -53,6 +53,13 @@ export type ClassifiedAd = {
   parsed?: ParsedAdName
   fatigueStatus?: FatigueStatus
   fatigueReason?: string
+  // Funnel event counts (exposed for creative detail modal)
+  landingPageViews: number
+  addsToCart: number
+  checkoutsInitiated: number
+  registrationsCompleted: number
+  appInstalls: number
+  mobileAppRegistrations: number
 }
 
 // --- Constants ---
@@ -152,6 +159,13 @@ type AdWithMetrics = {
   cvr: number
   postClickRate: number
   hasMinData: boolean
+  // Funnel event counts
+  landingPageViews: number
+  addsToCart: number
+  checkoutsInitiated: number
+  registrationsCompleted: number
+  appInstalls: number
+  mobileAppRegistrations: number
 }
 
 function median(values: number[]): number {
@@ -290,6 +304,7 @@ export function classifyAllAds(
       checkoutsInitiated: number
       registrationsCompleted: number
       appInstalls: number
+      mobileAppRegistrations: number
     }
   >()
 
@@ -310,6 +325,7 @@ export function classifyAllAds(
       existing.checkoutsInitiated += row.checkouts_initiated || 0
       existing.registrationsCompleted += row.registrations_completed || 0
       existing.appInstalls += row.app_installs || 0
+      existing.mobileAppRegistrations += row.mobile_app_registrations || 0
     } else {
       adMap.set(adId, {
         adName: row.ad_name || adId,
@@ -325,12 +341,13 @@ export function classifyAllAds(
         checkoutsInitiated: row.checkouts_initiated || 0,
         registrationsCompleted: row.registrations_completed || 0,
         appInstalls: row.app_installs || 0,
+        mobileAppRegistrations: row.mobile_app_registrations || 0,
       })
     }
   }
 
   // Step 2: Group aggregated ads by ad set
-  type AdData = { adName: string; adsetId: string; adsetName: string; spend: number; impressions: number; clicks: number; conversions: number; revenue: number; landingPageViews: number; addsToCart: number; checkoutsInitiated: number; registrationsCompleted: number; appInstalls: number }
+  type AdData = { adName: string; adsetId: string; adsetName: string; spend: number; impressions: number; clicks: number; conversions: number; revenue: number; landingPageViews: number; addsToCart: number; checkoutsInitiated: number; registrationsCompleted: number; appInstalls: number; mobileAppRegistrations: number }
   const byAdSet = new Map<string, { adId: string; data: AdData }[]>()
   adMap.forEach((data, adId) => {
     const group = byAdSet.get(data.adsetId) || []
@@ -365,6 +382,12 @@ export function classifyAllAds(
             type: "LOSER_NO_DELIVERY",
             reasons: ["ZERO_ADSET_SPEND"],
           },
+          landingPageViews: data.landingPageViews,
+          addsToCart: data.addsToCart,
+          checkoutsInitiated: data.checkoutsInitiated,
+          registrationsCompleted: data.registrationsCompleted,
+          appInstalls: data.appInstalls,
+          mobileAppRegistrations: data.mobileAppRegistrations,
         })
       }
       return
@@ -403,6 +426,12 @@ export function classifyAllAds(
         postClickRate:
           data.impressions > 0 ? postClickEvents / data.impressions : 0,
         hasMinData,
+        landingPageViews: data.landingPageViews,
+        addsToCart: data.addsToCart,
+        checkoutsInitiated: data.checkoutsInitiated,
+        registrationsCompleted: data.registrationsCompleted,
+        appInstalls: data.appInstalls,
+        mobileAppRegistrations: data.mobileAppRegistrations,
       }
     })
 

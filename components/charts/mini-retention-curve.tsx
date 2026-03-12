@@ -120,8 +120,10 @@ export default function MiniRetentionCurve({
   // ── X-axis / tooltip labels ─────────────────────────────────
   const tooltipLabel = (idx: number) => {
     const lbl = points[idx]?.label ?? ""
+    if (lbl === "Impr.") return "Impressions"
+    if (lbl === "3s") return "3s Views"
     if (lbl === "Views") return "Video Views"
-    return lbl
+    return `Watched ${lbl}`
   }
 
   // ── Tooltip position ────────────────────────────────────────

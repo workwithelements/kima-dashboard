@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic"
 
 import { fetchReachData } from "@/lib/data/fetch-client-data"
-import { getPresetRange } from "@/lib/utils/dates"
+import { getPresetRange, getComparisonRange } from "@/lib/utils/dates"
 import type { DatePreset } from "@/lib/utils/dates"
 import ReachAnalysisView from "@/components/dashboard/reach-analysis-view"
 import { notFound } from "next/navigation"
@@ -21,7 +21,16 @@ export default async function ReachAnalysisPage({ params, searchParams }: Props)
     ? { from: searchParams.from, to: searchParams.to }
     : getPresetRange(preset)
 
-  const data = await fetchReachData(params.id, range.from, range.to)
+  // Calculate comparison range (previous period)
+  const compRange = getComparisonRange(range, "previous_period")
+
+  const data = await fetchReachData(
+    params.id,
+    range.from,
+    range.to,
+    compRange?.from,
+    compRange?.to
+  )
   if (!data) notFound()
 
   return (
@@ -32,6 +41,7 @@ export default async function ReachAnalysisPage({ params, searchParams }: Props)
       from={range.from}
       to={range.to}
       currency={data.client.currency_code ?? "GBP"}
+      comparisonRows={data.comparisonRows}
     />
   )
 }

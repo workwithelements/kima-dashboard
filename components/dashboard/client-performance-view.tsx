@@ -86,6 +86,8 @@ type Props = {
   placements?: MetaPlacementsRow[]
   /** Annotations / notes for this client in date range */
   annotations?: Annotation[]
+  /** Contribution margin percentage (0-100) for CM3 calculation */
+  contributionMarginPct?: number | null
   /** Hide configure button (for public view) */
   readOnly?: boolean
 }
@@ -131,6 +133,7 @@ export default function ClientPerformanceView({
   annotations: initialAnnotations = [],
   demographics = [],
   placements = [],
+  contributionMarginPct = null,
   readOnly = false,
 }: Props) {
   const currency = client.currency_code ?? "GBP"
@@ -139,6 +142,9 @@ export default function ClientPerformanceView({
   const [showConfig, setShowConfig] = useState(false)
   const [funnelSteps, setFunnelSteps] = useState<string[]>(initialSteps || [])
   const [keyAction, setKeyAction] = useState<string | null>(initialKeyAction)
+  const [cmPct, setCmPct] = useState<number | null>(contributionMarginPct)
+  // Active CPA step: which funnel step drives the CPA chart (defaults to keyAction or last step)
+  const [activeCpaStep, setActiveCpaStep] = useState<string | null>(null)
   const [breakdownTab, setBreakdownTab] = useState<"demographics" | "placements">("demographics")
   const [breakdownMetric, setBreakdownMetric] = useState<"spend" | "impressions" | "purchases">("spend")
   const [breakdownOpen, setBreakdownOpen] = useState(true)
@@ -524,39 +530,111 @@ export default function ClientPerformanceView({
               const vals = calculateFunnelStep(stepKey, metrics, prevStepField)
               const compVals = hasComp ? calculateFunnelStep(stepKey, compMetrics, prevStepField) : null
               const rateDecimals = def.rateDecimals ?? 1
+              const resolvedCpaStep = activeCpaStep || keyAction || funnelSteps[funnelSteps.length - 1]
+              const isActive = stepKey === resolvedCpaStep
               return [
-                <MetricCard
+                <button
                   key={`${stepKey}-count`}
-                  label={def.label}
-                  value={fmtNumber(vals.count)}
-                  delta={compVals ? delta(vals.count, compVals.count) : null}
-                />,
-                <MetricCard
+                  onClick={() => setActiveCpaStep(stepKey)}
+                  className={`rounded-xl text-left transition ${isActive ? "ring-1 ring-brand-lime/40" : "ring-1 ring-transparent hover:ring-neutral-700"}`}
+                >
+                  <MetricCard
+                    label={def.label}
+                    value={fmtNumber(vals.count)}
+                    delta={compVals ? delta(vals.count, compVals.count) : null}
+                  />
+                </button>,
+                <button
                   key={`${stepKey}-rate`}
-                  label={def.rateLabel}
-                  value={vals.rate !== null ? fmtPercent(vals.rate, rateDecimals) : "—"}
-                  delta={
-                    compVals && vals.rate !== null && compVals.rate !== null
-                      ? delta(vals.rate, compVals.rate)
-                      : null
-                  }
-                />,
-                <MetricCard
+                  onClick={() => setActiveCpaStep(stepKey)}
+                  className={`rounded-xl text-left transition ${isActive ? "ring-1 ring-brand-lime/40" : "ring-1 ring-transparent hover:ring-neutral-700"}`}
+                >
+                  <MetricCard
+                    label={def.rateLabel}
+                    value={vals.rate !== null ? fmtPercent(vals.rate, rateDecimals) : "—"}
+                    delta={
+                      compVals && vals.rate !== null && compVals.rate !== null
+                        ? delta(vals.rate, compVals.rate)
+                        : null
+                    }
+                  />
+                </button>,
+                <button
                   key={`${stepKey}-cost`}
-                  label={def.costLabel}
-                  value={vals.costPer !== null ? fmtCurrency(vals.costPer, currency) : "—"}
-                  delta={
-                    compVals && vals.costPer !== null && compVals.costPer !== null
-                      ? delta(vals.costPer, compVals.costPer)
-                      : null
-                  }
-                  invertDelta
-                />,
+                  onClick={() => setActiveCpaStep(stepKey)}
+                  className={`rounded-xl text-left transition ${isActive ? "ring-1 ring-brand-lime/40" : "ring-1 ring-transparent hover:ring-neutral-700"}`}
+                >
+                  <MetricCard
+                    label={def.costLabel}
+                    value={vals.costPer !== null ? fmtCurrency(vals.costPer, currency) : "—"}
+                    delta={
+                      compVals && vals.costPer !== null && compVals.costPer !== null
+                        ? delta(vals.costPer, compVals.costPer)
+                        : null
+                    }
+                    invertDelta
+                  />
+                </button>,
               ]
             })}
           </div>
         </div>
       )}
+
+      {/* Revenue / AOV / ROAS — Meta view (only shown when revenue > 0) */}
+      {isMeta && metrics.revenue > 0 && (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <MetricCard
+            label="Revenue"
+            value={fmtCurrency(metrics.revenue, currency)}
+            delta={delta(metrics.revenue, compMetrics.revenue)}
+          />
+          <MetricCard
+            label="AOV"
+            value={fmtCurrency(derived.aov, currency)}
+            delta={delta(derived.aov, compDerived.aov)}
+          />
+          <MetricCard
+            label="ROAS"
+            value={derived.roas.toFixed(2) + "x"}
+            delta={delta(derived.roas, compDerived.roas)}
+          />
+          <MetricCard
+            label="CPC"
+            value={fmtCurrency(derived.cpc, currency)}
+            delta={delta(derived.cpc, compDerived.cpc)}
+            invertDelta
+          />
+        </div>
+      )}
+
+      {/* CM3 — Contribution Margin 3 (shown when CM% is set and revenue > 0) */}
+      {cmPct != null && metrics.revenue > 0 && (() => {
+        const cm3 = (metrics.revenue * cmPct / 100) - metrics.spend
+        const cm3Roas = metrics.spend > 0 ? cm3 / metrics.spend : 0
+        const compCm3 = hasComp && compMetrics.revenue > 0
+          ? (compMetrics.revenue * cmPct / 100) - compMetrics.spend
+          : null
+        const compCm3Roas = compCm3 !== null && compMetrics.spend > 0
+          ? compCm3 / compMetrics.spend
+          : null
+        return (
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-2">
+            <MetricCard
+              label="CM3"
+              value={fmtCurrency(cm3, currency)}
+              subValue={`CM ${cmPct}%`}
+              delta={compCm3 !== null ? fmtDelta(cm3, compCm3) : undefined}
+            />
+            <MetricCard
+              label="CM3 ROAS"
+              value={cm3Roas.toFixed(2) + "x"}
+              subValue="Profit per ad spend"
+              delta={compCm3Roas !== null ? fmtDelta(cm3Roas, compCm3Roas) : undefined}
+            />
+          </div>
+        )
+      })()}
 
       {/* Configure button when no steps configured (Meta only) */}
       {isMeta && funnelSteps.length === 0 && !readOnly && (
@@ -641,20 +719,24 @@ export default function ClientPerformanceView({
       </Card>
 
       {/* CPA Chart (Meta only, when funnel steps exist) */}
-      {showFunnel && (
-        <Card>
-          <h2 className="mb-4 text-sm font-medium text-neutral-400">
-            Cost Per {FUNNEL_STEP_DEFS[keyAction || funnelSteps[funnelSteps.length - 1]]?.label || "Action"}
-          </h2>
-          <CPAChart
-            data={funnelSeries}
-            stepKey={keyAction || funnelSteps[funnelSteps.length - 1]}
-            stepLabel={FUNNEL_STEP_DEFS[keyAction || funnelSteps[funnelSteps.length - 1]]?.label || "Action"}
-            spendByDate={spendByDate}
-            currency={currency}
-          />
-        </Card>
-      )}
+      {showFunnel && (() => {
+        const cpaStepKey = activeCpaStep || keyAction || funnelSteps[funnelSteps.length - 1]
+        const cpaStepLabel = FUNNEL_STEP_DEFS[cpaStepKey]?.label || "Action"
+        return (
+          <Card>
+            <h2 className="mb-4 text-sm font-medium text-neutral-400">
+              Cost Per {cpaStepLabel}
+            </h2>
+            <CPAChart
+              data={funnelSeries}
+              stepKey={cpaStepKey}
+              stepLabel={cpaStepLabel}
+              spendByDate={spendByDate}
+              currency={currency}
+            />
+          </Card>
+        )
+      })()}
 
       {showFunnel && (
         <div className="grid gap-4 lg:grid-cols-2">
@@ -741,10 +823,12 @@ export default function ClientPerformanceView({
           clientId={client.id}
           selectedSteps={funnelSteps}
           keyAction={keyAction}
+          contributionMarginPct={cmPct}
           onClose={() => setShowConfig(false)}
-          onSaved={(steps, newKeyAction) => {
+          onSaved={(steps, newKeyAction, newCmPct) => {
             setFunnelSteps(steps)
             setKeyAction(newKeyAction)
+            setCmPct(newCmPct)
             setShowConfig(false)
           }}
         />

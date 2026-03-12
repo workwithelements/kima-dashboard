@@ -11,7 +11,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts"
-import { fmtDateShort, fmtCurrency } from "@/lib/utils/format"
+import { fmtDateShort, fmtCurrency, fmtNumber } from "@/lib/utils/format"
 
 type Props = {
   /** Daily funnel data: { date, [stepKey]: count } */
@@ -34,13 +34,13 @@ export default function CPAChart({
 }: Props) {
   if (data.length === 0) return null
 
-  // Build CPA data: daily CPA + 7-day rolling average
+  // Build enriched data: event count + daily CPA + 7-day rolling average CPA
   const enriched = data.map((d) => {
     const date = d.date as string
     const spend = spendByDate[date] || 0
     const count = (d[stepKey] as number) || 0
     const cpa = count > 0 ? spend / count : null
-    return { date, cpa, spend, count }
+    return { date, count, cpa, spend }
   })
 
   const withRolling = enriched.map((d, i) => {
@@ -53,7 +53,7 @@ export default function CPAChart({
     return { ...d, rolling }
   })
 
-  // Compute max CPA for Y-axis (95th percentile × 1.2 to cut outliers)
+  // Compute max CPA for right Y-axis (95th percentile × 1.2 to cut outliers)
   const cpaValues = withRolling
     .map((d) => d.cpa)
     .filter((v): v is number => v !== null && v > 0)
@@ -77,7 +77,18 @@ export default function CPAChart({
           axisLine={{ stroke: "#262626" }}
           tickFormatter={fmtDateShort}
         />
+        {/* Left Y-axis: event count */}
         <YAxis
+          yAxisId="count"
+          tick={{ fill: "#737373", fontSize: 11 }}
+          tickLine={false}
+          axisLine={false}
+          tickFormatter={(v) => fmtNumber(v)}
+        />
+        {/* Right Y-axis: CPA currency */}
+        <YAxis
+          yAxisId="cpa"
+          orientation="right"
           tick={{ fill: "#737373", fontSize: 11 }}
           tickLine={false}
           axisLine={false}
@@ -94,14 +105,20 @@ export default function CPAChart({
           labelStyle={{ color: "#a3a3a3" }}
           labelFormatter={fmtDateShort}
           formatter={(value: any, name: string) => {
+            if (name === "count") {
+              return [fmtNumber(value as number), stepLabel]
+            }
+            if (name === "cpa") {
+              return value != null
+                ? [fmtCurrency(value as number, currency), "Daily CPA"]
+                : ["—", "Daily CPA"]
+            }
             if (name === "rolling") {
               return value != null
                 ? [fmtCurrency(value as number, currency), "7d Avg CPA"]
                 : ["—", "7d Avg CPA"]
             }
-            return value != null
-              ? [fmtCurrency(value as number, currency), `CPA (${stepLabel})`]
-              : ["—", `CPA (${stepLabel})`]
+            return [value, name]
           }}
         />
         <Legend
@@ -110,33 +127,55 @@ export default function CPAChart({
           iconType="circle"
           iconSize={8}
           formatter={(value: string) => {
+            if (value === "count") {
+              return (
+                <span className="text-xs text-neutral-400">{stepLabel}</span>
+              )
+            }
+            if (value === "cpa") {
+              return (
+                <span className="text-xs text-neutral-400">Daily CPA</span>
+              )
+            }
             if (value === "rolling") {
               return (
-                <span className="text-xs text-neutral-400">
-                  7-Day Rolling Avg
-                </span>
+                <span className="text-xs text-neutral-400">7d Avg CPA</span>
               )
             }
             return (
-              <span className="text-xs text-neutral-400">
-                CPA ({stepLabel})
-              </span>
+              <span className="text-xs text-neutral-400">{value}</span>
             )
           }}
         />
+        {/* Bars: event count (lime, semi-transparent) */}
         <Bar
-          dataKey="cpa"
+          yAxisId="count"
+          dataKey="count"
           fill="#CDFF00"
-          fillOpacity={0.35}
+          fillOpacity={0.3}
           radius={[2, 2, 0, 0]}
         />
+        {/* Line 1: daily CPA (pink) */}
         <Line
+          yAxisId="cpa"
           type="monotone"
-          dataKey="rolling"
-          stroke="#CDFF00"
+          dataKey="cpa"
+          stroke="#FF69B4"
           strokeWidth={2}
           dot={false}
-          activeDot={{ r: 4, strokeWidth: 0, fill: "#CDFF00" }}
+          activeDot={{ r: 4, strokeWidth: 0, fill: "#FF69B4" }}
+          connectNulls
+        />
+        {/* Line 2: 7d rolling average CPA (white dashed) */}
+        <Line
+          yAxisId="cpa"
+          type="monotone"
+          dataKey="rolling"
+          stroke="#a3a3a3"
+          strokeWidth={2}
+          strokeDasharray="6 3"
+          dot={false}
+          activeDot={{ r: 4, strokeWidth: 0, fill: "#a3a3a3" }}
           connectNulls
         />
       </ComposedChart>

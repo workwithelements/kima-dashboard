@@ -197,7 +197,9 @@ export async function fetchClientsList(from: string, to: string) {
 export async function fetchReachData(
   clientId: string,
   from: string,
-  to: string
+  to: string,
+  compFrom?: string,
+  compTo?: string
 ) {
   const supabase = createServiceClient()
 
@@ -218,8 +220,8 @@ export async function fetchReachData(
   baselineStart.setDate(baselineStart.getDate() - 30)
   const baselineStartStr = baselineStart.toISOString().split("T")[0]
 
-  // Fetch daily data and baseline in parallel
-  const [rowsResult, baselineResult] = await Promise.all([
+  // Build parallel queries
+  const queries: PromiseLike<any>[] = [
     supabase
       .from("meta_daily_performance")
       .select("date, reach, impressions, spend")
@@ -233,7 +235,23 @@ export async function fetchReachData(
       .eq("client_id", clientId)
       .gte("date", baselineStartStr)
       .lte("date", baselineEnd),
-  ])
+  ]
+
+  // Add comparison range query if provided
+  if (compFrom && compTo) {
+    queries.push(
+      supabase
+        .from("meta_daily_performance")
+        .select("date, reach, impressions, spend")
+        .eq("client_id", clientId)
+        .gte("date", compFrom)
+        .lte("date", compTo)
+        .order("date")
+    )
+  }
+
+  const results = await Promise.all(queries)
+  const [rowsResult, baselineResult] = results
 
   let baselineReach = 0
   if (baselineResult.data?.length) {
@@ -242,10 +260,14 @@ export async function fetchReachData(
     }
   }
 
+  // Comparison data
+  const comparisonRows = results[2]?.data || []
+
   return {
     client,
     rows: rowsResult.data || [],
     baselineReach,
+    comparisonRows,
   }
 }
 
@@ -288,7 +310,7 @@ export async function fetchCreativeData(
     ).catch(() => ({ data: [] as any[] })),
     supabase
       .from("client_scorecard_config")
-      .select("creative_previews_enabled, key_action")
+      .select("creative_previews_enabled, key_action, funnel_steps")
       .eq("client_id", clientId)
       .single(),
     Promise.resolve(
@@ -319,6 +341,7 @@ export async function fetchCreativeData(
 
   const previewsEnabled = configResult.data?.creative_previews_enabled ?? false
   const keyAction = configResult.data?.key_action ?? undefined
+  const funnelSteps: string[] = configResult.data?.funnel_steps ?? ["unique_link_clicks", "purchases"]
 
   return {
     client,
@@ -326,6 +349,7 @@ export async function fetchCreativeData(
     thumbnails,
     previewsEnabled,
     keyAction,
+    funnelSteps,
     demographics: demoResult,
     placements: placementResult,
   }

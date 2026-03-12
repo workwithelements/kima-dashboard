@@ -26,17 +26,21 @@ export default function ReachChart({
   fatigueDays = 0,
   height = 300,
 }: ReachChartProps) {
-  // Calculate trend line (simple moving average of newReachPct)
+  // Build chart data with 7-day rolling average of newReach count
   const chartData = data.map((d, i) => {
-    // 5-day moving average for trend
-    const windowSize = Math.min(5, i + 1)
+    const windowSize = Math.min(7, i + 1)
     const windowSlice = data.slice(Math.max(0, i - windowSize + 1), i + 1)
-    const trendValue =
-      windowSlice.reduce((sum, p) => sum + p.newReachPct, 0) / windowSlice.length
+    const rollingAvg =
+      windowSlice.reduce((sum, p) => sum + p.newReach, 0) / windowSlice.length
 
     return {
-      ...d,
-      trend: Math.round(trendValue * 10) / 10,
+      date: d.date,
+      reach: d.totalReach - d.previousReach + d.newReach > 0
+        ? (d.totalReach - d.previousReach) // daily total reach (re-derived)
+        : 0,
+      dailyReach: d.newReach + (d.totalReach - d.previousReach - d.newReach),
+      newReach: d.newReach,
+      rollingAvg: Math.round(rollingAvg),
     }
   })
 
@@ -62,20 +66,10 @@ export default function ReachChart({
             tickFormatter={fmtDateShort}
           />
           <YAxis
-            yAxisId="reach"
             tick={{ fill: "#737373", fontSize: 11 }}
             tickLine={false}
             axisLine={false}
             tickFormatter={(v) => fmtNumber(v)}
-          />
-          <YAxis
-            yAxisId="pct"
-            orientation="right"
-            tick={{ fill: "#737373", fontSize: 11 }}
-            tickLine={false}
-            axisLine={false}
-            tickFormatter={(v) => `${v}%`}
-            domain={[0, 100]}
           />
           <Tooltip
             contentStyle={{
@@ -88,12 +82,10 @@ export default function ReachChart({
             labelFormatter={fmtDateShort}
             formatter={(value: number, name: string) => {
               switch (name) {
-                case "previousReach":
-                  return [fmtNumber(value), "Previous Reach"]
                 case "newReach":
-                  return [fmtNumber(value), "New Reach"]
-                case "trend":
-                  return [`${value.toFixed(1)}%`, "New Reach % Trend"]
+                  return [fmtNumber(value), "Est. New Reach"]
+                case "rollingAvg":
+                  return [fmtNumber(value), "7d Avg New Reach"]
                 default:
                   return [fmtNumber(value), name]
               }
@@ -106,9 +98,8 @@ export default function ReachChart({
             iconSize={10}
             formatter={(value: string) => {
               const labels: Record<string, string> = {
-                previousReach: "Previous Reach",
-                newReach: "New Reach",
-                trend: "New Reach % Trend",
+                newReach: "Est. New Reach",
+                rollingAvg: "7d Avg New Reach",
               }
               return (
                 <span className="text-xs text-neutral-400">
@@ -118,23 +109,14 @@ export default function ReachChart({
             }}
           />
           <Bar
-            yAxisId="reach"
-            dataKey="previousReach"
-            stackId="reach"
-            fill="#3B3B5E"
-            radius={[0, 0, 0, 0]}
-          />
-          <Bar
-            yAxisId="reach"
             dataKey="newReach"
-            stackId="reach"
             fill="#CDFF00"
+            fillOpacity={0.6}
             radius={[2, 2, 0, 0]}
           />
           <Line
-            yAxisId="pct"
             type="monotone"
-            dataKey="trend"
+            dataKey="rollingAvg"
             stroke="#FF69B4"
             strokeWidth={2}
             dot={false}

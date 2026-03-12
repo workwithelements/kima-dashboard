@@ -40,7 +40,7 @@ export async function PUT(
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const body = await request.json()
-  const { metric_ids, funnel_steps, creative_previews_enabled, key_action } = body
+  const { metric_ids, funnel_steps, creative_previews_enabled, key_action, contribution_margin_pct } = body
 
   // Build upsert payload — only include fields that were sent
   const payload: Record<string, unknown> = {
@@ -68,6 +68,14 @@ export async function PUT(
 
   if (key_action !== undefined) {
     payload.key_action = key_action || null
+  }
+
+  if (contribution_margin_pct !== undefined) {
+    const cm = contribution_margin_pct === null ? null : Number(contribution_margin_pct)
+    if (cm !== null && (isNaN(cm) || cm < 0 || cm > 100)) {
+      return NextResponse.json({ error: "contribution_margin_pct must be 0-100 or null" }, { status: 400 })
+    }
+    payload.contribution_margin_pct = cm
   }
 
   // Use service client for the write to bypass RLS issues with upsert
