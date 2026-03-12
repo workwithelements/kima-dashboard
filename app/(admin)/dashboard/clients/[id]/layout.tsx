@@ -11,11 +11,24 @@ export default async function ClientLayout({
 }) {
   const supabase = createServiceClient()
 
-  const { data: client } = await supabase
+  // Try with slug first, fall back without it if the column doesn't exist yet
+  let client: { id: string; name: string; slug?: string } | null = null
+  const { data: full, error } = await supabase
     .from("clients")
     .select("id, name, slug")
     .eq("id", params.id)
     .single()
+
+  if (error && !full) {
+    const { data: fallback } = await supabase
+      .from("clients")
+      .select("id, name")
+      .eq("id", params.id)
+      .single()
+    client = fallback ? { ...fallback, slug: undefined } : null
+  } else {
+    client = full
+  }
 
   if (!client) notFound()
 

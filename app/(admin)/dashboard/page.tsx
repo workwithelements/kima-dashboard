@@ -35,7 +35,7 @@ export default async function DashboardPage({ searchParams }: Props) {
   const [clientsResult, configResult, perfResult] = await Promise.all([
     supabase
       .from("clients")
-      .select("id, name, slug")
+      .select("id, name")
       .eq("active", true)
       .order("name"),
     supabase
