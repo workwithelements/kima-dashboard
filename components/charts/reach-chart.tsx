@@ -11,7 +11,7 @@ import {
   Line,
   ComposedChart,
 } from "recharts"
-import { fmtDateShort, fmtNumber, fmtPercent } from "@/lib/utils/format"
+import { fmtDateShort, fmtNumber } from "@/lib/utils/format"
 import type { PreparedReachPoint } from "@/lib/utils/reach"
 
 type ReachChartProps = {
@@ -26,18 +26,17 @@ export default function ReachChart({
   fatigueDays = 0,
   height = 300,
 }: ReachChartProps) {
-  // Build chart data with 7-day rolling average of newReach %
+  // Build chart data with 7-day rolling average of newReach count
   const chartData = data.map((d, i) => {
     const windowSize = Math.min(7, i + 1)
     const windowSlice = data.slice(Math.max(0, i - windowSize + 1), i + 1)
-    const rollingAvgPct =
-      windowSlice.reduce((sum, p) => sum + p.newReachPct, 0) / windowSlice.length
+    const rollingAvgCount =
+      windowSlice.reduce((sum, p) => sum + p.newReach, 0) / windowSlice.length
 
     return {
       date: d.date,
       newReach: d.newReach,
-      newReachPct: d.newReachPct,
-      rollingAvgPct: Math.round(rollingAvgPct * 10) / 10,
+      rollingAvg: Math.round(rollingAvgCount),
     }
   })
 
@@ -62,22 +61,11 @@ export default function ReachChart({
             axisLine={{ stroke: "#262626" }}
             tickFormatter={fmtDateShort}
           />
-          {/* Left Y-axis: new reach count */}
           <YAxis
-            yAxisId="count"
             tick={{ fill: "#737373", fontSize: 11 }}
             tickLine={false}
             axisLine={false}
             tickFormatter={(v) => fmtNumber(v)}
-          />
-          {/* Right Y-axis: new reach % */}
-          <YAxis
-            yAxisId="pct"
-            orientation="right"
-            tick={{ fill: "#737373", fontSize: 11 }}
-            tickLine={false}
-            axisLine={false}
-            tickFormatter={(v) => `${v}%`}
           />
           <Tooltip
             contentStyle={{
@@ -92,8 +80,8 @@ export default function ReachChart({
               switch (name) {
                 case "newReach":
                   return [fmtNumber(value), "Est. New Reach"]
-                case "rollingAvgPct":
-                  return [fmtPercent(value, 1), "7d Avg New Reach %"]
+                case "rollingAvg":
+                  return [fmtNumber(value), "7d Avg New Reach"]
                 default:
                   return [fmtNumber(value), name]
               }
@@ -107,7 +95,7 @@ export default function ReachChart({
             formatter={(value: string) => {
               const labels: Record<string, string> = {
                 newReach: "Est. New Reach",
-                rollingAvgPct: "7d Avg New Reach %",
+                rollingAvg: "7d Avg New Reach",
               }
               return (
                 <span className="text-xs text-neutral-400">
@@ -117,16 +105,14 @@ export default function ReachChart({
             }}
           />
           <Bar
-            yAxisId="count"
             dataKey="newReach"
             fill="#CDFF00"
             fillOpacity={0.6}
             radius={[2, 2, 0, 0]}
           />
           <Line
-            yAxisId="pct"
             type="monotone"
-            dataKey="rollingAvgPct"
+            dataKey="rollingAvg"
             stroke="#FF69B4"
             strokeWidth={2}
             dot={false}
