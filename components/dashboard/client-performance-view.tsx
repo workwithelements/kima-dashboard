@@ -481,9 +481,9 @@ export default function ClientPerformanceView({
           delta={delta(metrics.impressions, compMetrics.impressions)}
         />
         <MetricCard
-          label={isGoogleAds ? "CPC" : "CPM"}
-          value={isGoogleAds ? fmtCurrency(derived.cpc, currency) : fmtCurrency(derived.cpm, currency)}
-          delta={isGoogleAds ? delta(derived.cpc, compDerived.cpc) : delta(derived.cpm, compDerived.cpm)}
+          label="CPM"
+          value={fmtCurrency(derived.cpm, currency)}
+          delta={delta(derived.cpm, compDerived.cpm)}
           invertDelta
         />
         {showReach ? (
@@ -581,9 +581,9 @@ export default function ClientPerformanceView({
         </div>
       )}
 
-      {/* Revenue / AOV / ROAS — Meta view (only shown when revenue > 0) */}
-      {isMeta && metrics.revenue > 0 && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {/* Revenue / AOV / ROAS — shown when configured via scorecard + revenue > 0 */}
+      {metrics.revenue > 0 && funnelSteps.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
           <MetricCard
             label="Revenue"
             value={fmtCurrency(metrics.revenue, currency)}
@@ -598,12 +598,6 @@ export default function ClientPerformanceView({
             label="ROAS"
             value={derived.roas.toFixed(2) + "x"}
             delta={delta(derived.roas, compDerived.roas)}
-          />
-          <MetricCard
-            label="CPC"
-            value={fmtCurrency(derived.cpc, currency)}
-            delta={delta(derived.cpc, compDerived.cpc)}
-            invertDelta
           />
         </div>
       )}
@@ -1146,33 +1140,41 @@ function BreakdownsSection({
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-neutral-800 text-neutral-500">
-                      <th className="pb-2 pr-4 font-medium">Age</th>
-                      <th className="pb-2 pr-4 font-medium">Gender</th>
-                      <th className="pb-2 pr-4 font-medium text-right">Spend</th>
-                      <th className="pb-2 pr-4 font-medium text-right">Impressions</th>
-                      <th className="pb-2 pr-4 font-medium text-right">CTR</th>
-                      {renderFunnelHeaders()}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {demoTable.map((row, i) => {
-                      const d = deriveBreakdown(row)
-                      return (
-                        <tr key={i} className="border-b border-neutral-800/50 hover:bg-neutral-800/30">
-                          <td className="py-2 pr-4 text-neutral-300">{row.age}</td>
-                          <td className="py-2 pr-4 capitalize text-neutral-300">{row.gender}</td>
-                          <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(row.spend, currency)}</td>
-                          <td className="py-2 pr-4 text-right text-neutral-300">{fmtNumber(row.impressions)}</td>
-                          <td className="py-2 pr-4 text-right text-neutral-300">{fmtPercent(d.ctr)}</td>
-                          {renderFunnelColumns(row, d)}
+                {(() => {
+                  const totalDemoSpend = demoTable.reduce((s, r) => s + r.spend, 0)
+                  return (
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-neutral-800 text-neutral-500">
+                          <th className="pb-2 pr-4 font-medium">Age</th>
+                          <th className="pb-2 pr-4 font-medium">Gender</th>
+                          <th className="pb-2 pr-4 font-medium text-right">Spend</th>
+                          <th className="pb-2 pr-4 font-medium text-right">Share</th>
+                          <th className="pb-2 pr-4 font-medium text-right">Impressions</th>
+                          <th className="pb-2 pr-4 font-medium text-right">CPM</th>
+                          {renderFunnelHeaders()}
                         </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
+                      </thead>
+                      <tbody>
+                        {demoTable.map((row, i) => {
+                          const d = deriveBreakdown(row)
+                          const share = totalDemoSpend > 0 ? (row.spend / totalDemoSpend) * 100 : 0
+                          return (
+                            <tr key={i} className="border-b border-neutral-800/50 hover:bg-neutral-800/30">
+                              <td className="py-2 pr-4 text-neutral-300">{row.age}</td>
+                              <td className="py-2 pr-4 capitalize text-neutral-300">{row.gender}</td>
+                              <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(row.spend, currency)}</td>
+                              <td className="py-2 pr-4 text-right text-neutral-300">{fmtPercent(share)}</td>
+                              <td className="py-2 pr-4 text-right text-neutral-300">{fmtNumber(row.impressions)}</td>
+                              <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(d.cpm, currency)}</td>
+                              {renderFunnelColumns(row, d)}
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  )
+                })()}
               </div>
             </div>
           )}
@@ -1200,33 +1202,41 @@ function BreakdownsSection({
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-neutral-800 text-neutral-500">
-                      <th className="pb-2 pr-4 font-medium">Platform</th>
-                      <th className="pb-2 pr-4 font-medium">Position</th>
-                      <th className="pb-2 pr-4 font-medium text-right">Spend</th>
-                      <th className="pb-2 pr-4 font-medium text-right">Impressions</th>
-                      <th className="pb-2 pr-4 font-medium text-right">CPM</th>
-                      {renderFunnelHeaders()}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {placementTable.map((row, i) => {
-                      const d = deriveBreakdown(row)
-                      return (
-                        <tr key={i} className="border-b border-neutral-800/50 hover:bg-neutral-800/30">
-                          <td className="py-2 pr-4 text-neutral-300">{fmtPlatform(row.platform)}</td>
-                          <td className="py-2 pr-4 text-neutral-300">{fmtPlatform(row.position)}</td>
-                          <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(row.spend, currency)}</td>
-                          <td className="py-2 pr-4 text-right text-neutral-300">{fmtNumber(row.impressions)}</td>
-                          <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(d.cpm, currency)}</td>
-                          {renderFunnelColumns(row, d)}
+                {(() => {
+                  const totalPlacementSpend = placementTable.reduce((s, r) => s + r.spend, 0)
+                  return (
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-neutral-800 text-neutral-500">
+                          <th className="pb-2 pr-4 font-medium">Platform</th>
+                          <th className="pb-2 pr-4 font-medium">Position</th>
+                          <th className="pb-2 pr-4 font-medium text-right">Spend</th>
+                          <th className="pb-2 pr-4 font-medium text-right">Share</th>
+                          <th className="pb-2 pr-4 font-medium text-right">Impressions</th>
+                          <th className="pb-2 pr-4 font-medium text-right">CPM</th>
+                          {renderFunnelHeaders()}
                         </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
+                      </thead>
+                      <tbody>
+                        {placementTable.map((row, i) => {
+                          const d = deriveBreakdown(row)
+                          const share = totalPlacementSpend > 0 ? (row.spend / totalPlacementSpend) * 100 : 0
+                          return (
+                            <tr key={i} className="border-b border-neutral-800/50 hover:bg-neutral-800/30">
+                              <td className="py-2 pr-4 text-neutral-300">{fmtPlatform(row.platform)}</td>
+                              <td className="py-2 pr-4 text-neutral-300">{fmtPlatform(row.position)}</td>
+                              <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(row.spend, currency)}</td>
+                              <td className="py-2 pr-4 text-right text-neutral-300">{fmtPercent(share)}</td>
+                              <td className="py-2 pr-4 text-right text-neutral-300">{fmtNumber(row.impressions)}</td>
+                              <td className="py-2 pr-4 text-right text-neutral-300">{fmtCurrency(d.cpm, currency)}</td>
+                              {renderFunnelColumns(row, d)}
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  )
+                })()}
               </div>
             </div>
           )}
