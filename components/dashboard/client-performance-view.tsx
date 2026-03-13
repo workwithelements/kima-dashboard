@@ -104,6 +104,8 @@ type Props = {
   readOnly?: boolean
   /** Client-specific naming convention config */
   namingConfig?: NamingConfig
+  /** ad_id → ISO created_time for test badge */
+  createdDates?: Record<string, string>
 }
 
 const COMPARE_OPTIONS: { value: ComparisonType; label: string }[] = [
@@ -150,6 +152,7 @@ export default function ClientPerformanceView({
   contributionMarginPct = null,
   readOnly = false,
   namingConfig,
+  createdDates = {},
 }: Props) {
   const currency = client.currency_code ?? "GBP"
   const router = useRouter()
@@ -166,6 +169,17 @@ export default function ClientPerformanceView({
   const [annotations, setAnnotations] = useState<Annotation[]>(initialAnnotations)
   // Dimension filters for ad-level view
   const [perfDimFilters, setPerfDimFilters] = useState<Record<string, string[]>>({})
+
+  // Compute new ad IDs (first 5 days of activity) for test badge
+  const newAdIds = useMemo(() => {
+    const ids = new Set<string>()
+    const now = Date.now()
+    for (const [adId, dateStr] of Object.entries(createdDates)) {
+      const created = new Date(dateStr).getTime()
+      if (now - created <= 5 * 86_400_000) ids.add(adId)
+    }
+    return ids
+  }, [createdDates])
 
   // Drill-down state for Meta performance table
   type DrillCrumb = { level: HierarchyLevel; id: string; name: string }
@@ -979,6 +993,7 @@ export default function ClientPerformanceView({
               currency={currency}
               breadcrumb={drillBreadcrumb}
               onRowClick={handleDrillDown}
+              newAdIds={isMeta && metaLevel === "ad" ? newAdIds : undefined}
             />
           </div>
         )}

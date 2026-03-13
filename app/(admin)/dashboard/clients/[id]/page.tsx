@@ -94,6 +94,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       placements={breakdownsData?.placements ?? []}
       annotations={annotations}
       namingConfig={data.namingConfig}
+      createdDates={data.createdDates}
     />
   )
 }

@@ -17,6 +17,8 @@ export type ClientData = {
   comparisonRows: Partial<MetaDailyRow>[]
   baselineReach: number
   namingConfig?: NamingConfig
+  /** ad_id → ISO created_time from meta_ad_metadata */
+  createdDates?: Record<string, string>
 }
 
 /**
@@ -62,8 +64,8 @@ export async function fetchClientData(
   dayBefore.setDate(dayBefore.getDate() - 1)
   const baselineEndStr = dayBefore.toISOString().split("T")[0]
 
-  // Fetch primary range, comparison range, and baseline reach ALL in parallel
-  const [primaryResult, compResult, baselineResult] = await Promise.all([
+  // Fetch primary range, comparison range, baseline reach, metadata, and naming config ALL in parallel
+  const [primaryResult, compResult, baselineResult, metadataResult, namingResult] = await Promise.all([
     supabase
       .from("meta_daily_performance")
       .select(PERF_COLUMNS)
@@ -89,6 +91,22 @@ export async function fetchClientData(
       .gte("date", baselineStartStr)
       .lte("date", baselineEndStr)
       .limit(10000),
+    // Fetch ad metadata for created_time (test badge)
+    Promise.resolve(
+      supabase
+        .from("meta_ad_metadata")
+        .select("ad_id, created_time")
+        .eq("client_id", clientId)
+        .limit(50000)
+    ).catch(() => ({ data: [] as any[] })),
+    // Fetch naming config
+    Promise.resolve(
+      supabase
+        .from("client_naming_config")
+        .select("positions, value_maps")
+        .eq("client_id", clientId)
+        .single()
+    ).catch(() => ({ data: null as any })),
   ])
 
   let baselineReach = 0
@@ -98,11 +116,31 @@ export async function fetchClientData(
     }
   }
 
+  // Build created dates map
+  const createdDates: Record<string, string> = {}
+  for (const row of metadataResult.data || []) {
+    if (row.created_time) {
+      createdDates[row.ad_id] = row.created_time
+    }
+  }
+
+  // Build naming config
+  let namingConfig: NamingConfig | undefined
+  const namingData = namingResult?.data
+  if (namingData && namingData.positions) {
+    namingConfig = {
+      positions: namingData.positions as NamingConfig["positions"],
+      valueMaps: (namingData.value_maps || {}) as NamingConfig["valueMaps"],
+    }
+  }
+
   return {
     client: client as Client,
     rows: primaryResult.data || [],
     comparisonRows: (compResult.data || []) as Partial<MetaDailyRow>[],
     baselineReach,
+    namingConfig,
+    createdDates,
   }
 }
 

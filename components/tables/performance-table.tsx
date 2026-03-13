@@ -253,6 +253,7 @@ export default function PerformanceTable({
   currency = "GBP",
   breadcrumb,
   onRowClick,
+  newAdIds,
 }: {
   data: GroupRow[]
   level: string
@@ -265,6 +266,8 @@ export default function PerformanceTable({
   breadcrumb?: { label: string; onClick: () => void }[]
   /** Click handler for drill-down rows (campaigns→adsets, adsets→ads) */
   onRowClick?: (row: GroupRow) => void
+  /** Set of ad IDs in their first 5 days — shows "Test" beaker badge */
+  newAdIds?: Set<string>
 }) {
   const [sortKey, setSortKey] = useState<string>("spend")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
@@ -511,12 +514,25 @@ export default function PerformanceTable({
                     } ${col.key === "name" ? "max-w-[320px] truncate font-medium text-white" : "text-neutral-300"}`}
                     title={col.key === "name" ? row.name : undefined}
                   >
-                    {col.key === "name" && onRowClick ? (
-                      <span className="inline-flex items-center gap-1">
+                    {col.key === "name" ? (
+                      <span className="inline-flex items-center gap-1.5">
                         {col.format(row)}
-                        <svg className="h-3 w-3 shrink-0 text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                        </svg>
+                        {newAdIds?.has(row.id) && (
+                          <span
+                            className="inline-flex shrink-0 items-center gap-0.5 rounded-md border border-purple-500/30 bg-purple-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-purple-400 backdrop-blur-sm"
+                            title="Testing — first 5 days of activity"
+                          >
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 0 1-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 0 1 4.5 0m0 0v5.714a2.25 2.25 0 0 0 .659 1.591L19 14.5M14.25 3.104c.251.023.501.05.75.082M19 14.5l-2.47 5.527a.5.5 0 0 1-.457.298H7.927a.5.5 0 0 1-.457-.298L5 14.5m14 0H5" />
+                            </svg>
+                            Test
+                          </span>
+                        )}
+                        {onRowClick && (
+                          <svg className="h-3 w-3 shrink-0 text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                          </svg>
+                        )}
                       </span>
                     ) : (
                       col.format(row)
