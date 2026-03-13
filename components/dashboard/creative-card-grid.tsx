@@ -37,6 +37,8 @@ type Props = {
   onAssignTag?: (adId: string, tagId: string) => void
   /** Remove a tag from an ad */
   onRemoveTag?: (adId: string, tagId: string) => void
+  /** IDs of ads in their first 5 days of activity (show "Test" badge) */
+  newAdIds?: Set<string>
 }
 
 export default function CreativeCardGrid({
@@ -51,6 +53,7 @@ export default function CreativeCardGrid({
   selectedMetrics = DEFAULT_CARD_METRICS,
   onAssignTag,
   onRemoveTag,
+  newAdIds,
 }: Props) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -67,6 +70,7 @@ export default function CreativeCardGrid({
           selectedMetrics={selectedMetrics}
           onAssignTag={onAssignTag}
           onRemoveTag={onRemoveTag}
+          isNew={newAdIds?.has(ad.adId)}
         />
       ))}
       {ads.length === 0 && (
@@ -89,6 +93,7 @@ function CreativeCard({
   selectedMetrics,
   onAssignTag,
   onRemoveTag,
+  isNew,
 }: {
   ad: ClassifiedAd
   thumbnailUrl?: string
@@ -100,6 +105,7 @@ function CreativeCard({
   selectedMetrics: CreativeMetricKey[]
   onAssignTag?: (adId: string, tagId: string) => void
   onRemoveTag?: (adId: string, tagId: string) => void
+  isNew?: boolean
 }) {
   const [imgError, setImgError] = useState(false)
   const [showTagDropdown, setShowTagDropdown] = useState(false)
@@ -155,6 +161,19 @@ function CreativeCard({
             />
           )}
         </span>
+
+        {/* Test badge for ads in their first 5 days */}
+        {isNew && (
+          <span
+            className="absolute top-2 right-2 inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md border backdrop-blur-sm bg-purple-500/15 text-purple-400 border-purple-500/30"
+            title="Testing — first 5 days of activity"
+          >
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714a2.25 2.25 0 00.659 1.591L19 14.5M14.25 3.104c.251.023.501.05.75.082M19 14.5l-1.572 4.483A2.25 2.25 0 0115.3 21H8.7a2.25 2.25 0 01-2.128-1.517L5 14.5m14 0H5" />
+            </svg>
+            Test
+          </span>
+        )}
       </div>
 
       {/* Content */}

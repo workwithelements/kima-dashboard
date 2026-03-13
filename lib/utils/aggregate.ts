@@ -122,6 +122,7 @@ export function deriveMetrics(m: AggregatedMetrics) {
     conversionRate: m.clicks > 0 ? (m.purchases / m.clicks) * 100 : 0,
     aov: m.purchases > 0 ? m.revenue / m.purchases : 0,
     costPerRegistration: m.registrationsCompleted > 0 ? m.spend / m.registrationsCompleted : 0,
+    frequency: m.reach > 0 ? m.impressions / m.reach : 0,
   }
 }
 

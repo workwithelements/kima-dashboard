@@ -277,10 +277,11 @@ export default function ClientDashboard({
         {activeTab === "performance" && (
           <div className="space-y-6">
             {/* Core metrics — always shown */}
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
               <MetricCard label="Spend" value={fmtCurrency(metrics.spend)} />
               <MetricCard label="Impressions" value={fmtNumber(metrics.impressions)} />
               <MetricCard label="CPM" value={fmtCurrency(derived.cpm)} />
+              <MetricCard label="Frequency" value={derived.frequency > 0 ? `${derived.frequency.toFixed(2)}x` : "—"} />
               <MetricCard label="Net New Reach" value={fmtNumber(netNewReach)} />
             </div>
 

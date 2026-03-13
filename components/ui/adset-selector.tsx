@@ -14,11 +14,15 @@ export default function AdSetSelector({
   onChange: (ids: string[]) => void
 }) {
   const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState("")
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false)
+        setSearch("")
+      }
     }
     document.addEventListener("mousedown", handleClick)
     return () => document.removeEventListener("mousedown", handleClick)
@@ -87,8 +91,19 @@ export default function AdSetSelector({
             </div>
           </div>
 
+          {adsets.length > 5 && (
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search ad sets..."
+              className="mb-2 w-full rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-white placeholder-neutral-500 focus:border-brand-lime focus:outline-none"
+              autoFocus
+            />
+          )}
+
           <div className="max-h-48 space-y-0.5 overflow-y-auto">
-            {adsets.map((a) => {
+            {adsets.filter((a) => !search || a.name.toLowerCase().includes(search.toLowerCase())).map((a) => {
               const checked = allSelected || selected.includes(a.id)
               return (
                 <label

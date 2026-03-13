@@ -6,6 +6,7 @@ import { monthStart, today, daysAgo } from "@/lib/utils/dates"
 import { dailySpendSeries } from "@/lib/utils/aggregate"
 import { calculatePacing } from "@/lib/utils/pacing"
 import { fetchConsolidatedSpend, consolidateDailySpend } from "@/lib/data/fetch-client-data"
+import BudgetEditor from "@/components/dashboard/budget-editor"
 import PacingCard from "@/components/dashboard/pacing-card"
 import { Card, MetricCard } from "@/components/ui/card"
 import MetricChart from "@/components/charts/metric-chart"
@@ -21,14 +22,14 @@ export default async function ClientPacingPage({ params }: Props) {
   // Fetch client
   const { data: client } = await supabase
     .from("clients")
-    .select("id, name, currency_code")
+    .select("id, name, currency_code, monthly_budget")
     .eq("id", params.id)
     .single()
 
   if (!client) notFound()
-  const clientWithBudget = { ...client, monthly_budget: null as number | null }
 
   const currency = (client as any).currency_code ?? "GBP"
+  const monthlyBudget: number | null = (client as any).monthly_budget ?? null
   const now = new Date()
   const year = now.getFullYear()
   const month = now.getMonth() + 1
@@ -37,6 +38,7 @@ export default async function ClientPacingPage({ params }: Props) {
   const [currentMonthSpend, historicalSpend] = await Promise.all([
     fetchConsolidatedSpend(params.id, monthStart(), today()),
     fetchConsolidatedSpend(params.id, daysAgo(90), today()),
+    new Promise((r) => setTimeout(r, 1000)),
   ])
 
   const dailySpend = consolidateDailySpend(currentMonthSpend)
@@ -45,7 +47,7 @@ export default async function ClientPacingPage({ params }: Props) {
   // Calculate pacing
   const pacing = calculatePacing(
     dailySpend,
-    clientWithBudget.monthly_budget || null,
+    monthlyBudget,
     year,
     month,
     historicalDaily
@@ -63,6 +65,9 @@ export default async function ClientPacingPage({ params }: Props) {
 
   return (
     <div className="space-y-6">
+      {/* Budget editor */}
+      <BudgetEditor clientId={params.id} currentBudget={monthlyBudget} currency={currency} />
+
       {/* Pacing card */}
       <PacingCard pacing={pacing} currency={currency} />
 
@@ -121,14 +126,14 @@ export default async function ClientPacingPage({ params }: Props) {
       </div>
 
       {/* Info about budget */}
-      {!clientWithBudget.monthly_budget && (
+      {!monthlyBudget && (
         <Card className="border-amber-900/50 bg-amber-950/20">
           <div className="flex items-start gap-3">
             <span className="text-amber-500">⚠️</span>
             <div>
               <p className="text-sm font-medium text-amber-400">No budget set</p>
               <p className="mt-1 text-xs text-neutral-400">
-                Set a monthly budget for this client in the Settings page to enable pacing projections and alerts.
+                Click the edit icon above to set a monthly budget and enable pacing projections.
               </p>
             </div>
           </div>

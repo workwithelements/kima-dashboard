@@ -37,6 +37,14 @@ import { isVideoAd } from "@/lib/utils/video-retention"
 import { FUNNEL_STEP_DEFS, type FunnelStepDef } from "@/lib/utils/funnel-steps"
 import { detectFatigueAll, FATIGUE_CONFIG } from "@/lib/utils/fatigue-detection"
 import { calculateConcentration, CONCENTRATION_COLORS } from "@/lib/utils/spend-concentration"
+import {
+  type NamingConfig,
+  getAvailableDimensions,
+  getDimensionLabel,
+  getDimensionValue,
+  type ParsedAdName,
+} from "@/lib/utils/ad-name-parser"
+import NamingConfigModal from "@/components/dashboard/naming-config-modal"
 import type { MetaDailyRow, MetaDemographicsRow, MetaPlacementsRow } from "@/lib/utils/types"
 import type { DatePreset } from "@/lib/utils/dates"
 
@@ -61,6 +69,10 @@ type Props = {
   placements?: MetaPlacementsRow[]
   /** Configured funnel steps from scorecard config */
   funnelSteps?: string[]
+  /** Client-specific naming convention config */
+  namingConfig?: NamingConfig
+  /** Ad ID → created_time mapping for "test" badge */
+  createdDates?: Record<string, string>
 }
 
 type SortKey =
@@ -70,7 +82,7 @@ type SortKey =
   | CreativeMetricKey
 
 type ViewMode = "table" | "grid"
-type GroupBy = "none" | "tags"
+type GroupBy = "none" | "tags" | `dimension:${string}`
 
 type AdTagMap = Record<string, string[]> // ad_id -> tag_id[]
 
@@ -98,6 +110,8 @@ export default function CreativeAnalysisView({
   demographics = [],
   placements = [],
   funnelSteps = ["unique_link_clicks", "purchases"],
+  namingConfig,
+  createdDates = {},
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -111,6 +125,12 @@ export default function CreativeAnalysisView({
   const [viewMode, setViewMode] = useState<ViewMode>("grid")
   const [groupBy, setGroupBy] = useState<GroupBy>("none")
   const [spendShareAdSet, setSpendShareAdSet] = useState<string | null>(null)
+
+  // Dimension filter state
+  const [dimensionFilters, setDimensionFilters] = useState<Record<string, string[]>>({})
+
+  // Naming config modal state
+  const [showNamingConfig, setShowNamingConfig] = useState(false)
 
   // Tag state
   const [tags, setTags] = useState<Tag[]>([])
@@ -226,8 +246,8 @@ export default function CreativeAnalysisView({
 
   // Classify all ads
   const classifiedAds = useMemo(
-    () => classifyAllAds(filteredRows, keyAction),
-    [filteredRows, keyAction]
+    () => classifyAllAds(filteredRows, keyAction, namingConfig),
+    [filteredRows, keyAction, namingConfig]
   )
 
   // Fatigue detection
@@ -242,13 +262,46 @@ export default function CreativeAnalysisView({
     [classifiedAds, fatigueMap]
   )
 
+  // Available parsed dimensions
+  const availableDimensions = useMemo(() => {
+    const parsed = enrichedAds
+      .map((a) => a.parsed)
+      .filter((p): p is ParsedAdName => p !== undefined)
+    return getAvailableDimensions(parsed, namingConfig)
+  }, [enrichedAds, namingConfig])
+
+  // Compute per-dimension available values for filter dropdowns
+  const dimensionValues = useMemo(() => {
+    const result: Record<string, string[]> = {}
+    for (const dim of availableDimensions) {
+      const vals = new Set<string>()
+      for (const ad of enrichedAds) {
+        const v = getDimensionValue(ad.parsed, dim)
+        if (v) vals.add(v)
+      }
+      result[dim] = Array.from(vals).sort()
+    }
+    return result
+  }, [enrichedAds, availableDimensions])
+
+  // New ad IDs — ads created within last 5 days
+  const newAdIds = useMemo(() => {
+    const ids = new Set<string>()
+    const now = new Date()
+    for (const [adId, created] of Object.entries(createdDates)) {
+      const diff = (now.getTime() - new Date(created).getTime()) / 86400000
+      if (diff <= 5) ids.add(adId)
+    }
+    return ids
+  }, [createdDates])
+
   // Counts by type
   const counts = useMemo(
     () => countByClassification(enrichedAds),
     [enrichedAds]
   )
 
-  // Filter by classification + tags
+  // Filter by classification + tags + dimension filters
   const displayAds = useMemo(() => {
     let ads = enrichedAds
     if (activeFilters.size > 0) {
@@ -260,8 +313,16 @@ export default function CreativeAnalysisView({
         return selectedTagFilters.some((t) => adTags.includes(t))
       })
     }
+    // Dimension filters
+    for (const [dim, selectedValues] of Object.entries(dimensionFilters)) {
+      if (selectedValues.length === 0) continue
+      ads = ads.filter((ad) => {
+        const v = getDimensionValue(ad.parsed, dim)
+        return v ? selectedValues.includes(v) : false
+      })
+    }
     return ads
-  }, [enrichedAds, activeFilters, selectedTagFilters, adTagMap])
+  }, [enrichedAds, activeFilters, selectedTagFilters, adTagMap, dimensionFilters])
 
   // Video ads identification
   const videoAdIds = useMemo(() => {
@@ -336,7 +397,24 @@ export default function CreativeAnalysisView({
   // Grouped ads: split sortedAds into sections when groupBy !== "none"
   const groupedSections = useMemo(() => {
     if (groupBy === "none") return null
-    // group by tags
+
+    // Group by dimension
+    if (groupBy.startsWith("dimension:")) {
+      const dim = groupBy.slice("dimension:".length)
+      const dimMap = new Map<string, ClassifiedAd[]>()
+      for (const ad of sortedAds) {
+        const val = getDimensionValue(ad.parsed, dim) || "Unknown"
+        if (!dimMap.has(val)) dimMap.set(val, [])
+        dimMap.get(val)!.push(ad)
+      }
+      const sections: { label: string; color: string; ads: ClassifiedAd[] }[] = []
+      for (const [value, ads] of Array.from(dimMap)) {
+        sections.push({ label: value, color: "#525252", ads })
+      }
+      return sections
+    }
+
+    // Group by tags
     const tagMap = new Map<string, ClassifiedAd[]>()
     const untagged: ClassifiedAd[] = []
     for (const ad of sortedAds) {
@@ -471,6 +549,37 @@ export default function CreativeAnalysisView({
               className="text-xs text-neutral-500 transition hover:text-white"
             >
               Clear
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Dimension filters */}
+      {availableDimensions.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-neutral-500">Dimensions:</span>
+          {availableDimensions.map((dim) => {
+            const values = dimensionValues[dim] || []
+            const selected = dimensionFilters[dim] || []
+            const label = getDimensionLabel(dim, namingConfig)
+            return (
+              <DimensionFilterDropdown
+                key={dim}
+                label={label}
+                values={values}
+                selected={selected}
+                onChange={(vals) =>
+                  setDimensionFilters((prev) => ({ ...prev, [dim]: vals }))
+                }
+              />
+            )
+          })}
+          {Object.values(dimensionFilters).some((v) => v.length > 0) && (
+            <button
+              onClick={() => setDimensionFilters({})}
+              className="text-xs text-neutral-500 transition hover:text-white"
+            >
+              Clear all
             </button>
           )}
         </div>
@@ -645,8 +754,22 @@ export default function CreativeAnalysisView({
               >
                 <option value="none">None</option>
                 {tags.length > 0 && <option value="tags">Tags</option>}
+                {availableDimensions.map((dim) => (
+                  <option key={dim} value={`dimension:${dim}`}>
+                    {getDimensionLabel(dim, namingConfig)}
+                  </option>
+                ))}
               </select>
             </div>
+            <button
+              onClick={() => setShowNamingConfig(true)}
+              className="rounded-lg px-2.5 py-1.5 text-xs font-medium transition flex items-center gap-1.5 text-neutral-500 hover:text-neutral-300"
+              title="Naming Convention Config"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+              </svg>
+            </button>
             <button
               onClick={() => setShowMetricPicker((v) => !v)}
               className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition flex items-center gap-1.5 ${
@@ -704,6 +827,7 @@ export default function CreativeAnalysisView({
                     selectedMetrics={cardMetrics}
                     onAssignTag={assignTag}
                     onRemoveTag={removeTag}
+                    newAdIds={newAdIds}
                   />
                 ) : (
                   <CreativeTableInline
@@ -722,6 +846,7 @@ export default function CreativeAnalysisView({
                     removeTag={removeTag}
                     onAdClick={setDetailAd}
                     selectedMetrics={tableMetrics}
+                    newAdIds={newAdIds}
                   />
                 )}
               </div>
@@ -740,6 +865,7 @@ export default function CreativeAnalysisView({
             selectedMetrics={cardMetrics}
             onAssignTag={assignTag}
             onRemoveTag={removeTag}
+            newAdIds={newAdIds}
           />
         ) : (
           <CreativeTableInline
@@ -758,6 +884,7 @@ export default function CreativeAnalysisView({
             removeTag={removeTag}
             onAdClick={setDetailAd}
             selectedMetrics={tableMetrics}
+            newAdIds={newAdIds}
           />
         )}
       </div>
@@ -770,6 +897,18 @@ export default function CreativeAnalysisView({
           onTagsChanged={() => {
             fetchTags()
             fetchAdTags()
+          }}
+        />
+      )}
+
+      {/* Naming config modal */}
+      {showNamingConfig && (
+        <NamingConfigModal
+          clientId={clientId}
+          onClose={() => setShowNamingConfig(false)}
+          onSaved={() => {
+            // Reload the page to pick up new config
+            router.refresh()
           }}
         />
       )}
@@ -814,6 +953,7 @@ function CreativeTableInline({
   removeTag,
   onAdClick,
   selectedMetrics = DEFAULT_TABLE_METRICS,
+  newAdIds,
 }: {
   ads: ClassifiedAd[]
   tags: Tag[]
@@ -830,6 +970,7 @@ function CreativeTableInline({
   removeTag: (adId: string, tagId: string) => void
   onAdClick?: (ad: ClassifiedAd) => void
   selectedMetrics?: CreativeMetricKey[]
+  newAdIds?: Set<string>
 }) {
   // Fixed columns: 4 (Name, AdSet, Classification, Tags) + dynamic metrics
   const fixedColCount = 4 + selectedMetrics.length
@@ -872,12 +1013,25 @@ function CreativeTableInline({
                   className="border-b border-neutral-800/50 transition hover:bg-neutral-800/30"
                 >
                   <td className="max-w-[200px] truncate py-2.5 pr-3" title={ad.adName}>
-                    <button
-                      onClick={() => onAdClick?.(ad)}
-                      className="text-neutral-200 hover:text-brand-lime transition truncate text-left"
-                    >
-                      {ad.adName}
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => onAdClick?.(ad)}
+                        className="text-neutral-200 hover:text-brand-lime transition truncate text-left"
+                      >
+                        {ad.adName}
+                      </button>
+                      {newAdIds?.has(ad.adId) && (
+                        <span
+                          className="inline-flex flex-shrink-0 items-center gap-0.5 rounded-md border px-1 py-px text-[9px] font-semibold bg-purple-500/15 text-purple-400 border-purple-500/30"
+                          title="Testing — first 5 days of activity"
+                        >
+                          <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714a2.25 2.25 0 00.659 1.591L19 14.5M14.25 3.104c.251.023.501.05.75.082M19 14.5l-1.572 4.483A2.25 2.25 0 0115.3 21H8.7a2.25 2.25 0 01-2.128-1.517L5 14.5m14 0H5" />
+                          </svg>
+                          Test
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="max-w-[150px] truncate py-2.5 pr-3 text-neutral-400" title={ad.adsetName}>
                     {ad.adsetName}
@@ -1537,5 +1691,106 @@ function ThButton({
         </span>
       )}
     </th>
+  )
+}
+
+// Compact dimension filter dropdown (multi-select)
+function DimensionFilterDropdown({
+  label,
+  values,
+  selected,
+  onChange,
+}: {
+  label: string
+  values: string[]
+  selected: string[]
+  onChange: (vals: string[]) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handleClick)
+    return () => document.removeEventListener("mousedown", handleClick)
+  }, [])
+
+  const displayLabel = selected.length === 0
+    ? label
+    : selected.length === 1
+      ? selected[0]
+      : `${label} (${selected.length})`
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition ${
+          selected.length > 0
+            ? "border-brand-lime/40 bg-brand-lime/10 text-brand-lime"
+            : "border-neutral-700 bg-neutral-800/50 text-neutral-400 hover:text-neutral-200"
+        }`}
+      >
+        <span className="max-w-[120px] truncate">{displayLabel}</span>
+        <svg className={`h-3 w-3 transition ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1 w-56 rounded-xl border border-neutral-700 bg-neutral-900 p-2 shadow-xl">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-neutral-500">
+              {label}
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => onChange(values)}
+                className="text-[10px] text-neutral-400 hover:text-white"
+              >
+                All
+              </button>
+              <button
+                onClick={() => onChange([])}
+                className="text-[10px] text-neutral-400 hover:text-white"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+          <div className="max-h-48 space-y-0.5 overflow-y-auto">
+            {values.map((val) => {
+              const checked = selected.includes(val)
+              return (
+                <label
+                  key={val}
+                  className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-xs transition hover:bg-neutral-800"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => {
+                      if (checked) {
+                        onChange(selected.filter((v) => v !== val))
+                      } else {
+                        onChange([...selected, val])
+                      }
+                    }}
+                    className="h-3.5 w-3.5 rounded border-neutral-600 bg-neutral-800 text-brand-lime focus:ring-brand-lime/30"
+                  />
+                  <span className={checked ? "text-white" : "text-neutral-400"}>
+                    {val}
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

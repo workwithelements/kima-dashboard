@@ -25,7 +25,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
   // Look up client by slug
   const { data: client } = await supabase
     .from("clients")
-    .select("id, name, view_password_hash, slug")
+    .select("id, name, slug")
     .eq("slug", slug)
     .single()
 
@@ -37,10 +37,19 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     )
   }
 
-  // Check if user has already authenticated via cookie
+  // Check if user has already authenticated via opaque session token
   const cookieStore = cookies()
   const authCookie = cookieStore.get(`kima_view_${slug}`)
-  const isAuthenticated = authCookie?.value === client.view_password_hash
+  let isAuthenticated = false
+  if (authCookie?.value) {
+    const { data: session } = await supabase
+      .from("view_sessions")
+      .select("expires_at")
+      .eq("token", authCookie.value)
+      .eq("slug", slug)
+      .single()
+    isAuthenticated = !!session && new Date(session.expires_at) > new Date()
+  }
 
   if (!isAuthenticated) {
     return <PasswordGate slug={slug} clientName={client.name} />

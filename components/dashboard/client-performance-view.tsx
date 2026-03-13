@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
 import type { MetaDailyRow, GoogleAdsDailyRow, MetaDemographicsRow, MetaPlacementsRow, Client, ComparisonType, HierarchyLevel, AggregatedMetrics } from "@/lib/utils/types"
@@ -25,6 +25,14 @@ import PerformanceTable from "@/components/tables/performance-table"
 import AdsSidebar, { type AdEntry } from "@/components/ui/ads-sidebar"
 import ScorecardConfigModal from "./scorecard-config-modal"
 import AnnotationsBar, { type Annotation } from "@/components/ui/annotations-bar"
+import {
+  type NamingConfig,
+  parseAdName,
+  getAvailableDimensions,
+  getDimensionLabel,
+  getDimensionValue,
+  type ParsedAdName,
+} from "@/lib/utils/ad-name-parser"
 
 // Lazy-load heavy chart components (recharts ~200KB)
 const ChartPlaceholder = () => (
@@ -94,6 +102,8 @@ type Props = {
   contributionMarginPct?: number | null
   /** Hide configure button (for public view) */
   readOnly?: boolean
+  /** Client-specific naming convention config */
+  namingConfig?: NamingConfig
 }
 
 const COMPARE_OPTIONS: { value: ComparisonType; label: string }[] = [
@@ -139,6 +149,7 @@ export default function ClientPerformanceView({
   placements = [],
   contributionMarginPct = null,
   readOnly = false,
+  namingConfig,
 }: Props) {
   const currency = client.currency_code ?? "GBP"
   const router = useRouter()
@@ -153,6 +164,8 @@ export default function ClientPerformanceView({
   const [breakdownMetric, setBreakdownMetric] = useState<"spend" | "impressions" | "purchases">("spend")
   const [breakdownOpen, setBreakdownOpen] = useState(true)
   const [annotations, setAnnotations] = useState<Annotation[]>(initialAnnotations)
+  // Dimension filters for ad-level view
+  const [perfDimFilters, setPerfDimFilters] = useState<Record<string, string[]>>({})
 
   // Drill-down state for Meta performance table
   type DrillCrumb = { level: HierarchyLevel; id: string; name: string }
@@ -312,12 +325,60 @@ export default function ClientPerformanceView({
     return byDate
   }, [filteredRows])
 
+  // Parse ad names for dimension filtering at ad level
+  const perfParsedAds = useMemo(() => {
+    if (!isMeta || metaLevel !== "ad") return new Map<string, ParsedAdName>()
+    const map = new Map<string, ParsedAdName>()
+    for (const r of filteredRows) {
+      if (!r.ad_name || !r.ad_id || map.has(r.ad_id)) continue
+      const parsed = parseAdName(r.ad_name, namingConfig)
+      if (parsed) map.set(r.ad_id, parsed)
+    }
+    return map
+  }, [filteredRows, metaLevel, platform, namingConfig])
+
+  const perfAvailableDims = useMemo(() => {
+    if (perfParsedAds.size === 0) return [] as string[]
+    return getAvailableDimensions(Array.from(perfParsedAds.values()), namingConfig)
+  }, [perfParsedAds, namingConfig])
+
+  // Compute unique values per dimension for filter dropdowns
+  const perfDimValues = useMemo(() => {
+    const result: Record<string, string[]> = {}
+    for (const dim of perfAvailableDims) {
+      const vals = new Set<string>()
+      for (const parsed of Array.from(perfParsedAds.values())) {
+        const v = getDimensionValue(parsed, dim)
+        if (v) vals.add(v)
+      }
+      result[dim] = Array.from(vals).sort()
+    }
+    return result
+  }, [perfAvailableDims, perfParsedAds])
+
   // Table data — apply drill-down filtering for Meta
   const groupedData = useMemo(() => {
     if (isMeta) {
       let rows = filteredRows
       if (drillPath.length >= 1) rows = rows.filter(r => r.campaign_id === drillPath[0].id)
       if (drillPath.length >= 2) rows = rows.filter(r => r.adset_id === drillPath[1].id)
+
+      // Apply dimension filters at ad level
+      if (metaLevel === "ad") {
+        const activeFilters = Object.entries(perfDimFilters).filter(([, vals]) => vals.length > 0)
+        if (activeFilters.length > 0) {
+          rows = rows.filter(r => {
+            if (!r.ad_id) return true
+            const parsed = perfParsedAds.get(r.ad_id)
+            if (!parsed) return true
+            return activeFilters.every(([dim, vals]) => {
+              const v = getDimensionValue(parsed, dim)
+              return v ? vals.includes(v) : false
+            })
+          })
+        }
+      }
+
       return groupByLevel(rows, metaLevel)
     }
     if (isGoogleAds) return groupGoogleAdsByLevel(googleAdsRows, gaLevel)
@@ -326,7 +387,7 @@ export default function ClientPerformanceView({
     const gaGroups = groupGoogleAdsByLevel(googleAdsRows, "campaign")
     // Merge: different platforms will have different campaign IDs, so just concat
     return [...metaGroups, ...gaGroups].sort((a, b) => b.metrics.spend - a.metrics.spend)
-  }, [filteredRows, googleAdsRows, metaLevel, drillPath, gaLevel, platform])
+  }, [filteredRows, googleAdsRows, metaLevel, drillPath, gaLevel, platform, perfDimFilters, perfParsedAds])
 
   // Has comparison data?
   const hasComp = compareType !== "none" && (filteredCompRows.length > 0 || googleAdsComparisonRows.length > 0)
@@ -541,7 +602,7 @@ export default function ClientPerformanceView({
       </div>
 
       {/* Core metrics — always shown */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className={`grid grid-cols-2 gap-3 ${showReach ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
         <MetricCard
           label="Spend"
           value={fmtCurrency(metrics.spend, currency)}
@@ -558,6 +619,14 @@ export default function ClientPerformanceView({
           delta={delta(derived.cpm, compDerived.cpm)}
           invertDelta
         />
+        {showReach && (
+          <MetricCard
+            label="Frequency"
+            value={derived.frequency > 0 ? `${derived.frequency.toFixed(2)}x` : "—"}
+            delta={hasComp && compDerived.frequency > 0 ? delta(derived.frequency, compDerived.frequency) : null}
+            invertDelta
+          />
+        )}
         {showReach ? (
           <MetricCard
             label="Avg. Daily New Reach"
@@ -719,7 +788,7 @@ export default function ClientPerformanceView({
 
       {/* Google Ads summary metrics */}
       {isGoogleAds && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
           <MetricCard
             label="Conversions"
             value={fmtNumber(metrics.purchases)}
@@ -729,6 +798,12 @@ export default function ClientPerformanceView({
             label="Conv. Value"
             value={fmtCurrency(metrics.revenue, currency)}
             delta={delta(metrics.revenue, compMetrics.revenue)}
+          />
+          <MetricCard
+            label="Cost / Conv."
+            value={fmtCurrency(derived.cpa, currency)}
+            delta={delta(derived.cpa, compDerived.cpa)}
+            invertDelta
           />
           <MetricCard
             label="ROAS"
@@ -868,6 +943,33 @@ export default function ClientPerformanceView({
         </button>
         {breakdownOpen && (
           <div className="mt-4">
+            {/* Dimension filters — only at ad level with naming config */}
+            {isMeta && metaLevel === "ad" && perfAvailableDims.length > 0 && (
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <span className="text-[10px] font-medium uppercase tracking-wider text-neutral-500">
+                  Filter by
+                </span>
+                {perfAvailableDims.map((dim) => (
+                  <PerfDimensionFilter
+                    key={dim}
+                    label={getDimensionLabel(dim, namingConfig)}
+                    values={perfDimValues[dim] || []}
+                    selected={perfDimFilters[dim] || []}
+                    onChange={(vals) =>
+                      setPerfDimFilters((prev) => ({ ...prev, [dim]: vals }))
+                    }
+                  />
+                ))}
+                {Object.values(perfDimFilters).some((v) => v.length > 0) && (
+                  <button
+                    onClick={() => setPerfDimFilters({})}
+                    className="text-[10px] text-neutral-500 underline hover:text-neutral-300 transition"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+            )}
             <PerformanceTable
               data={groupedData}
               level={currentTableLevel}
@@ -1341,5 +1443,116 @@ function BreakdownsSection({
         />
       )}
     </Card>
+  )
+}
+
+/* ──────────────────────────────────────────────────────────────────────────── */
+/*  PerfDimensionFilter — compact multi-select for perf tab dimension filters */
+/* ──────────────────────────────────────────────────────────────────────────── */
+
+function PerfDimensionFilter({
+  label,
+  values,
+  selected,
+  onChange,
+}: {
+  label: string
+  values: string[]
+  selected: string[]
+  onChange: (vals: string[]) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handleClick)
+    return () => document.removeEventListener("mousedown", handleClick)
+  }, [])
+
+  const displayLabel =
+    selected.length === 0
+      ? label
+      : selected.length === 1
+        ? selected[0]
+        : `${label} (${selected.length})`
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition ${
+          selected.length > 0
+            ? "border-brand-lime/40 bg-brand-lime/10 text-brand-lime"
+            : "border-neutral-700 bg-neutral-800/50 text-neutral-400 hover:text-neutral-200"
+        }`}
+      >
+        <span className="max-w-[120px] truncate">{displayLabel}</span>
+        <svg
+          className={`h-3 w-3 transition ${open ? "rotate-180" : ""}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1 w-56 rounded-xl border border-neutral-700 bg-neutral-900 p-2 shadow-xl">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-neutral-500">
+              {label}
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => onChange(values)}
+                className="text-[10px] text-neutral-400 hover:text-white"
+              >
+                All
+              </button>
+              <button
+                onClick={() => onChange([])}
+                className="text-[10px] text-neutral-400 hover:text-white"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+          <div className="max-h-48 space-y-0.5 overflow-y-auto">
+            {values.map((val) => {
+              const checked = selected.includes(val)
+              return (
+                <label
+                  key={val}
+                  className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-xs transition hover:bg-neutral-800"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => {
+                      if (checked) {
+                        onChange(selected.filter((v) => v !== val))
+                      } else {
+                        onChange([...selected, val])
+                      }
+                    }}
+                    className="h-3.5 w-3.5 rounded border-neutral-600 bg-neutral-800 text-brand-lime focus:ring-brand-lime/30"
+                  />
+                  <span className={checked ? "text-white" : "text-neutral-400"}>
+                    {val}
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

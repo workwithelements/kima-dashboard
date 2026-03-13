@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
 import Logo from "@/components/ui/logo"
@@ -12,6 +12,13 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const router = useRouter()
   const supabase = createClient()
+
+  // Show error from URL params (e.g. failed auth confirmation)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const urlError = params.get("error")
+    if (urlError) setError(urlError)
+  }, [])
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()

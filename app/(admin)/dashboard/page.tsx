@@ -6,7 +6,7 @@ import SpendChart from "@/components/charts/spend-chart"
 import ClientsOverviewTable from "@/components/tables/clients-overview-table"
 import { aggregateMetrics, deriveMetrics, dailySpendSeries } from "@/lib/utils/aggregate"
 import { fmtCurrency, fmtNumber, fmtRoas } from "@/lib/utils/format"
-import { getPresetRange } from "@/lib/utils/dates"
+import { getPresetRange, getComparisonRange } from "@/lib/utils/dates"
 import type { DatePreset } from "@/lib/utils/dates"
 import { FUNNEL_STEP_DEFS } from "@/lib/utils/funnel-steps"
 import OverviewDatePicker from "@/components/ui/overview-date-picker"
@@ -31,8 +31,11 @@ export default async function DashboardPage({ searchParams }: Props) {
   const fromDate = range.from
   const toDate = range.to
 
-  // Fetch clients, scorecard configs, and performance data in parallel
-  const [clientsResult, configResult, perfResult] = await Promise.all([
+  // Comparison range (previous period)
+  const compRange = getComparisonRange(range, "previous_period")
+
+  // Fetch clients, configs, Meta + Google Ads data, and comparison data in parallel
+  const [clientsResult, configResult, perfResult, gaPerfResult, compPerfResult] = await Promise.all([
     supabase
       .from("clients")
       .select("id, name")
@@ -40,7 +43,7 @@ export default async function DashboardPage({ searchParams }: Props) {
       .order("name"),
     supabase
       .from("client_scorecard_config")
-      .select("client_id, funnel_steps"),
+      .select("client_id, funnel_steps, key_action"),
     supabase
       .from("meta_daily_performance")
       .select(
@@ -50,26 +53,52 @@ export default async function DashboardPage({ searchParams }: Props) {
       .lte("date", toDate)
       .order("date")
       .limit(10000),
+    Promise.resolve(
+      supabase
+        .from("google_ads_daily_performance")
+        .select("date, client_id, spend")
+        .gte("date", fromDate)
+        .lte("date", toDate)
+        .order("date")
+        .limit(10000)
+    ).catch(() => ({ data: [] as any[] })),
+    compRange
+      ? supabase
+          .from("meta_daily_performance")
+          .select(
+            "client_id, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, checkouts_initiated, purchases, app_installs"
+          )
+          .gte("date", compRange.from)
+          .lte("date", compRange.to)
+          .limit(10000)
+      : Promise.resolve({ data: [] as any[] }),
+    new Promise((r) => setTimeout(r, 1000)),
   ])
 
   const clients = clientsResult.data || []
   const configs = configResult.data || []
-  const allRows = perfResult.data || []
+  const metaRows = perfResult.data || []
+  const gaRows = (gaPerfResult.data || []) as { date: string; client_id: string; spend: number }[]
+  const compRows = (compPerfResult.data || []) as any[]
 
-  // Build config map: client_id → first funnel step key (the "key action")
+  // Build config map: client_id → key_action (the configured key action)
   const keyActionMap: Record<string, string | null> = {}
   for (const cfg of configs) {
-    const steps = cfg.funnel_steps as string[] | null
-    keyActionMap[cfg.client_id] = steps?.[0] || null
+    keyActionMap[cfg.client_id] = (cfg as any).key_action || null
   }
 
-  // Totals for KPI cards (same date range as chart)
-  const totals = aggregateMetrics(allRows)
+  // Totals for KPI cards (Meta metrics + Google Ads spend)
+  const totals = aggregateMetrics(metaRows)
+  for (const row of gaRows) totals.spend += row.spend || 0
   const derived = deriveMetrics(totals)
   const cpmr = totals.reach > 0 ? (totals.spend / totals.reach) * 1000 : 0
 
-  // Spend chart data
-  const spendData = dailySpendSeries(allRows, fromDate, toDate)
+  // Spend chart data (Meta + Google Ads combined)
+  const combinedSpendRows = [
+    ...metaRows.map((r) => ({ date: r.date, spend: r.spend || 0 })),
+    ...gaRows.map((r) => ({ date: r.date, spend: r.spend || 0 })),
+  ]
+  const spendData = dailySpendSeries(combinedSpendRows, fromDate, toDate)
 
   // Per-client aggregation (spend + all funnel step columns)
   const STEP_COLS = [
@@ -83,7 +112,7 @@ export default async function DashboardPage({ searchParams }: Props) {
   ] as const
 
   const clientAgg: Record<string, Record<string, number>> = {}
-  for (const row of allRows) {
+  for (const row of metaRows) {
     const cid = row.client_id
     if (!cid) continue
     if (!clientAgg[cid]) clientAgg[cid] = { spend: 0 }
@@ -92,10 +121,34 @@ export default async function DashboardPage({ searchParams }: Props) {
       clientAgg[cid][col] = (clientAgg[cid][col] || 0) + ((row as Record<string, any>)[col] || 0)
     }
   }
+  // Add Google Ads spend to per-client totals
+  for (const row of gaRows) {
+    const cid = row.client_id
+    if (!cid) continue
+    if (!clientAgg[cid]) clientAgg[cid] = { spend: 0 }
+    clientAgg[cid].spend += row.spend || 0
+  }
 
-  // Per-client daily spend for sparklines
+  // Comparison period per-client aggregation (for key action deltas)
+  const compClientAgg: Record<string, Record<string, number>> = {}
+  for (const row of compRows) {
+    const cid = row.client_id
+    if (!cid) continue
+    if (!compClientAgg[cid]) compClientAgg[cid] = {}
+    for (const col of STEP_COLS) {
+      compClientAgg[cid][col] = (compClientAgg[cid][col] || 0) + ((row as Record<string, any>)[col] || 0)
+    }
+  }
+
+  // Per-client daily spend for sparklines (Meta + Google Ads)
   const clientDailySpend: Record<string, Record<string, number>> = {}
-  for (const row of allRows) {
+  for (const row of metaRows) {
+    const cid = row.client_id
+    if (!cid) continue
+    if (!clientDailySpend[cid]) clientDailySpend[cid] = {}
+    clientDailySpend[cid][row.date] = (clientDailySpend[cid][row.date] || 0) + (row.spend || 0)
+  }
+  for (const row of gaRows) {
     const cid = row.client_id
     if (!cid) continue
     if (!clientDailySpend[cid]) clientDailySpend[cid] = {}
@@ -107,11 +160,15 @@ export default async function DashboardPage({ searchParams }: Props) {
     const agg = clientAgg[c.id] || {}
     const spend = agg.spend || 0
 
-    // Key action from scorecard config
+    // Key action from scorecard config (uses key_action field)
     const keyActionKey = keyActionMap[c.id] || null
     const keyActionDef = keyActionKey ? FUNNEL_STEP_DEFS[keyActionKey] : null
     const keyActionCount = keyActionKey ? (agg[keyActionKey] || 0) : 0
     const costPerKeyAction = keyActionCount > 0 ? spend / keyActionCount : 0
+
+    // Comparison key action count for delta
+    const compAgg = compClientAgg[c.id] || {}
+    const compKeyActionCount = keyActionKey ? (compAgg[keyActionKey] || 0) : 0
 
     // Build sparkline data (sorted daily spend)
     const dailyMap = clientDailySpend[c.id] || {}
@@ -127,6 +184,7 @@ export default async function DashboardPage({ searchParams }: Props) {
       keyActionLabel: keyActionDef?.label || null,
       keyActionCount,
       costPerKeyAction,
+      compKeyActionCount,
     }
   })
 
@@ -146,7 +204,7 @@ export default async function DashboardPage({ searchParams }: Props) {
         <div>
           <h1 className="text-2xl font-semibold">Dashboard</h1>
           <p className="text-sm text-neutral-400">
-            {rangeLabel} &middot; All clients &middot; Meta Ads
+            {rangeLabel} &middot; All clients
           </p>
         </div>
         <OverviewDatePicker preset={preset} />

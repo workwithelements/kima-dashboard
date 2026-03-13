@@ -27,7 +27,7 @@ export default async function PacingOverviewPage() {
   // Fetch all active clients with budgets
   const { data: clients } = await supabase
     .from("clients")
-    .select("id, name, currency_code")
+    .select("id, name, currency_code, monthly_budget")
     .eq("active", true)
     .order("name")
 

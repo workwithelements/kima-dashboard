@@ -1,7 +1,19 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient } from "@/lib/supabase/server"
+import bcrypt from "bcryptjs"
+import { isRateLimited } from "@/lib/auth/rate-limit"
 
 export async function POST(request: NextRequest) {
+  // Rate limit by IP
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"
+  if (isRateLimited(ip)) {
+    console.warn(`[Auth] Rate limited: ${ip}`)
+    return NextResponse.json(
+      { error: "Too many attempts. Try again later." },
+      { status: 429 }
+    )
+  }
+
   const { slug, password } = await request.json()
 
   if (!slug || !password) {
@@ -16,25 +28,33 @@ export async function POST(request: NextRequest) {
     .eq("slug", slug)
     .single()
 
-  if (!client) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 })
+  if (!client || !client.view_password_hash) {
+    // Log failed attempt — no client found (don't reveal this to caller)
+    console.warn(`[Auth] Failed login for slug="${slug}" from ${ip} — not found`)
+    return NextResponse.json({ error: "Invalid credentials" }, { status: 401 })
   }
 
-  // Simple hash comparison — the password is stored as a SHA-256 hex hash
-  const encoder = new TextEncoder()
-  const data = encoder.encode(password)
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data)
-  const hashHex = Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
+  // Compare with bcrypt
+  const isValid = await bcrypt.compare(password, client.view_password_hash)
 
-  if (hashHex !== client.view_password_hash) {
-    return NextResponse.json({ error: "Wrong password" }, { status: 401 })
+  if (!isValid) {
+    console.warn(`[Auth] Failed login for slug="${slug}" from ${ip} — wrong password`)
+    return NextResponse.json({ error: "Invalid credentials" }, { status: 401 })
   }
 
-  // Set auth cookie (7 day expiry)
+  // Generate opaque session token
+  const sessionToken = crypto.randomUUID()
+
+  // Store session token in the database
+  await supabase.from("view_sessions").insert({
+    token: sessionToken,
+    slug,
+    expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+  })
+
+  // Set auth cookie with opaque token (7 day expiry)
   const response = NextResponse.json({ ok: true })
-  response.cookies.set(`kima_view_${slug}`, hashHex, {
+  response.cookies.set(`kima_view_${slug}`, sessionToken, {
     httpOnly: true,
     secure: true,
     sameSite: "lax",

@@ -8,7 +8,7 @@
  */
 
 import type { MetaDailyRow } from "./types"
-import { parseAdName, type ParsedAdName } from "./ad-name-parser"
+import { parseAdName, type ParsedAdName, type NamingConfig } from "./ad-name-parser"
 import type { FatigueStatus, FatigueResult } from "./fatigue-detection"
 
 // --- Classification Types ---
@@ -285,7 +285,8 @@ function classifyAd(
  */
 export function classifyAllAds(
   rows: Partial<MetaDailyRow>[],
-  keyAction?: string
+  keyAction?: string,
+  namingConfig?: NamingConfig
 ): ClassifiedAd[] {
   // Step 1: Aggregate rows by ad_id
   const adMap = new Map<
@@ -453,7 +454,7 @@ export function classifyAllAds(
       classified.push({
         ...ad,
         classification: result,
-        parsed: parseAdName(ad.adName),
+        parsed: parseAdName(ad.adName, namingConfig),
       })
     }
   })

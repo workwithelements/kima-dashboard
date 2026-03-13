@@ -1,8 +1,13 @@
 /**
  * Elements logo — the stylised X mark followed by "elements" wordmark.
- * Extracted from the brand asset. Renders as inline SVG so it can
- * inherit colour via `currentColor` or be overridden with `className`.
+ * The X is a quatrefoil rotated 45° with concave indentations.
+ * Renders as inline SVG so it inherits colour via `currentColor`.
  */
+
+/** Shared X-mark path used by both Logo and LoadingLogo */
+export const LOGO_X_PATH =
+  "M82,18 C84,32 72,38 65,50 C72,62 84,68 82,82 C68,84 62,72 50,65 C38,72 32,84 18,82 C16,68 28,62 35,50 C28,38 16,32 18,18 C32,16 38,28 50,35 C62,28 68,16 82,18Z"
+
 export default function Logo({
   className = "",
   size = "default",
@@ -23,11 +28,8 @@ export default function Logo({
       xmlns="http://www.w3.org/2000/svg"
       className={`${heights[size]} w-auto ${className}`}
     >
-      {/* X mark — four rounded petals */}
-      <path
-        d="M50 0C50 0 58 20 70 30C80 20 100 20 100 20C100 20 80 28 70 40C80 52 100 80 100 80C100 80 80 60 70 50C58 60 50 80 50 80C50 80 42 60 30 50C20 60 0 80 0 80C0 80 20 52 30 40C20 28 0 20 0 20C0 20 20 20 30 30C42 20 50 0 50 0Z"
-        fill="currentColor"
-      />
+      {/* X mark — four rounded petals with concave indents */}
+      <path d={LOGO_X_PATH} fill="currentColor" />
       {/* "elements" wordmark */}
       <text
         x="120"

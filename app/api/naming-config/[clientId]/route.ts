@@ -3,7 +3,7 @@ import { createServiceClient } from "@/lib/supabase/server"
 import { requireAuth, safeError } from "@/lib/auth/authorize"
 
 /**
- * GET /api/scorecard-config/[clientId] — get scorecard config for a client
+ * GET /api/naming-config/[clientId] — get naming convention config for a client
  */
 export async function GET(
   _request: NextRequest,
@@ -14,7 +14,7 @@ export async function GET(
 
   const db = createServiceClient()
   const { data, error } = await db
-    .from("client_scorecard_config")
+    .from("client_naming_config")
     .select("*")
     .eq("client_id", params.clientId)
     .single()
@@ -23,12 +23,12 @@ export async function GET(
     return safeError(error)
   }
 
-  // Return config or null (no config yet = use defaults)
+  // Return config or null (no config yet = use default hardcoded parser)
   return NextResponse.json(data || null)
 }
 
 /**
- * PUT /api/scorecard-config/[clientId] — upsert scorecard config
+ * PUT /api/naming-config/[clientId] — upsert naming convention config
  */
 export async function PUT(
   request: NextRequest,
@@ -38,7 +38,7 @@ export async function PUT(
   if (authError) return authError
 
   const body = await request.json()
-  const { metric_ids, funnel_steps, creative_previews_enabled, key_action, contribution_margin_pct } = body
+  const { positions, value_maps } = body
 
   // Build upsert payload — only include fields that were sent
   const payload: Record<string, unknown> = {
@@ -46,40 +46,33 @@ export async function PUT(
     updated_at: new Date().toISOString(),
   }
 
-  if (metric_ids !== undefined) {
-    if (!Array.isArray(metric_ids)) {
-      return NextResponse.json({ error: "metric_ids must be an array" }, { status: 400 })
+  if (positions !== undefined) {
+    if (!Array.isArray(positions)) {
+      return NextResponse.json({ error: "positions must be an array" }, { status: 400 })
     }
-    payload.metric_ids = metric_ids
-  }
-
-  if (funnel_steps !== undefined) {
-    if (!Array.isArray(funnel_steps)) {
-      return NextResponse.json({ error: "funnel_steps must be an array" }, { status: 400 })
+    // Validate each position has required fields
+    for (const pos of positions) {
+      if (typeof pos.index !== "number" || !pos.key || !pos.label) {
+        return NextResponse.json(
+          { error: "Each position must have index (number), key (string), label (string)" },
+          { status: 400 }
+        )
+      }
     }
-    payload.funnel_steps = funnel_steps
+    payload.positions = positions
   }
 
-  if (creative_previews_enabled !== undefined) {
-    payload.creative_previews_enabled = Boolean(creative_previews_enabled)
-  }
-
-  if (key_action !== undefined) {
-    payload.key_action = key_action || null
-  }
-
-  if (contribution_margin_pct !== undefined) {
-    const cm = contribution_margin_pct === null ? null : Number(contribution_margin_pct)
-    if (cm !== null && (isNaN(cm) || cm < 0 || cm > 100)) {
-      return NextResponse.json({ error: "contribution_margin_pct must be 0-100 or null" }, { status: 400 })
+  if (value_maps !== undefined) {
+    if (typeof value_maps !== "object" || value_maps === null) {
+      return NextResponse.json({ error: "value_maps must be an object" }, { status: 400 })
     }
-    payload.contribution_margin_pct = cm
+    payload.value_maps = value_maps
   }
 
   // Use service client for the write to bypass RLS issues with upsert
   const db = createServiceClient()
   const { data, error } = await db
-    .from("client_scorecard_config")
+    .from("client_naming_config")
     .upsert(payload, { onConflict: "client_id" })
     .select()
     .single()

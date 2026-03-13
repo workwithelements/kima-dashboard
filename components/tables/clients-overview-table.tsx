@@ -13,6 +13,7 @@ type ClientRow = {
   keyActionLabel: string | null
   keyActionCount: number
   costPerKeyAction: number
+  compKeyActionCount: number
 }
 
 type SortKey = "name" | "spend" | "keyActionCount" | "costPerKeyAction"
@@ -129,9 +130,19 @@ export default function ClientsOverviewTable({
                       {client.keyActionLabel}:
                     </span>{" "}
                     {fmtNumber(client.keyActionCount)}
+                    {client.compKeyActionCount > 0 && (
+                      <span className={`ml-1.5 text-[10px] ${
+                        client.keyActionCount >= client.compKeyActionCount
+                          ? "text-emerald-400"
+                          : "text-red-400"
+                      }`}>
+                        {client.keyActionCount >= client.compKeyActionCount ? "+" : ""}
+                        {(((client.keyActionCount - client.compKeyActionCount) / client.compKeyActionCount) * 100).toFixed(0)}%
+                      </span>
+                    )}
                   </span>
                 ) : (
-                  <span className="text-neutral-600">—</span>
+                  <span className="text-neutral-600 text-[10px] italic">None set</span>
                 )}
               </td>
 

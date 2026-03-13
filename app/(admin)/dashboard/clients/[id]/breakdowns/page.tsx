@@ -21,7 +21,10 @@ export default async function BreakdownsPage({ params, searchParams }: Props) {
     ? { from: searchParams.from, to: searchParams.to }
     : getPresetRange(preset)
 
-  const data = await fetchBreakdownsData(params.id, range.from, range.to)
+  const [data] = await Promise.all([
+    fetchBreakdownsData(params.id, range.from, range.to),
+    new Promise((r) => setTimeout(r, 1000)),
+  ])
   if (!data) notFound()
 
   return (

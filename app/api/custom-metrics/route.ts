@@ -1,21 +1,22 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
+import { requireAuth, safeError } from "@/lib/auth/authorize"
 
 /**
  * GET /api/custom-metrics — list all custom metrics
  */
 export async function GET() {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const { user, error: authError } = await requireAuth()
+  if (authError) return authError
 
+  const supabase = createClient()
   const { data, error } = await supabase
     .from("custom_metrics")
     .select("*")
     .order("is_preset", { ascending: false })
     .order("name")
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeError(error)
   return NextResponse.json(data)
 }
 
@@ -23,9 +24,10 @@ export async function GET() {
  * POST /api/custom-metrics — create a new custom metric
  */
 export async function POST(request: NextRequest) {
+  const { user, error: authError } = await requireAuth()
+  if (authError) return authError
+
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const body = await request.json()
   const { name, numerator, denominator, multiplier, format, decimals, description } = body
@@ -50,6 +52,6 @@ export async function POST(request: NextRequest) {
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeError(error)
   return NextResponse.json(data, { status: 201 })
 }

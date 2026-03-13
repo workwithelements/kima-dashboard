@@ -32,6 +32,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
   // Fetch performance data + scorecard config + Google Ads data in parallel
   const supabase = createServiceClient()
 
+  const minDelay = new Promise((r) => setTimeout(r, 1000))
   const [data, configRes, gaRows, gaCompRows, breakdownsData, annotationsRes] = await Promise.all([
     fetchClientData(
       params.id,
@@ -57,6 +58,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       .gte("date", range.from)
       .lte("date", range.to)
       .order("date"),
+    minDelay,
   ])
 
   if (!data) notFound()
@@ -91,6 +93,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       demographics={breakdownsData?.demographics ?? []}
       placements={breakdownsData?.placements ?? []}
       annotations={annotations}
+      namingConfig={data.namingConfig}
     />
   )
 }

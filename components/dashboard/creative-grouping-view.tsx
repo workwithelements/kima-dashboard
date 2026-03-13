@@ -10,13 +10,18 @@ import {
 import {
   type AdDimension,
   type ParsedAdName,
+  type NamingConfig,
   DIMENSION_LABELS,
   getAvailableDimensions,
+  getDimensionLabel,
+  getDimensionValue,
 } from "@/lib/utils/ad-name-parser"
 
 type Props = {
   classifiedAds: ClassifiedAd[]
   currency?: string
+  /** Client-specific naming convention config */
+  namingConfig?: NamingConfig
 }
 
 type GroupRow = {
@@ -31,16 +36,16 @@ type GroupRow = {
   losers: number
 }
 
-export default function CreativeGroupingView({ classifiedAds, currency = "GBP" }: Props) {
+export default function CreativeGroupingView({ classifiedAds, currency = "GBP", namingConfig }: Props) {
   // Get available dimensions from parsed ads
   const availableDimensions = useMemo(() => {
     const parsed = classifiedAds
       .map((a) => a.parsed)
       .filter((p): p is ParsedAdName => p !== undefined)
-    return getAvailableDimensions(parsed)
-  }, [classifiedAds])
+    return getAvailableDimensions(parsed, namingConfig)
+  }, [classifiedAds, namingConfig])
 
-  const [selectedDimension, setSelectedDimension] = useState<AdDimension>(
+  const [selectedDimension, setSelectedDimension] = useState<string>(
     () => availableDimensions[0] || "format"
   )
 
@@ -57,7 +62,7 @@ export default function CreativeGroupingView({ classifiedAds, currency = "GBP" }
     >()
 
     for (const ad of classifiedAds) {
-      const val = ad.parsed?.[selectedDimension] || "Unknown"
+      const val = getDimensionValue(ad.parsed, selectedDimension) || "Unknown"
       const existing = map.get(val)
       if (existing) {
         existing.ads.push(ad)
@@ -133,13 +138,13 @@ export default function CreativeGroupingView({ classifiedAds, currency = "GBP" }
         <select
           value={selectedDimension}
           onChange={(e) =>
-            setSelectedDimension(e.target.value as AdDimension)
+            setSelectedDimension(e.target.value)
           }
           className="rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs text-neutral-200 focus:border-brand-lime focus:outline-none"
         >
           {availableDimensions.map((dim) => (
             <option key={dim} value={dim}>
-              {DIMENSION_LABELS[dim]}
+              {getDimensionLabel(dim, namingConfig)}
             </option>
           ))}
         </select>
@@ -150,7 +155,7 @@ export default function CreativeGroupingView({ classifiedAds, currency = "GBP" }
           <thead>
             <tr className="border-b border-neutral-800 text-neutral-500">
               <th className="py-2 pr-3 font-medium">
-                {DIMENSION_LABELS[selectedDimension]}
+                {getDimensionLabel(selectedDimension, namingConfig)}
               </th>
               <th className="py-2 pr-3 font-medium text-right">Ads</th>
               <th className="py-2 pr-3 font-medium text-right">Spend</th>

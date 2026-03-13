@@ -24,13 +24,16 @@ export default async function ReachAnalysisPage({ params, searchParams }: Props)
   // Calculate comparison range (previous period)
   const compRange = getComparisonRange(range, "previous_period")
 
-  const data = await fetchReachData(
-    params.id,
-    range.from,
-    range.to,
-    compRange?.from,
-    compRange?.to
-  )
+  const [data] = await Promise.all([
+    fetchReachData(
+      params.id,
+      range.from,
+      range.to,
+      compRange?.from,
+      compRange?.to
+    ),
+    new Promise((r) => setTimeout(r, 1000)),
+  ])
   if (!data) notFound()
 
   return (

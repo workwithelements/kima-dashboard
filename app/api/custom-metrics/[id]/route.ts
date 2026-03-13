@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
+import { requireAuth, safeError } from "@/lib/auth/authorize"
 
 /**
  * PUT /api/custom-metrics/[id] — update a custom metric
@@ -8,9 +9,10 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const { user, error: authError } = await requireAuth()
+  if (authError) return authError
+
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const body = await request.json()
   const { name, numerator, denominator, multiplier, format, decimals, description } = body
@@ -34,7 +36,7 @@ export async function PUT(
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeError(error)
   return NextResponse.json(data)
 }
 
@@ -45,9 +47,10 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const { user, error: authError } = await requireAuth()
+  if (authError) return authError
+
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   // Check if preset
   const { data: metric } = await supabase
@@ -66,6 +69,6 @@ export async function DELETE(
     .delete()
     .eq("id", params.id)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeError(error)
   return NextResponse.json({ ok: true })
 }

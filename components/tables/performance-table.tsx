@@ -60,6 +60,12 @@ const EXTRA_METRICS: ExtraMetricDef[] = [
     format: (row, cur) => fmtCurrency(deriveMetrics(row.metrics).cpc, cur),
   },
   {
+    key: "cpa",
+    label: "Cost / Conv.",
+    getValue: (row) => deriveMetrics(row.metrics).cpa,
+    format: (row, cur) => fmtCurrency(deriveMetrics(row.metrics).cpa, cur),
+  },
+  {
     key: "purchases",
     label: "Purchases",
     getValue: (row) => row.metrics.purchases,
@@ -156,13 +162,22 @@ function buildColumns(
     })
   }
 
-  // When funnel steps are configured, always show CPM after the funnel columns
+  // When funnel steps are configured, always show CPM + Frequency after the funnel columns
   if (funnelSteps.length > 0) {
     cols.push({
       key: "cpm",
       label: "CPM",
       getValue: (row) => deriveMetrics(row.metrics).cpm,
       format: (row) => fmtCurrency(deriveMetrics(row.metrics).cpm, currency),
+    })
+    cols.push({
+      key: "frequency",
+      label: "Freq.",
+      getValue: (row) => deriveMetrics(row.metrics).frequency,
+      format: (row) => {
+        const freq = deriveMetrics(row.metrics).frequency
+        return freq > 0 ? `${freq.toFixed(2)}x` : "—"
+      },
     })
   }
 
@@ -180,6 +195,15 @@ function buildColumns(
         label: "CTR",
         getValue: (row) => deriveMetrics(row.metrics).ctr,
         format: (row) => fmtPercent(deriveMetrics(row.metrics).ctr),
+      },
+      {
+        key: "frequency",
+        label: "Freq.",
+        getValue: (row) => deriveMetrics(row.metrics).frequency,
+        format: (row) => {
+          const freq = deriveMetrics(row.metrics).frequency
+          return freq > 0 ? `${freq.toFixed(2)}x` : "—"
+        },
       },
       {
         key: "purchases",

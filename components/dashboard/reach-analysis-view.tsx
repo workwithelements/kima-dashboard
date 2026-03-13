@@ -1,9 +1,11 @@
 "use client"
 
+import { useMemo, useState } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import dynamic from "next/dynamic"
 import { Card, MetricCard } from "@/components/ui/card"
 import DateRangePicker from "@/components/ui/date-range-picker"
+import AdSetSelector from "@/components/ui/adset-selector"
 import { fmtNumber, fmtPercent, fmtCurrency, fmtDelta } from "@/lib/utils/format"
 
 // Lazy-load heavy chart components
@@ -36,7 +38,7 @@ import {
 } from "@/lib/utils/reach"
 import type { DatePreset } from "@/lib/utils/dates"
 
-type ReachRow = { date: string; reach: number; impressions: number; spend?: number }
+type ReachRow = { date: string; reach: number; impressions: number; spend?: number; adset_id?: string; adset_name?: string }
 
 type Props = {
   rows: ReachRow[]
@@ -77,13 +79,39 @@ export default function ReachAnalysisView({
     router.push(`${pathname}?${params.toString()}`)
   }
 
+  // Extract unique ad sets from rows
+  const adsets = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const r of rows) {
+      if (r.adset_id && r.adset_name) map.set(r.adset_id, r.adset_name)
+    }
+    return Array.from(map, ([id, name]) => ({ id, name })).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    )
+  }, [rows])
+
+  const [selectedAdSets, setSelectedAdSets] = useState<string[]>(() =>
+    adsets.map((a) => a.id)
+  )
+
+  // Filter rows by selected ad sets
+  const filteredRows = useMemo(() => {
+    if (selectedAdSets.length === 0 || selectedAdSets.length === adsets.length) return rows
+    return rows.filter((r) => r.adset_id && selectedAdSets.includes(r.adset_id))
+  }, [rows, selectedAdSets, adsets.length])
+
+  const filteredCompRows = useMemo(() => {
+    if (selectedAdSets.length === 0 || selectedAdSets.length === adsets.length) return comparisonRows
+    return comparisonRows.filter((r) => r.adset_id && selectedAdSets.includes(r.adset_id))
+  }, [comparisonRows, selectedAdSets, adsets.length])
+
   // — Primary period data —
-  const dailyReach = dailyReachSeries(rows)
+  const dailyReach = dailyReachSeries(filteredRows)
   const reachData = prepareReachData(dailyReach, baselineReach)
 
-  const totalReach = rows.reduce((sum, r) => sum + (r.reach || 0), 0)
-  const totalImpressions = rows.reduce((sum, r) => sum + (r.impressions || 0), 0)
-  const totalSpend = rows.reduce((sum, r) => sum + (r.spend || 0), 0)
+  const totalReach = filteredRows.reduce((sum, r) => sum + (r.reach || 0), 0)
+  const totalImpressions = filteredRows.reduce((sum, r) => sum + (r.impressions || 0), 0)
+  const totalSpend = filteredRows.reduce((sum, r) => sum + (r.spend || 0), 0)
 
   const saturation = calculateSaturation(totalImpressions, totalReach, totalSpend, reachData)
 
@@ -97,7 +125,7 @@ export default function ReachAnalysisView({
       : 0
 
   // — Comparison period data —
-  const hasComparison = comparisonRows.length > 0
+  const hasComparison = filteredCompRows.length > 0
   let compTotalReach = 0
   let compTotalImpressions = 0
   let compTotalSpend = 0
@@ -107,11 +135,11 @@ export default function ReachAnalysisView({
   let compCpm = 0
 
   if (hasComparison) {
-    compTotalReach = comparisonRows.reduce((sum, r) => sum + (r.reach || 0), 0)
-    compTotalImpressions = comparisonRows.reduce((sum, r) => sum + (r.impressions || 0), 0)
-    compTotalSpend = comparisonRows.reduce((sum, r) => sum + (r.spend || 0), 0)
+    compTotalReach = filteredCompRows.reduce((sum, r) => sum + (r.reach || 0), 0)
+    compTotalImpressions = filteredCompRows.reduce((sum, r) => sum + (r.impressions || 0), 0)
+    compTotalSpend = filteredCompRows.reduce((sum, r) => sum + (r.spend || 0), 0)
 
-    const compDailyReach = dailyReachSeries(comparisonRows)
+    const compDailyReach = dailyReachSeries(filteredCompRows)
     const compReachData = prepareReachData(compDailyReach, 0)
     compAvgNewReachPct =
       compReachData.length > 0
@@ -132,7 +160,7 @@ export default function ReachAnalysisView({
 
   // — Charts data —
   const cpmrData = dailyCpmrSeries(
-    rows.map((r) => ({
+    filteredRows.map((r) => ({
       date: r.date,
       spend: r.spend || 0,
       impressions: r.impressions,
@@ -148,13 +176,20 @@ export default function ReachAnalysisView({
       {/* Header bar */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-sm font-medium text-neutral-400">Reach Analysis</h2>
-        <DateRangePicker
-          preset={preset}
-          from={from}
-          to={to}
-          onPresetChange={handlePresetChange}
-          onCustomChange={handleCustomChange}
-        />
+        <div className="flex items-center gap-2">
+          <AdSetSelector
+            adsets={adsets}
+            selected={selectedAdSets}
+            onChange={setSelectedAdSets}
+          />
+          <DateRangePicker
+            preset={preset}
+            from={from}
+            to={to}
+            onPresetChange={handlePresetChange}
+            onCustomChange={handleCustomChange}
+          />
+        </div>
       </div>
 
       {/* Scorecards */}

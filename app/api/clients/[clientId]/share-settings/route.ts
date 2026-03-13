@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createClient, createServiceClient } from "@/lib/supabase/server"
+import { createServiceClient } from "@/lib/supabase/server"
+import { requireAuth, safeError } from "@/lib/auth/authorize"
+import bcrypt from "bcryptjs"
 
 /**
  * GET /api/clients/[clientId]/share-settings
@@ -9,9 +11,8 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: { clientId: string } }
 ) {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const { user, error: authError } = await requireAuth()
+  if (authError) return authError
 
   const db = createServiceClient()
   const { data: client, error } = await db
@@ -20,7 +21,7 @@ export async function GET(
     .eq("id", params.clientId)
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeError(error)
   if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
   return NextResponse.json({
@@ -31,32 +32,26 @@ export async function GET(
 
 /**
  * PUT /api/clients/[clientId]/share-settings
- * Accepts { password } and stores the SHA-256 hash on the clients table.
+ * Accepts { password } and stores a bcrypt hash on the clients table.
  */
 export async function PUT(
   request: NextRequest,
   { params }: { params: { clientId: string } }
 ) {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const { user, error: authError } = await requireAuth()
+  if (authError) return authError
 
   const { password } = await request.json()
 
-  if (!password || typeof password !== "string" || password.length < 4) {
+  if (!password || typeof password !== "string" || password.length < 8) {
     return NextResponse.json(
-      { error: "Password must be at least 4 characters" },
+      { error: "Password must be at least 8 characters" },
       { status: 400 }
     )
   }
 
-  // SHA-256 hash — same approach as /api/view-auth
-  const encoder = new TextEncoder()
-  const data = encoder.encode(password)
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data)
-  const hashHex = Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
+  // Hash with bcrypt (10 rounds)
+  const hash = await bcrypt.hash(password, 10)
 
   const db = createServiceClient()
 
@@ -67,15 +62,15 @@ export async function PUT(
     .eq("id", params.clientId)
     .single()
 
-  if (!client) return NextResponse.json({ error: "Client not found" }, { status: 404 })
+  if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
   // Update password hash
   const { error } = await db
     .from("clients")
-    .update({ view_password_hash: hashHex })
+    .update({ view_password_hash: hash })
     .eq("id", params.clientId)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeError(error)
 
   return NextResponse.json({
     slug: client.slug,

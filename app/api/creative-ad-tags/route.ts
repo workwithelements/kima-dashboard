@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
+import { requireAuth, safeError } from "@/lib/auth/authorize"
 
 /**
  * GET /api/creative-ad-tags?client_id=xxx — list ad-tag assignments for a client
  */
 export async function GET(request: NextRequest) {
+  const { user, error: authError } = await requireAuth()
+  if (authError) return authError
+
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const clientId = request.nextUrl.searchParams.get("client_id")
   if (!clientId) {
@@ -19,7 +21,7 @@ export async function GET(request: NextRequest) {
     .select("ad_id, tag_id")
     .eq("client_id", clientId)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeError(error)
   return NextResponse.json(data)
 }
 
@@ -28,9 +30,10 @@ export async function GET(request: NextRequest) {
  * Body: { ad_id, tag_id, client_id }
  */
 export async function POST(request: NextRequest) {
+  const { user, error: authError } = await requireAuth()
+  if (authError) return authError
+
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const body = await request.json()
   const { ad_id, tag_id, client_id } = body
@@ -64,9 +67,10 @@ export async function POST(request: NextRequest) {
  * Body: { ad_id, tag_id }
  */
 export async function DELETE(request: NextRequest) {
+  const { user, error: authError } = await requireAuth()
+  if (authError) return authError
+
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const body = await request.json()
   const { ad_id, tag_id } = body
@@ -81,6 +85,6 @@ export async function DELETE(request: NextRequest) {
     .eq("ad_id", ad_id)
     .eq("tag_id", tag_id)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeError(error)
   return NextResponse.json({ ok: true })
 }

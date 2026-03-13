@@ -5,6 +5,7 @@
 
 import { createServiceClient } from "@/lib/supabase/server"
 import type { MetaDailyRow, MetaDemographicsRow, MetaPlacementsRow, GoogleAdsDailyRow, Client, AdPlatform, DailySpendRow } from "@/lib/utils/types"
+import type { NamingConfig } from "@/lib/utils/ad-name-parser"
 
 /** Columns available in meta_daily_performance */
 const PERF_COLUMNS =
@@ -15,6 +16,7 @@ export type ClientData = {
   rows: Partial<MetaDailyRow>[]
   comparisonRows: Partial<MetaDailyRow>[]
   baselineReach: number
+  namingConfig?: NamingConfig
 }
 
 /**
@@ -228,7 +230,7 @@ export async function fetchReachData(
   const queries: PromiseLike<any>[] = [
     supabase
       .from("meta_daily_performance")
-      .select("date, reach, impressions, spend")
+      .select("date, reach, impressions, spend, adset_id, adset_name")
       .eq("client_id", clientId)
       .gte("date", from)
       .lte("date", to)
@@ -248,7 +250,7 @@ export async function fetchReachData(
     queries.push(
       supabase
         .from("meta_daily_performance")
-        .select("date, reach, impressions, spend")
+        .select("date, reach, impressions, spend, adset_id, adset_name")
         .eq("client_id", clientId)
         .gte("date", compFrom)
         .lte("date", compTo)
@@ -298,9 +300,9 @@ export async function fetchCreativeData(
 
   if (!client) return null
 
-  // Fetch performance rows, thumbnails, config, and breakdowns in parallel
+  // Fetch performance rows, thumbnails, config, naming config, and breakdowns in parallel
   // meta_ad_metadata may not exist yet — wrap in catch to be safe
-  const [perfResult, thumbResult, configResult, demoResult, placementResult] = await Promise.all([
+  const [perfResult, thumbResult, configResult, namingResult, demoResult, placementResult] = await Promise.all([
     supabase
       .from("meta_daily_performance")
       .select(PERF_COLUMNS)
@@ -312,15 +314,22 @@ export async function fetchCreativeData(
     Promise.resolve(
       supabase
         .from("meta_ad_metadata")
-        .select("ad_id, creative_thumbnail_url")
+        .select("ad_id, creative_thumbnail_url, created_time")
         .eq("client_id", clientId)
-        .not("creative_thumbnail_url", "is", null)
+        .limit(50000)
     ).catch(() => ({ data: [] as any[] })),
     supabase
       .from("client_scorecard_config")
       .select("creative_previews_enabled, key_action, funnel_steps")
       .eq("client_id", clientId)
       .single(),
+    Promise.resolve(
+      supabase
+        .from("client_naming_config")
+        .select("positions, value_maps")
+        .eq("client_id", clientId)
+        .single()
+    ).catch(() => ({ data: null as any })),
     Promise.resolve(
       supabase
         .from("meta_daily_demographics")
@@ -341,11 +350,15 @@ export async function fetchCreativeData(
     ).then(r => (r.data || []) as MetaPlacementsRow[]).catch(() => [] as MetaPlacementsRow[]),
   ])
 
-  // Build thumbnail map: ad_id -> url
+  // Build thumbnail map (ad_id -> url) and created dates map (ad_id -> created_time)
   const thumbnails: Record<string, string> = {}
+  const createdDates: Record<string, string> = {}
   for (const row of thumbResult.data || []) {
     if (row.creative_thumbnail_url) {
       thumbnails[row.ad_id] = row.creative_thumbnail_url
+    }
+    if (row.created_time) {
+      createdDates[row.ad_id] = row.created_time
     }
   }
 
@@ -353,13 +366,25 @@ export async function fetchCreativeData(
   const keyAction = configResult.data?.key_action ?? undefined
   const funnelSteps: string[] = configResult.data?.funnel_steps ?? ["unique_link_clicks", "purchases"]
 
+  // Build naming config if found (table may not exist yet)
+  let namingConfig: NamingConfig | undefined
+  const namingData = namingResult?.data
+  if (namingData && namingData.positions) {
+    namingConfig = {
+      positions: namingData.positions as NamingConfig["positions"],
+      valueMaps: (namingData.value_maps || {}) as NamingConfig["valueMaps"],
+    }
+  }
+
   return {
     client,
     rows: perfResult.data || [],
     thumbnails,
+    createdDates,
     previewsEnabled,
     keyAction,
     funnelSteps,
+    namingConfig,
     demographics: demoResult,
     placements: placementResult,
   }
