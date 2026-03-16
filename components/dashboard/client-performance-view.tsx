@@ -66,6 +66,10 @@ const PlatformCPAChart = dynamic(
   () => import("@/components/charts/platform-cpa-chart"),
   { ssr: false, loading: ChartPlaceholder }
 )
+const SpendBreakdownPie = dynamic(
+  () => import("@/components/charts/spend-breakdown-pie"),
+  { ssr: false, loading: ChartPlaceholder }
+)
 const DemographicsChart = dynamic(
   () => import("@/components/charts/demographics-chart"),
   { ssr: false, loading: ChartPlaceholder }
@@ -973,20 +977,31 @@ export default function ClientPerformanceView({
         </div>
       )}
 
-      {/* Charts */}
-      <Card>
-        <h2 className="mb-4 text-sm font-medium text-neutral-400">Daily Spend</h2>
-        <MetricChart data={spendSeries} label="Spend" color="#CDFF00" format="currency" height={260} currency={currency} comparisonData={compSpendSeries} comparisonLabel="Previous Period" annotations={annotations} />
-        <AnnotationsBar
-          annotations={annotations}
-          clientId={client.id}
-          from={from}
-          to={to}
-          onAdd={(a) => setAnnotations((prev) => [...prev, a].sort((x, y) => x.date.localeCompare(y.date)))}
-          onDelete={(id) => setAnnotations((prev) => prev.filter((a) => a.id !== id))}
-          readOnly={readOnly}
-        />
-      </Card>
+      {/* Charts — Daily Spend + Spend Breakdown side by side */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
+        <Card>
+          <h2 className="mb-4 text-sm font-medium text-neutral-400">Daily Spend</h2>
+          <MetricChart data={spendSeries} label="Spend" color="#CDFF00" format="currency" height={260} currency={currency} comparisonData={compSpendSeries} comparisonLabel="Previous Period" annotations={annotations} />
+          <AnnotationsBar
+            annotations={annotations}
+            clientId={client.id}
+            from={from}
+            to={to}
+            onAdd={(a) => setAnnotations((prev) => [...prev, a].sort((x, y) => x.date.localeCompare(y.date)))}
+            onDelete={(id) => setAnnotations((prev) => prev.filter((a) => a.id !== id))}
+            readOnly={readOnly}
+          />
+        </Card>
+        <Card>
+          <h2 className="mb-4 text-sm font-medium text-neutral-400">Spend Breakdown</h2>
+          <SpendBreakdownPie
+            metaRows={filteredRows}
+            googleAdsRows={filteredGaRows}
+            platform={platform}
+            currency={currency}
+          />
+        </Card>
+      </div>
 
       {/* Platform CPA chart (All Platforms view) */}
       {isAll && platformCpaData.length > 0 && (
