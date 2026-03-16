@@ -997,6 +997,8 @@ export default function ClientPerformanceView({
           <SpendBreakdownPie
             metaRows={filteredRows}
             googleAdsRows={filteredGaRows}
+            compMetaRows={hasComp ? filteredCompRows : []}
+            compGoogleAdsRows={hasComp ? filteredGaCompRows : []}
             platform={platform}
             currency={currency}
           />
