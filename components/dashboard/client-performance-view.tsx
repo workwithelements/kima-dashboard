@@ -278,36 +278,38 @@ export default function ClientPerformanceView({
     return Math.round(total / numDays)
   }, [filteredCompRows, compareType, platform, numDays])
 
-  // Chart data — daily spend series
-  const spendSeries = useMemo(() => {
-    if (isMeta) {
-      return dailySpendSeries(filteredRows).map((d) => ({ date: d.date, value: d.spend }))
+  // Helper: generate all dates in the selected range so charts always span the full range
+  const allDates = useMemo(() => {
+    const dates: string[] = []
+    const d = new Date(from + "T00:00:00")
+    const end = new Date(to + "T00:00:00")
+    while (d <= end) {
+      dates.push(d.toISOString().split("T")[0])
+      d.setDate(d.getDate() + 1)
     }
-    if (isGoogleAds) {
-      // Build spend series from Google Ads rows
-      const byDate: Record<string, number> = {}
+    return dates
+  }, [from, to])
+
+  // Chart data — daily spend series (always covers full date range)
+  const spendSeries = useMemo(() => {
+    const byDate: Record<string, number> = {}
+    if (!isGoogleAds) {
+      for (const r of filteredRows) {
+        if (!r.date) continue
+        byDate[r.date] = (byDate[r.date] || 0) + (r.spend || 0)
+      }
+    }
+    if (!isMeta) {
       for (const r of googleAdsRows) {
         if (!r.date) continue
         byDate[r.date] = (byDate[r.date] || 0) + (r.spend || 0)
       }
-      return Object.entries(byDate)
-        .map(([date, spend]) => ({ date, value: Math.round(spend * 100) / 100 }))
-        .sort((a, b) => a.date.localeCompare(b.date))
     }
-    // "all" — combine both platforms
-    const byDate: Record<string, number> = {}
-    for (const r of filteredRows) {
-      if (!r.date) continue
-      byDate[r.date] = (byDate[r.date] || 0) + (r.spend || 0)
-    }
-    for (const r of googleAdsRows) {
-      if (!r.date) continue
-      byDate[r.date] = (byDate[r.date] || 0) + (r.spend || 0)
-    }
-    return Object.entries(byDate)
-      .map(([date, spend]) => ({ date, value: Math.round(spend * 100) / 100 }))
-      .sort((a, b) => a.date.localeCompare(b.date))
-  }, [filteredRows, googleAdsRows, platform])
+    return allDates.map((date) => ({
+      date,
+      value: Math.round((byDate[date] || 0) * 100) / 100,
+    }))
+  }, [filteredRows, googleAdsRows, platform, allDates])
 
   // Build funnel chart series from configured steps (Meta only)
   const funnelChartSeries: FunnelSeriesDef[] = useMemo(
