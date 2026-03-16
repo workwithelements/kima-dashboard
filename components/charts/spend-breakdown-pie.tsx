@@ -159,17 +159,17 @@ export default function SpendBreakdownPie({
         </div>
       )}
 
-      {/* Pie chart — fixed height */}
-      <ResponsiveContainer width="100%" height={220}>
-        <PieChart>
+      {/* Pie chart — fixed height with margin for labels */}
+      <ResponsiveContainer width="100%" height={240}>
+        <PieChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
           <Pie
             data={data}
             dataKey="value"
             nameKey="name"
             cx="50%"
             cy="50%"
-            innerRadius={50}
-            outerRadius={85}
+            innerRadius={40}
+            outerRadius={70}
             paddingAngle={1}
             strokeWidth={0}
             label={({ pct }) => `${pct.toFixed(0)}%`}
