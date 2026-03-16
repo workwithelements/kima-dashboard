@@ -1302,6 +1302,7 @@ function CreativeDetailModal({
   onClose: () => void
 }) {
   const cls = CLASSIFICATIONS[ad.classification.type]
+  const [detailImgError, setDetailImgError] = useState(false)
   const roas = ad.spend > 0 ? ad.revenue / ad.spend : 0
 
   useEffect(() => {
@@ -1332,13 +1333,14 @@ function CreativeDetailModal({
 
         {/* Thumbnail */}
         <div className="bg-neutral-800 relative flex items-center justify-center overflow-hidden" style={{ minHeight: 200, maxHeight: 400 }}>
-          {thumbnailUrl ? (
+          {thumbnailUrl && !detailImgError ? (
             <img
               src={thumbnailUrl}
               alt={ad.adName}
               className="w-full object-contain"
               style={{ maxHeight: 400, imageRendering: "auto" }}
               loading="eager"
+              onError={() => setDetailImgError(true)}
             />
           ) : (
             <div className="text-neutral-600 text-sm py-20">
@@ -1346,7 +1348,7 @@ function CreativeDetailModal({
             </div>
           )}
           {/* Video play icon overlay */}
-          {isVideo && thumbnailUrl && (
+          {isVideo && thumbnailUrl && !detailImgError && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="h-12 w-12 rounded-full bg-black/50 flex items-center justify-center backdrop-blur-sm">
                 <svg className="h-6 w-6 text-white ml-0.5" viewBox="0 0 24 24" fill="currentColor">

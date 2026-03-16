@@ -112,6 +112,11 @@ function CreativeCard({
   const [tagAnchor, setTagAnchor] = useState<DOMRect | null>(null)
   const cls = CLASSIFICATIONS[ad.classification.type]
 
+  // Reset error state when thumbnail URL changes (e.g. after sync refresh)
+  useEffect(() => {
+    setImgError(false)
+  }, [thumbnailUrl])
+
   const assignedTagIds = new Set((tags || []).map((t) => t.id))
   const unassignedTags = allTags.filter((t) => !assignedTagIds.has(t.id))
 
