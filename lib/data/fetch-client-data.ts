@@ -91,22 +91,20 @@ export async function fetchClientData(
       .gte("date", baselineStartStr)
       .lte("date", baselineEndStr)
       .limit(10000),
-    // Fetch ad metadata for created_time (test badge)
-    Promise.resolve(
-      supabase
-        .from("meta_ad_metadata")
-        .select("ad_id, created_time")
-        .eq("client_id", clientId)
-        .limit(50000)
-    ).catch(() => ({ data: [] as any[] })),
+    // Fetch RECENT ad metadata for test badge (last 6 days only)
+    // Supabase PostgREST caps results at 1000 rows regardless of .limit(),
+    // so we filter to recent ads to stay well under that cap.
+    supabase
+      .from("meta_ad_metadata")
+      .select("ad_id, created_time")
+      .eq("client_id", clientId)
+      .gte("created_time", new Date(Date.now() - 6 * 86_400_000).toISOString()),
     // Fetch naming config
-    Promise.resolve(
-      supabase
-        .from("client_naming_config")
-        .select("positions, value_maps")
-        .eq("client_id", clientId)
-        .single()
-    ).catch(() => ({ data: null as any })),
+    supabase
+      .from("client_naming_config")
+      .select("positions, value_maps")
+      .eq("client_id", clientId)
+      .single(),
   ])
 
   let baselineReach = 0
@@ -118,15 +116,23 @@ export async function fetchClientData(
 
   // Build created dates map
   const createdDates: Record<string, string> = {}
+  if (metadataResult.error) {
+    console.warn("[fetchClientData] meta_ad_metadata query error:", metadataResult.error.message)
+  }
   for (const row of metadataResult.data || []) {
     if (row.created_time) {
       createdDates[row.ad_id] = row.created_time
     }
   }
+  console.log(`[fetchClientData] client=${clientId} metadataRows=${metadataResult.data?.length ?? 0} createdDates=${Object.keys(createdDates).length}`)
 
   // Build naming config
   let namingConfig: NamingConfig | undefined
   const namingData = namingResult?.data
+  if (namingResult?.error && namingResult.error.code !== "PGRST116") {
+    // PGRST116 = "no rows returned" (expected when no config set) — only log real errors
+    console.warn("[fetchClientData] naming config error:", namingResult.error.message)
+  }
   if (namingData && namingData.positions) {
     namingConfig = {
       positions: namingData.positions as NamingConfig["positions"],
@@ -338,9 +344,12 @@ export async function fetchCreativeData(
 
   if (!client) return null
 
-  // Fetch performance rows, thumbnails, config, naming config, and breakdowns in parallel
-  // meta_ad_metadata may not exist yet — wrap in catch to be safe
-  const [perfResult, thumbResult, configResult, namingResult, demoResult, placementResult] = await Promise.all([
+  // Fetch performance rows, thumbnails, recent created_times, config, naming config, and breakdowns in parallel
+  // NOTE: Supabase PostgREST caps results at 1000 rows regardless of .limit().
+  // Thumbnails query may miss some ads for large accounts — but performance rows
+  // themselves are date-filtered so the overlap is usually good.
+  // created_time is filtered to last 6 days for test badge (well under 1000).
+  const [perfResult, thumbResult, recentMetaResult, configResult, namingResult2, demoResult, placementResult] = await Promise.all([
     supabase
       .from("meta_daily_performance")
       .select(PERF_COLUMNS)
@@ -349,68 +358,80 @@ export async function fetchCreativeData(
       .lte("date", to)
       .order("date")
       .limit(10000),
-    Promise.resolve(
-      supabase
-        .from("meta_ad_metadata")
-        .select("ad_id, creative_thumbnail_url, created_time")
-        .eq("client_id", clientId)
-        .limit(50000)
-    ).catch(() => ({ data: [] as any[] })),
+    // Thumbnails — fetch most recently updated first so active ads are prioritised
+    supabase
+      .from("meta_ad_metadata")
+      .select("ad_id, creative_thumbnail_url")
+      .eq("client_id", clientId)
+      .not("creative_thumbnail_url", "is", null)
+      .order("created_time", { ascending: false })
+      .limit(1000),
+    // Recent created_times for test badge (last 6 days — avoids 1000-row cap)
+    supabase
+      .from("meta_ad_metadata")
+      .select("ad_id, created_time")
+      .eq("client_id", clientId)
+      .gte("created_time", new Date(Date.now() - 6 * 86_400_000).toISOString()),
     supabase
       .from("client_scorecard_config")
       .select("creative_previews_enabled, key_action, funnel_steps")
       .eq("client_id", clientId)
       .single(),
-    Promise.resolve(
-      supabase
-        .from("client_naming_config")
-        .select("positions, value_maps")
-        .eq("client_id", clientId)
-        .single()
-    ).catch(() => ({ data: null as any })),
-    Promise.resolve(
-      supabase
-        .from("meta_daily_demographics")
-        .select(DEMO_COLUMNS)
-        .eq("client_id", clientId)
-        .gte("date", from)
-        .lte("date", to)
-        .limit(10000)
-    ).then(r => (r.data || []) as MetaDemographicsRow[]).catch(() => [] as MetaDemographicsRow[]),
-    Promise.resolve(
-      supabase
-        .from("meta_daily_placements")
-        .select(PLACEMENT_COLUMNS)
-        .eq("client_id", clientId)
-        .gte("date", from)
-        .lte("date", to)
-        .limit(10000)
-    ).then(r => (r.data || []) as MetaPlacementsRow[]).catch(() => [] as MetaPlacementsRow[]),
+    supabase
+      .from("client_naming_config")
+      .select("positions, value_maps")
+      .eq("client_id", clientId)
+      .single(),
+    supabase
+      .from("meta_daily_demographics")
+      .select(DEMO_COLUMNS)
+      .eq("client_id", clientId)
+      .gte("date", from)
+      .lte("date", to)
+      .limit(10000),
+    supabase
+      .from("meta_daily_placements")
+      .select(PLACEMENT_COLUMNS)
+      .eq("client_id", clientId)
+      .gte("date", from)
+      .lte("date", to)
+      .limit(10000),
   ])
 
-  // Build thumbnail map (ad_id -> url) and created dates map (ad_id -> created_time)
+  // Build thumbnail map (ad_id -> url)
   const thumbnails: Record<string, string> = {}
-  const createdDates: Record<string, string> = {}
+  if (thumbResult.error) {
+    console.warn("[fetchCreativeData] meta_ad_metadata thumbnails error:", thumbResult.error.message)
+  }
   for (const row of thumbResult.data || []) {
     if (row.creative_thumbnail_url) {
       thumbnails[row.ad_id] = row.creative_thumbnail_url
     }
+  }
+
+  // Build created dates map (ad_id -> created_time) — only recent ads
+  const createdDates: Record<string, string> = {}
+  if (recentMetaResult.error) {
+    console.warn("[fetchCreativeData] recent metadata error:", recentMetaResult.error.message)
+  }
+  for (const row of recentMetaResult.data || []) {
     if (row.created_time) {
       createdDates[row.ad_id] = row.created_time
     }
   }
+  console.log(`[fetchCreativeData] client=${clientId} thumbRows=${thumbResult.data?.length ?? 0} recentAds=${Object.keys(createdDates).length}`)
 
   const previewsEnabled = configResult.data?.creative_previews_enabled ?? false
   const keyAction = configResult.data?.key_action ?? undefined
   const funnelSteps: string[] = configResult.data?.funnel_steps ?? ["unique_link_clicks", "purchases"]
 
-  // Build naming config if found (table may not exist yet)
+  // Build naming config if found
   let namingConfig: NamingConfig | undefined
-  const namingData = namingResult?.data
-  if (namingData && namingData.positions) {
+  const namingData2 = namingResult2?.data
+  if (namingData2 && namingData2.positions) {
     namingConfig = {
-      positions: namingData.positions as NamingConfig["positions"],
-      valueMaps: (namingData.value_maps || {}) as NamingConfig["valueMaps"],
+      positions: namingData2.positions as NamingConfig["positions"],
+      valueMaps: (namingData2.value_maps || {}) as NamingConfig["valueMaps"],
     }
   }
 
@@ -423,8 +444,8 @@ export async function fetchCreativeData(
     keyAction,
     funnelSteps,
     namingConfig,
-    demographics: demoResult,
-    placements: placementResult,
+    demographics: (demoResult.data || []) as MetaDemographicsRow[],
+    placements: (placementResult.data || []) as MetaPlacementsRow[],
   }
 }
 

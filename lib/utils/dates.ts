@@ -65,11 +65,11 @@ export function getPresetRange(preset: DatePreset): DateRange {
     case "today":
       return { from: today(), to: today() }
     case "last_7d":
-      return { from: daysAgo(6), to: today() }
+      return { from: daysAgo(7), to: daysAgo(1) }
     case "last_30d":
-      return { from: daysAgo(29), to: today() }
+      return { from: daysAgo(30), to: daysAgo(1) }
     case "this_month":
-      return { from: monthStart(), to: today() }
+      return { from: monthStart(), to: daysAgo(1) }
     case "last_month": {
       const lastM = new Date(now.getFullYear(), now.getMonth() - 1, 1)
       return {
@@ -78,7 +78,7 @@ export function getPresetRange(preset: DatePreset): DateRange {
       }
     }
     default:
-      return { from: daysAgo(29), to: today() }
+      return { from: daysAgo(30), to: daysAgo(1) }
   }
 }
 

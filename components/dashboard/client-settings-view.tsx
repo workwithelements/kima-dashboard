@@ -5,6 +5,37 @@ import { useState, useEffect } from "react"
 /* ── Types ── */
 type NamingPosition = { index: number; key: string; label: string }
 
+type AlertConfig = {
+  id?: string
+  metric: string
+  threshold_pct: number
+  direction: "increase" | "decrease" | "either"
+  slack_channel: string
+  enabled: boolean
+}
+
+const ALERT_METRIC_OPTIONS = [
+  { value: "spend", label: "Spend" },
+  { value: "impressions", label: "Impressions" },
+  { value: "reach", label: "Reach" },
+  { value: "unique_link_clicks", label: "Link Clicks" },
+  { value: "landing_page_views", label: "Landing Page Views" },
+  { value: "purchases", label: "Purchases" },
+  { value: "purchase_value", label: "Revenue" },
+  { value: "adds_to_cart", label: "Add to Carts" },
+  { value: "checkouts_initiated", label: "Checkouts" },
+  { value: "cpa", label: "CPA" },
+  { value: "roas", label: "ROAS" },
+  { value: "ctr", label: "CTR" },
+  { value: "cpm", label: "CPM" },
+]
+
+const DIRECTION_OPTIONS = [
+  { value: "either", label: "Changes by" },
+  { value: "increase", label: "Increases by" },
+  { value: "decrease", label: "Decreases by" },
+]
+
 const STANDARD_KEYS = [
   { key: "format", label: "Format" },
   { key: "landingPage", label: "Landing Page" },
@@ -27,22 +58,36 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
   const [saved, setSaved] = useState(false)
   const [showValueMaps, setShowValueMaps] = useState(false)
 
+  /* ── Alerts state ── */
+  const [alerts, setAlerts] = useState<AlertConfig[]>([])
+  const [alertsLoading, setAlertsLoading] = useState(true)
+  const [alertsSaving, setAlertsSaving] = useState(false)
+  const [alertsSaved, setAlertsSaved] = useState(false)
+
   /* ── Load existing config ── */
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch(`/api/naming-config/${clientId}`)
-        if (res.ok) {
-          const data = await res.json()
+        const [namingRes, alertsRes] = await Promise.all([
+          fetch(`/api/naming-config/${clientId}`),
+          fetch(`/api/alert-config/${clientId}`),
+        ])
+        if (namingRes.ok) {
+          const data = await namingRes.json()
           if (data) {
             setPositions(data.positions || [])
             setValueMaps(data.value_maps || {})
           }
         }
+        if (alertsRes.ok) {
+          const data = await alertsRes.json()
+          if (Array.isArray(data)) setAlerts(data)
+        }
       } catch {
         /* ignore */
       }
       setLoading(false)
+      setAlertsLoading(false)
     }
     load()
   }, [clientId])
@@ -142,6 +187,92 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
   }
 
   const usedKeys = positions.map((p) => p.key)
+
+  /* ── Alert CRUD ── */
+  function addAlert() {
+    setAlerts([
+      ...alerts,
+      { metric: "spend", threshold_pct: 20, direction: "either", slack_channel: "", enabled: true },
+    ])
+    setAlertsSaved(false)
+  }
+
+  function updateAlert(idx: number, field: keyof AlertConfig, value: unknown) {
+    const next = [...alerts]
+    next[idx] = { ...next[idx], [field]: value }
+    setAlerts(next)
+    setAlertsSaved(false)
+  }
+
+  async function deleteAlert(idx: number) {
+    const alert = alerts[idx]
+    if (alert.id) {
+      try {
+        await fetch(`/api/alert-config/${clientId}?id=${alert.id}`, { method: "DELETE" })
+      } catch { /* ignore */ }
+    }
+    setAlerts(alerts.filter((_, i) => i !== idx))
+  }
+
+  async function toggleAlert(idx: number) {
+    const alert = alerts[idx]
+    const newEnabled = !alert.enabled
+    const next = [...alerts]
+    next[idx] = { ...next[idx], enabled: newEnabled }
+    setAlerts(next)
+    if (alert.id) {
+      try {
+        await fetch(`/api/alert-config/${clientId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: alert.id, enabled: newEnabled }),
+        })
+      } catch { /* ignore */ }
+    }
+  }
+
+  async function handleSaveAlerts() {
+    setAlertsSaving(true)
+    try {
+      const updated: AlertConfig[] = []
+      for (const alert of alerts) {
+        if (!alert.slack_channel.trim()) continue
+        if (alert.id) {
+          const res = await fetch(`/api/alert-config/${clientId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: alert.id,
+              metric: alert.metric,
+              threshold_pct: alert.threshold_pct,
+              direction: alert.direction,
+              slack_channel: alert.slack_channel,
+              enabled: alert.enabled,
+            }),
+          })
+          if (res.ok) updated.push(await res.json())
+          else updated.push(alert)
+        } else {
+          const res = await fetch(`/api/alert-config/${clientId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              metric: alert.metric,
+              threshold_pct: alert.threshold_pct,
+              direction: alert.direction,
+              slack_channel: alert.slack_channel,
+            }),
+          })
+          if (res.ok) updated.push(await res.json())
+          else updated.push(alert)
+        }
+      }
+      setAlerts(updated)
+      setAlertsSaved(true)
+      setTimeout(() => setAlertsSaved(false), 3000)
+    } catch { /* ignore */ }
+    setAlertsSaving(false)
+  }
 
   /* ── Render ── */
   return (
@@ -462,8 +593,174 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
         )}
       </section>
 
-      {/* ── Future settings sections go here ── */}
-      {/* Example: Scorecard Config, Data Sources, etc. */}
+      {/* ── Alerts Section ── */}
+      <section className="rounded-xl border border-neutral-800 bg-neutral-900/50">
+        <div className="border-b border-neutral-800 px-5 py-4">
+          <h2 className="text-sm font-semibold text-neutral-100">
+            Performance Alerts
+          </h2>
+          <p className="mt-1 text-[11px] text-neutral-500">
+            Get Slack notifications when a metric deviates from its 7-day average
+            by more than a set threshold.
+          </p>
+        </div>
+
+        {alertsLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-lime border-t-transparent" />
+          </div>
+        ) : (
+          <div className="space-y-4 p-5">
+            {alerts.length === 0 && (
+              <p className="rounded-lg border border-dashed border-neutral-700 px-4 py-6 text-center text-xs text-neutral-500">
+                No alerts configured. Add alerts to get Slack notifications when
+                metrics deviate from their 7-day average.
+              </p>
+            )}
+
+            {alerts.map((alert, idx) => (
+              <div
+                key={alert.id || `new-${idx}`}
+                className={`flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2.5 ${
+                  alert.enabled
+                    ? "border-neutral-800 bg-neutral-800/50"
+                    : "border-neutral-800/50 bg-neutral-900/30 opacity-60"
+                }`}
+              >
+                {/* Metric */}
+                <select
+                  value={alert.metric}
+                  onChange={(e) => updateAlert(idx, "metric", e.target.value)}
+                  className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 focus:border-brand-lime focus:outline-none"
+                >
+                  {ALERT_METRIC_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+
+                {/* Direction */}
+                <select
+                  value={alert.direction}
+                  onChange={(e) =>
+                    updateAlert(idx, "direction", e.target.value)
+                  }
+                  className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 focus:border-brand-lime focus:outline-none"
+                >
+                  {DIRECTION_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+
+                {/* Threshold */}
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    value={alert.threshold_pct}
+                    onChange={(e) =>
+                      updateAlert(
+                        idx,
+                        "threshold_pct",
+                        Math.max(1, parseInt(e.target.value) || 1)
+                      )
+                    }
+                    min={1}
+                    className="w-16 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-center text-xs text-white focus:border-brand-lime focus:outline-none"
+                  />
+                  <span className="text-[10px] text-neutral-500">%</span>
+                </div>
+
+                {/* Slack channel */}
+                <input
+                  type="text"
+                  value={alert.slack_channel}
+                  onChange={(e) =>
+                    updateAlert(idx, "slack_channel", e.target.value)
+                  }
+                  placeholder="#channel"
+                  className="w-32 flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-white focus:border-brand-lime focus:outline-none sm:flex-none"
+                />
+
+                {/* Enable/disable toggle */}
+                <button
+                  onClick={() => toggleAlert(idx)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
+                    alert.enabled ? "bg-brand-lime" : "bg-neutral-700"
+                  }`}
+                  title={alert.enabled ? "Enabled" : "Disabled"}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                      alert.enabled ? "translate-x-[18px]" : "translate-x-[3px]"
+                    }`}
+                  />
+                </button>
+
+                {/* Delete */}
+                <button
+                  onClick={() => deleteAlert(idx)}
+                  className="rounded p-0.5 text-neutral-500 transition hover:text-red-400"
+                  title="Remove alert"
+                >
+                  <svg
+                    className="h-3.5 w-3.5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </div>
+            ))}
+
+            {/* Add alert button */}
+            <button
+              onClick={addAlert}
+              className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium text-neutral-400 transition hover:text-brand-lime"
+            >
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 4v16m8-8H4"
+                />
+              </svg>
+              Add Alert
+            </button>
+
+            {/* Save */}
+            <div className="flex items-center justify-end gap-3 border-t border-neutral-800 pt-4">
+              {alertsSaved && (
+                <span className="text-xs font-medium text-green-400">
+                  Saved
+                </span>
+              )}
+              <button
+                onClick={handleSaveAlerts}
+                disabled={alertsSaving || alerts.length === 0}
+                className="rounded-lg bg-brand-lime px-5 py-2 text-xs font-semibold text-black transition hover:bg-brand-lime/90 disabled:opacity-50"
+              >
+                {alertsSaving ? "Saving..." : "Save Alerts"}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
     </div>
   )
 }

@@ -127,25 +127,31 @@ function buildColumns(
   ]
 
   // Add columns for each configured funnel step
-  for (const stepKey of funnelSteps) {
+  for (let stepIdx = 0; stepIdx < funnelSteps.length; stepIdx++) {
+    const stepKey = funnelSteps[stepIdx]
     const def = FUNNEL_STEP_DEFS[stepKey]
     if (!def) continue
+
+    // Use previous funnel step as rate denominator (matches the funnel view above)
+    const prevStepField = stepIdx > 0
+      ? FUNNEL_STEP_DEFS[funnelSteps[stepIdx - 1]]?.field
+      : undefined
 
     // Count column
     cols.push({
       key: `${stepKey}_count`,
       label: def.shortLabel,
-      getValue: (row) => calculateFunnelStep(stepKey, row.metrics).count,
-      format: (row) => fmtNumber(calculateFunnelStep(stepKey, row.metrics).count),
+      getValue: (row) => calculateFunnelStep(stepKey, row.metrics, prevStepField).count,
+      format: (row) => fmtNumber(calculateFunnelStep(stepKey, row.metrics, prevStepField).count),
     })
 
     // Rate column
     cols.push({
       key: `${stepKey}_rate`,
       label: def.rateLabel,
-      getValue: (row) => calculateFunnelStep(stepKey, row.metrics).rate ?? 0,
+      getValue: (row) => calculateFunnelStep(stepKey, row.metrics, prevStepField).rate ?? 0,
       format: (row) => {
-        const v = calculateFunnelStep(stepKey, row.metrics).rate
+        const v = calculateFunnelStep(stepKey, row.metrics, prevStepField).rate
         return v !== null ? fmtPercent(v) : "—"
       },
     })
@@ -154,9 +160,9 @@ function buildColumns(
     cols.push({
       key: `${stepKey}_cost`,
       label: def.costLabel,
-      getValue: (row) => calculateFunnelStep(stepKey, row.metrics).costPer ?? 0,
+      getValue: (row) => calculateFunnelStep(stepKey, row.metrics, prevStepField).costPer ?? 0,
       format: (row) => {
-        const v = calculateFunnelStep(stepKey, row.metrics).costPer
+        const v = calculateFunnelStep(stepKey, row.metrics, prevStepField).costPer
         return v !== null ? fmtCurrency(v, currency) : "—"
       },
     })

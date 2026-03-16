@@ -174,9 +174,21 @@ export default function ClientPerformanceView({
   const newAdIds = useMemo(() => {
     const ids = new Set<string>()
     const now = Date.now()
-    for (const [adId, dateStr] of Object.entries(createdDates)) {
+    const entries = Object.entries(createdDates)
+    for (const [adId, dateStr] of entries) {
       const created = new Date(dateStr).getTime()
       if (now - created <= 5 * 86_400_000) ids.add(adId)
+    }
+    if (typeof window !== "undefined") {
+      console.log(`[TestBadge] createdDates entries: ${entries.length}, newAdIds (≤5d): ${ids.size}`)
+      if (entries.length > 0 && ids.size === 0) {
+        // Show sample to help debug — maybe the window is too narrow
+        const sample = entries.slice(0, 3).map(([id, d]) => {
+          const age = Math.round((now - new Date(d).getTime()) / 86_400_000)
+          return `${id.slice(0, 12)}…: ${age}d ago`
+        })
+        console.log(`[TestBadge] No ads within 5d window. Samples: ${sample.join(", ")}`)
+      }
     }
     return ids
   }, [createdDates])
