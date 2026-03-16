@@ -146,13 +146,14 @@ function buildColumns(
     })
 
     // Rate column
+    const rateDecimals = def.rateDecimals ?? 1
     cols.push({
       key: `${stepKey}_rate`,
       label: def.rateLabel,
       getValue: (row) => calculateFunnelStep(stepKey, row.metrics, prevStepField).rate ?? 0,
       format: (row) => {
         const v = calculateFunnelStep(stepKey, row.metrics, prevStepField).rate
-        return v !== null ? fmtPercent(v) : "—"
+        return v !== null ? fmtPercent(v, rateDecimals) : "—"
       },
     })
 

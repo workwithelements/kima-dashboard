@@ -303,7 +303,7 @@ export default function ClientDashboard({
                       <MetricCard
                         key={`${stepKey}-rate`}
                         label={def.rateLabel}
-                        value={vals.rate !== null ? fmtPercent(vals.rate) : "—"}
+                        value={vals.rate !== null ? fmtPercent(vals.rate, def.rateDecimals ?? 1) : "—"}
                       />,
                       <MetricCard
                         key={`${stepKey}-cost`}
