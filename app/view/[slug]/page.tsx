@@ -4,9 +4,18 @@ import { cookies } from "next/headers"
 import { createServiceClient } from "@/lib/supabase/server"
 import ClientDashboard from "./client-dashboard"
 import PasswordGate from "./password-gate"
-import { daysAgo, today, monthStart } from "@/lib/utils/dates"
+import {
+  fetchClientData,
+  fetchCreativeData,
+  fetchReachData,
+  fetchBreakdownsData,
+  fetchConsolidatedSpend,
+  consolidateDailySpend,
+} from "@/lib/data/fetch-client-data"
+import { getPresetRange, getComparisonRange, daysAgo, monthStart, today } from "@/lib/utils/dates"
+import type { DatePreset } from "@/lib/utils/dates"
+import type { ComparisonType } from "@/lib/utils/types"
 import { calculatePacing } from "@/lib/utils/pacing"
-import { fetchConsolidatedSpend, consolidateDailySpend } from "@/lib/data/fetch-client-data"
 
 type Props = {
   params: { slug: string }
@@ -15,6 +24,7 @@ type Props = {
     from?: string
     to?: string
     tab?: string
+    compare?: string
   }
 }
 
@@ -25,7 +35,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
   // Look up client by slug
   const { data: client } = await supabase
     .from("clients")
-    .select("id, name, slug")
+    .select("id, name, slug, meta_account_id, currency_code, monthly_budget, active, google_ads_customer_id")
     .eq("slug", slug)
     .single()
 
@@ -55,82 +65,57 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     return <PasswordGate slug={slug} clientName={client.name} />
   }
 
-  // Date range — default to month-to-date
-  const preset = searchParams.preset || "this_month"
-  let from = searchParams.from || monthStart()
-  let to = searchParams.to || today()
+  // Date range
+  const preset = (searchParams.preset || "this_month") as DatePreset
+  const range = searchParams.from && searchParams.to
+    ? { from: searchParams.from, to: searchParams.to }
+    : getPresetRange(preset)
 
-  if (preset === "last_7d") {
-    from = daysAgo(6)
-    to = today()
-  } else if (preset === "last_30d") {
-    from = daysAgo(29)
-    to = today()
-  } else if (preset === "this_month") {
-    from = monthStart()
-    to = today()
-  }
+  // Comparison
+  const compareType = (searchParams.compare || "previous_period") as ComparisonType
+  const compRange = getComparisonRange(range, compareType)
 
-  // Fetch performance data (include adset fields for ad set selector)
-  const { data: metaRows } = await supabase
-    .from("meta_daily_performance")
-    .select(
-      "date, adset_id, adset_name, spend, impressions, reach, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, checkouts_initiated, purchases, purchase_value, app_installs"
-    )
-    .eq("client_id", client.id)
-    .gte("date", from)
-    .lte("date", to)
-    .order("date")
-    .limit(10000)
-
-  // Fetch pacing data — current month spend + 90-day historical (Meta + Google Ads)
+  // Pacing data
   const now = new Date()
   const year = now.getFullYear()
   const month = now.getMonth() + 1
 
-  const [currentMonthSpend, historicalSpend] = await Promise.all([
-    fetchConsolidatedSpend(client.id, monthStart(), today()),
-    fetchConsolidatedSpend(client.id, daysAgo(90), today()),
-  ])
-
-  const dailySpend = consolidateDailySpend(currentMonthSpend)
-  const historicalDaily = consolidateDailySpend(historicalSpend)
-
-  const pacing = calculatePacing(
-    dailySpend,
-    (client as any).monthly_budget || null,
-    year,
-    month,
-    historicalDaily
-  )
-
-  // Fetch funnel config + reach data + annotations in parallel
-  const [scorecardConfigRes, reachRes, annotationsRes] = await Promise.all([
+  // Fetch all data in parallel for all tabs
+  const [
+    perfData,
+    creativeData,
+    reachData,
+    breakdownsData,
+    scorecardConfigRes,
+    annotationsRes,
+    currentMonthSpend,
+    historicalSpend,
+  ] = await Promise.all([
+    fetchClientData(client.id, range.from, range.to, compRange?.from, compRange?.to),
+    fetchCreativeData(client.id, range.from, range.to),
+    fetchReachData(client.id, range.from, range.to, compRange?.from, compRange?.to),
+    fetchBreakdownsData(client.id, range.from, range.to),
     supabase
       .from("client_scorecard_config")
-      .select("funnel_steps, key_action")
+      .select("funnel_steps, key_action, contribution_margin_pct")
       .eq("client_id", client.id)
       .single(),
-    supabase
-      .from("meta_daily_performance")
-      .select("date, reach, impressions")
-      .eq("client_id", client.id)
-      .gte("date", from)
-      .lte("date", to)
-      .order("date")
-      .limit(10000),
     supabase
       .from("annotations")
       .select("id, date, text, created_at")
       .eq("client_id", client.id)
-      .gte("date", from)
-      .lte("date", to)
+      .gte("date", range.from)
+      .lte("date", range.to)
       .order("date"),
+    fetchConsolidatedSpend(client.id, monthStart(), today()),
+    fetchConsolidatedSpend(client.id, daysAgo(90), today()),
   ])
 
   const funnelSteps = (scorecardConfigRes.data?.funnel_steps as string[]) || null
   const keyAction = (scorecardConfigRes.data?.key_action as string) || null
-  const reachRows = reachRes.data || []
+  const contributionMarginPct = scorecardConfigRes.data?.contribution_margin_pct != null
+    ? Number(scorecardConfigRes.data.contribution_margin_pct)
+    : null
   const annotations = (annotationsRes.data || []).map((a: { id: string; date: string; text: string; created_at: string }) => ({
     id: a.id,
     date: a.date,
@@ -138,49 +123,55 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     created_at: a.created_at,
   }))
 
-  // Baseline reach (30 days before range start)
-  const dayBefore = new Date(from + "T00:00:00")
-  dayBefore.setDate(dayBefore.getDate() - 1)
-  const baselineEnd = dayBefore.toISOString().split("T")[0]
-  const baselineStartDate = new Date(from + "T00:00:00")
-  baselineStartDate.setDate(baselineStartDate.getDate() - 30)
-  const baselineStartStr = baselineStartDate.toISOString().split("T")[0]
+  const dailySpend = consolidateDailySpend(currentMonthSpend)
+  const historicalDaily = consolidateDailySpend(historicalSpend)
 
-  const { data: baselineRows } = await supabase
-    .from("meta_daily_performance")
-    .select("reach, impressions")
-    .eq("client_id", client.id)
-    .gte("date", baselineStartStr)
-    .lte("date", baselineEnd)
-    .limit(10000)
-
-  let baselineReach = 0
-  if (baselineRows?.length) {
-    for (const row of baselineRows) {
-      const reach = row.reach || 0
-      const impressions = row.impressions || 0
-      const freq = reach > 0 ? impressions / reach : 1
-      const overlapFactor = Math.min(1, 1 / Math.max(1, freq))
-      baselineReach += Math.round(reach * overlapFactor)
-    }
-  }
+  const pacing = calculatePacing(
+    dailySpend,
+    client.monthly_budget || null,
+    year,
+    month,
+    historicalDaily
+  )
 
   return (
     <ClientDashboard
-      clientName={client.name}
-      data={metaRows || []}
-      pacing={pacing}
-      monthlyBudget={(client as any).monthly_budget || null}
-      currentMonthDailySpend={dailySpend}
-      reachRows={reachRows}
-      baselineReach={baselineReach}
+      client={client}
+      tab={searchParams.tab || "performance"}
+      preset={preset}
+      from={range.from}
+      to={range.to}
+      compareType={compareType}
+      /* Performance tab */
+      perfRows={perfData?.rows || []}
+      perfComparisonRows={perfData?.comparisonRows || []}
+      baselineReach={perfData?.baselineReach || 0}
       funnelSteps={funnelSteps}
       keyAction={keyAction}
-      preset={preset}
-      from={from}
-      to={to}
-      tab={searchParams.tab || "performance"}
+      contributionMarginPct={contributionMarginPct}
+      demographics={breakdownsData?.demographics ?? []}
+      placements={breakdownsData?.placements ?? []}
       annotations={annotations}
+      namingConfig={perfData?.namingConfig}
+      createdDates={perfData?.createdDates || {}}
+      /* Creative tab */
+      creativeRows={creativeData?.rows || []}
+      thumbnails={creativeData?.thumbnails || {}}
+      previewsEnabled={creativeData?.previewsEnabled || false}
+      creativeFunnelSteps={creativeData?.funnelSteps || undefined}
+      creativeKeyAction={creativeData?.keyAction || undefined}
+      creativeDemographics={creativeData?.demographics || []}
+      creativePlacements={creativeData?.placements || []}
+      creativeNamingConfig={creativeData?.namingConfig}
+      creativeCreatedDates={creativeData?.createdDates || {}}
+      /* Reach tab */
+      reachRows={reachData?.rows || []}
+      reachBaselineReach={reachData?.baselineReach || 0}
+      reachComparisonRows={reachData?.comparisonRows || []}
+      /* Pacing tab */
+      pacing={pacing}
+      monthlyBudget={client.monthly_budget || null}
+      currentMonthDailySpend={dailySpend}
     />
   )
 }
