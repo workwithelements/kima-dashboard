@@ -28,7 +28,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(redirectTo)
   }
 
-  const response = NextResponse.redirect(new URL("/dashboard", request.url))
+  // Recovery links should redirect to the reset-password page, not the dashboard
+  const destination = type === "recovery" ? "/reset-password" : "/dashboard"
+  const response = NextResponse.redirect(new URL(destination, request.url))
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

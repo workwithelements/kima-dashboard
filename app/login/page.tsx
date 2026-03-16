@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import Logo from "@/components/ui/logo"
 
 export default function LoginPage() {
@@ -73,6 +74,15 @@ export default function LoginPage() {
           >
             {loading ? "Signing in..." : "Sign in"}
           </button>
+
+          <div className="text-center">
+            <Link
+              href="/forgot-password"
+              className="text-sm text-neutral-500 hover:text-neutral-300"
+            >
+              Forgot password?
+            </Link>
+          </div>
         </form>
       </div>
     </div>
