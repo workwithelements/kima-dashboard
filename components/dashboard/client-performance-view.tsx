@@ -208,19 +208,53 @@ export default function ClientPerformanceView({
   const isGoogleAds = platform === "google_ads"
   const isAll = platform === "all"
 
-  // Extract unique ad sets from Meta rows (only for Meta view)
+  // Determine "active" cutoff — last 3 days of the selected range
+  const activeCutoff = useMemo(() => {
+    const d = new Date(to + "T00:00:00")
+    d.setDate(d.getDate() - 2)
+    return d.toISOString().split("T")[0]
+  }, [to])
+
+  // Extract unique ad sets from Meta rows with active status
   const adsets = useMemo(() => {
-    const map = new Map<string, string>()
+    const map = new Map<string, { name: string; active: boolean }>()
     for (const r of rows) {
-      if (r.adset_id && r.adset_name) map.set(r.adset_id, r.adset_name)
+      if (!r.adset_id || !r.adset_name) continue
+      const prev = map.get(r.adset_id)
+      const isRecent = (r.date || "") >= activeCutoff && (r.spend || 0) > 0
+      map.set(r.adset_id, {
+        name: r.adset_name,
+        active: prev?.active || isRecent,
+      })
     }
-    return Array.from(map, ([id, name]) => ({ id, name })).sort((a, b) =>
+    return Array.from(map, ([id, v]) => ({ id, name: v.name, active: v.active })).sort((a, b) =>
       a.name.localeCompare(b.name)
     )
-  }, [rows])
+  }, [rows, activeCutoff])
 
   const [selectedAdSets, setSelectedAdSets] = useState<string[]>(() =>
     adsets.map((a) => a.id)
+  )
+
+  // Extract unique ad groups from Google Ads rows with active status
+  const adGroups = useMemo(() => {
+    const map = new Map<string, { name: string; active: boolean }>()
+    for (const r of googleAdsRows) {
+      if (!r.ad_group_id || !r.ad_group_name) continue
+      const prev = map.get(r.ad_group_id)
+      const isRecent = (r.date || "") >= activeCutoff && (r.spend || 0) > 0
+      map.set(r.ad_group_id, {
+        name: r.ad_group_name,
+        active: prev?.active || isRecent,
+      })
+    }
+    return Array.from(map, ([id, v]) => ({ id, name: v.name, active: v.active })).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    )
+  }, [googleAdsRows, activeCutoff])
+
+  const [selectedAdGroups, setSelectedAdGroups] = useState<string[]>(() =>
+    adGroups.map((a) => a.id)
   )
 
   // Filter Meta rows by selected ad sets
@@ -234,21 +268,32 @@ export default function ClientPerformanceView({
     return comparisonRows.filter((r) => r.adset_id && selectedAdSets.includes(r.adset_id))
   }, [comparisonRows, selectedAdSets, adsets.length])
 
+  // Filter Google Ads rows by selected ad groups
+  const filteredGaRows = useMemo(() => {
+    if (selectedAdGroups.length === 0 || selectedAdGroups.length === adGroups.length) return googleAdsRows
+    return googleAdsRows.filter((r) => r.ad_group_id && selectedAdGroups.includes(r.ad_group_id))
+  }, [googleAdsRows, selectedAdGroups, adGroups.length])
+
+  const filteredGaCompRows = useMemo(() => {
+    if (selectedAdGroups.length === 0 || selectedAdGroups.length === adGroups.length) return googleAdsComparisonRows
+    return googleAdsComparisonRows.filter((r) => r.ad_group_id && selectedAdGroups.includes(r.ad_group_id))
+  }, [googleAdsComparisonRows, selectedAdGroups, adGroups.length])
+
   // Aggregated metrics based on selected platform
   const metrics = useMemo(() => {
     if (isMeta) return aggregateMetrics(filteredRows)
-    if (isGoogleAds) return aggregateGoogleAdsMetrics(googleAdsRows)
+    if (isGoogleAds) return aggregateGoogleAdsMetrics(filteredGaRows)
     // "all" — combine both
-    return mergeMetrics(aggregateMetrics(filteredRows), aggregateGoogleAdsMetrics(googleAdsRows))
-  }, [filteredRows, googleAdsRows, platform])
+    return mergeMetrics(aggregateMetrics(filteredRows), aggregateGoogleAdsMetrics(filteredGaRows))
+  }, [filteredRows, filteredGaRows, platform])
 
   const derived = useMemo(() => deriveMetrics(metrics), [metrics])
 
   const compMetrics = useMemo(() => {
     if (isMeta) return aggregateMetrics(filteredCompRows)
-    if (isGoogleAds) return aggregateGoogleAdsMetrics(googleAdsComparisonRows)
-    return mergeMetrics(aggregateMetrics(filteredCompRows), aggregateGoogleAdsMetrics(googleAdsComparisonRows))
-  }, [filteredCompRows, googleAdsComparisonRows, platform])
+    if (isGoogleAds) return aggregateGoogleAdsMetrics(filteredGaCompRows)
+    return mergeMetrics(aggregateMetrics(filteredCompRows), aggregateGoogleAdsMetrics(filteredGaCompRows))
+  }, [filteredCompRows, filteredGaCompRows, platform])
 
   const compDerived = useMemo(() => deriveMetrics(compMetrics), [compMetrics])
 
@@ -300,7 +345,7 @@ export default function ClientPerformanceView({
       }
     }
     if (!isMeta) {
-      for (const r of googleAdsRows) {
+      for (const r of filteredGaRows) {
         if (!r.date) continue
         byDate[r.date] = (byDate[r.date] || 0) + (r.spend || 0)
       }
@@ -309,7 +354,7 @@ export default function ClientPerformanceView({
       date,
       value: Math.round((byDate[date] || 0) * 100) / 100,
     }))
-  }, [filteredRows, googleAdsRows, platform, allDates])
+  }, [filteredRows, filteredGaRows, platform, allDates])
 
   // Build funnel chart series from configured steps (Meta only)
   const funnelChartSeries: FunnelSeriesDef[] = useMemo(
@@ -409,16 +454,16 @@ export default function ClientPerformanceView({
 
       return groupByLevel(rows, metaLevel)
     }
-    if (isGoogleAds) return groupGoogleAdsByLevel(googleAdsRows, gaLevel)
+    if (isGoogleAds) return groupGoogleAdsByLevel(filteredGaRows, gaLevel)
     // "all" — combine both platforms grouped by campaign
     const metaGroups = groupByLevel(filteredRows, "campaign")
-    const gaGroups = groupGoogleAdsByLevel(googleAdsRows, "campaign")
+    const gaGroups = groupGoogleAdsByLevel(filteredGaRows, "campaign")
     // Merge: different platforms will have different campaign IDs, so just concat
     return [...metaGroups, ...gaGroups].sort((a, b) => b.metrics.spend - a.metrics.spend)
-  }, [filteredRows, googleAdsRows, metaLevel, drillPath, gaLevel, platform, perfDimFilters, perfParsedAds])
+  }, [filteredRows, filteredGaRows, metaLevel, drillPath, gaLevel, platform, perfDimFilters, perfParsedAds])
 
   // Has comparison data?
-  const hasComp = compareType !== "none" && (filteredCompRows.length > 0 || googleAdsComparisonRows.length > 0)
+  const hasComp = compareType !== "none" && (filteredCompRows.length > 0 || filteredGaCompRows.length > 0)
 
   // Comparison spend series — built from comparison rows (aligned by day index)
   const compSpendSeries = useMemo(() => {
@@ -428,7 +473,7 @@ export default function ClientPerformanceView({
     }
     if (isGoogleAds) {
       const byDate: Record<string, number> = {}
-      for (const r of googleAdsComparisonRows) {
+      for (const r of filteredGaCompRows) {
         if (!r.date) continue
         byDate[r.date] = (byDate[r.date] || 0) + (r.spend || 0)
       }
@@ -442,14 +487,14 @@ export default function ClientPerformanceView({
       if (!r.date) continue
       byDate[r.date] = (byDate[r.date] || 0) + (r.spend || 0)
     }
-    for (const r of googleAdsComparisonRows) {
+    for (const r of filteredGaCompRows) {
       if (!r.date) continue
       byDate[r.date] = (byDate[r.date] || 0) + (r.spend || 0)
     }
     return Object.entries(byDate)
       .map(([date, spend]) => ({ date, value: Math.round(spend * 100) / 100 }))
       .sort((a, b) => a.date.localeCompare(b.date))
-  }, [filteredCompRows, googleAdsComparisonRows, hasComp, platform])
+  }, [filteredCompRows, filteredGaCompRows, hasComp, platform])
 
   // Delta helper
   const delta = (current: number, prev: number) =>
@@ -491,7 +536,7 @@ export default function ClientPerformanceView({
 
   // "All Platforms" key action count (Meta uses configured funnel step, Google Ads always uses "conversions" → purchases)
   const allMetaKeyCount = (metrics as Record<string, number>)[allKeyActionField] || 0
-  const gaMetrics = useMemo(() => aggregateGoogleAdsMetrics(googleAdsRows), [googleAdsRows])
+  const gaMetrics = useMemo(() => aggregateGoogleAdsMetrics(filteredGaRows), [filteredGaRows])
   const allGoogleKeyCount = gaMetrics.purchases // Google "conversions" always mapped to purchases
   const allTotalKeyCount = allMetaKeyCount + allGoogleKeyCount
   const allCpa = allTotalKeyCount > 0 ? metrics.spend / allTotalKeyCount : 0
@@ -511,7 +556,7 @@ export default function ClientPerformanceView({
 
     // Map google conversions by date
     const googleByDate: Record<string, { spend: number; conversions: number }> = {}
-    for (const r of googleAdsRows) {
+    for (const r of filteredGaRows) {
       if (!r.date) continue
       if (!googleByDate[r.date]) googleByDate[r.date] = { spend: 0, conversions: 0 }
       googleByDate[r.date].spend += r.spend || 0
@@ -548,7 +593,7 @@ export default function ClientPerformanceView({
         : null
       return { ...d, rolling }
     })
-  }, [filteredRows, googleAdsRows, platform, allKeyActionStep])
+  }, [filteredRows, filteredGaRows, platform, allKeyActionStep])
 
   // Table level options based on platform
   const tableLevelOptions = useMemo(() => {
@@ -602,9 +647,19 @@ export default function ClientPerformanceView({
 
         {isMeta && (
           <AdSetSelector
-            adsets={adsets}
+            items={adsets}
             selected={selectedAdSets}
             onChange={setSelectedAdSets}
+            label="ad sets"
+          />
+        )}
+
+        {isGoogleAds && (
+          <AdSetSelector
+            items={adGroups}
+            selected={selectedAdGroups}
+            onChange={setSelectedAdGroups}
+            label="ad groups"
           />
         )}
 
@@ -814,35 +869,80 @@ export default function ClientPerformanceView({
         </div>
       )}
 
-      {/* Google Ads summary metrics */}
+      {/* Google Ads summary metrics — 4 rows of 3 */}
       {isGoogleAds && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-          <MetricCard
-            label="Conversions"
-            value={fmtNumber(metrics.purchases)}
-            delta={delta(metrics.purchases, compMetrics.purchases)}
-          />
-          <MetricCard
-            label="Conv. Value"
-            value={fmtCurrency(metrics.revenue, currency)}
-            delta={delta(metrics.revenue, compMetrics.revenue)}
-          />
-          <MetricCard
-            label="Cost / Conv."
-            value={fmtCurrency(derived.cpa, currency)}
-            delta={delta(derived.cpa, compDerived.cpa)}
-            invertDelta
-          />
-          <MetricCard
-            label="ROAS"
-            value={derived.roas.toFixed(2) + "x"}
-            delta={delta(derived.roas, compDerived.roas)}
-          />
-          <MetricCard
-            label="CTR"
-            value={fmtPercent(derived.ctr)}
-            delta={delta(derived.ctr, compDerived.ctr)}
-          />
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-3">
+            <MetricCard
+              label="Spend"
+              value={fmtCurrency(metrics.spend, currency)}
+              delta={delta(metrics.spend, compMetrics.spend)}
+            />
+            <MetricCard
+              label="Impressions"
+              value={fmtNumber(metrics.impressions)}
+              delta={delta(metrics.impressions, compMetrics.impressions)}
+            />
+            <MetricCard
+              label="CPM"
+              value={fmtCurrency(derived.cpm, currency)}
+              delta={delta(derived.cpm, compDerived.cpm)}
+              invertDelta
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <MetricCard
+              label="Clicks"
+              value={fmtNumber(metrics.clicks)}
+              delta={delta(metrics.clicks, compMetrics.clicks)}
+            />
+            <MetricCard
+              label="CPC"
+              value={fmtCurrency(derived.cpc, currency)}
+              delta={delta(derived.cpc, compDerived.cpc)}
+              invertDelta
+            />
+            <MetricCard
+              label="CTR"
+              value={fmtPercent(derived.ctr)}
+              delta={delta(derived.ctr, compDerived.ctr)}
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <MetricCard
+              label="Conversions"
+              value={fmtNumber(metrics.purchases)}
+              delta={delta(metrics.purchases, compMetrics.purchases)}
+            />
+            <MetricCard
+              label="CPA"
+              value={fmtCurrency(derived.cpa, currency)}
+              delta={delta(derived.cpa, compDerived.cpa)}
+              invertDelta
+            />
+            <MetricCard
+              label="CVR"
+              value={fmtPercent(derived.conversionRate)}
+              delta={delta(derived.conversionRate, compDerived.conversionRate)}
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <MetricCard
+              label="Revenue"
+              value={fmtCurrency(metrics.revenue, currency)}
+              delta={delta(metrics.revenue, compMetrics.revenue)}
+            />
+            <MetricCard
+              label="AOV"
+              value={fmtCurrency(derived.aov, currency)}
+              delta={delta(derived.aov, compDerived.aov)}
+            />
+            <MetricCard
+              label="ROAS"
+              value={derived.roas.toFixed(2) + "x"}
+              delta={delta(derived.roas, compDerived.roas)}
+            />
+          </div>
         </div>
       )}
 

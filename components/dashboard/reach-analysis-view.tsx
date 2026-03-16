@@ -178,9 +178,10 @@ export default function ReachAnalysisView({
         <h2 className="text-sm font-medium text-neutral-400">Reach Analysis</h2>
         <div className="flex items-center gap-2">
           <AdSetSelector
-            adsets={adsets}
+            items={adsets}
             selected={selectedAdSets}
             onChange={setSelectedAdSets}
+            label="ad sets"
           />
           <DateRangePicker
             preset={preset}

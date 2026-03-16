@@ -250,9 +250,10 @@ export default function ClientDashboard({
           {(activeTab === "performance" || activeTab === "reach") && (
             <div className="flex items-center gap-3">
               <AdSetSelector
-                adsets={adsets}
+                items={adsets}
                 selected={selectedAdSets}
                 onChange={setSelectedAdSets}
+                label="ad sets"
               />
               <div className="flex gap-1 rounded-lg bg-neutral-900 p-1">
                 {DATE_PRESETS.map((p) => (

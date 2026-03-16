@@ -2,16 +2,19 @@
 
 import { useState, useRef, useEffect, useMemo } from "react"
 
-type AdSet = { id: string; name: string }
+type AdSetItem = { id: string; name: string; active?: boolean }
 
 export default function AdSetSelector({
-  adsets,
+  items,
   selected,
   onChange,
+  label: itemLabel = "ad sets",
 }: {
-  adsets: AdSet[]
+  items: AdSetItem[]
   selected: string[]
   onChange: (ids: string[]) => void
+  /** Label used in the button and header, e.g. "ad sets" or "ad groups" */
+  label?: string
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
@@ -28,33 +31,33 @@ export default function AdSetSelector({
     return () => document.removeEventListener("mousedown", handleClick)
   }, [])
 
-  const allSelected = selected.length === adsets.length || selected.length === 0
-  const label = allSelected
-    ? "All ad sets"
+  const allSelected = selected.length === items.length || selected.length === 0
+  const buttonLabel = allSelected
+    ? `All ${itemLabel}`
     : selected.length === 1
-      ? adsets.find((a) => a.id === selected[0])?.name || "1 ad set"
-      : `${selected.length} ad sets`
+      ? items.find((a) => a.id === selected[0])?.name || `1 ${itemLabel.replace(/s$/, "")}`
+      : `${selected.length} ${itemLabel}`
 
   function toggle(id: string) {
     if (selected.includes(id)) {
       const next = selected.filter((s) => s !== id)
-      // If removing the last one, reset to all
-      onChange(next.length === 0 ? adsets.map((a) => a.id) : next)
+      onChange(next.length === 0 ? items.map((a) => a.id) : next)
     } else {
       onChange([...selected, id])
     }
   }
 
   function selectAll() {
-    onChange(adsets.map((a) => a.id))
+    onChange(items.map((a) => a.id))
   }
 
   function clearAll() {
-    // Keep at least 1 — select only the first
-    if (adsets.length) onChange([adsets[0].id])
+    if (items.length) onChange([items[0].id])
   }
 
-  if (adsets.length <= 1) return null
+  if (items.length <= 1) return null
+
+  const headerLabel = itemLabel.toUpperCase()
 
   return (
     <div className="relative" ref={ref}>
@@ -65,16 +68,16 @@ export default function AdSetSelector({
         <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
         </svg>
-        <span>{label}</span>
+        <span>{buttonLabel}</span>
         <svg className={`h-3 w-3 transition ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
         </svg>
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-72 rounded-xl border border-neutral-700 bg-neutral-900 p-3 shadow-xl">
+        <div className="absolute right-0 top-full z-50 mt-1 w-80 rounded-xl border border-neutral-700 bg-neutral-900 p-3 shadow-xl">
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-[10px] font-medium uppercase tracking-wider text-neutral-500">Ad Sets</span>
+            <span className="text-[10px] font-medium uppercase tracking-wider text-neutral-500">{headerLabel}</span>
             <div className="flex gap-2">
               <button
                 onClick={selectAll}
@@ -91,19 +94,19 @@ export default function AdSetSelector({
             </div>
           </div>
 
-          {adsets.length > 5 && (
+          {items.length > 5 && (
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search ad sets..."
+              placeholder={`Search ${itemLabel}...`}
               className="mb-2 w-full rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-white placeholder-neutral-500 focus:border-brand-lime focus:outline-none"
               autoFocus
             />
           )}
 
           <div className="max-h-48 space-y-0.5 overflow-y-auto">
-            {adsets.filter((a) => !search || a.name.toLowerCase().includes(search.toLowerCase())).map((a) => {
+            {items.filter((a) => !search || a.name.toLowerCase().includes(search.toLowerCase())).map((a) => {
               const checked = allSelected || selected.includes(a.id)
               return (
                 <label
@@ -116,7 +119,15 @@ export default function AdSetSelector({
                     onChange={() => toggle(a.id)}
                     className="h-3.5 w-3.5 rounded border-neutral-600 bg-neutral-800 text-brand-lime focus:ring-brand-lime/30"
                   />
-                  <span className={checked ? "text-white" : "text-neutral-400"}>
+                  {a.active !== undefined && (
+                    <span
+                      className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
+                        a.active ? "bg-green-400" : "bg-red-400"
+                      }`}
+                      title={a.active ? "Active" : "Inactive"}
+                    />
+                  )}
+                  <span className={`break-all ${checked ? "text-white" : "text-neutral-400"}`}>
                     {a.name}
                   </span>
                 </label>

@@ -495,9 +495,10 @@ export default function CreativeAnalysisView({
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <AdSetSelector
-            adsets={adsets}
+            items={adsets}
             selected={selectedAdSets}
             onChange={setSelectedAdSets}
+            label="ad sets"
           />
           <DateRangePicker
             preset={preset}
