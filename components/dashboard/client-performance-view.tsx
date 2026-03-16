@@ -978,7 +978,7 @@ export default function ClientPerformanceView({
       )}
 
       {/* Charts — Daily Spend + Spend Breakdown side by side */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[1fr_300px]">
         <Card>
           <h2 className="mb-4 text-sm font-medium text-neutral-400">Daily Spend</h2>
           <MetricChart data={spendSeries} label="Spend" color="#CDFF00" format="currency" height={260} currency={currency} comparisonData={compSpendSeries} comparisonLabel="Previous Period" annotations={annotations} />
