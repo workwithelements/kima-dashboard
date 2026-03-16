@@ -441,6 +441,7 @@ export async function fetchCreativeData(
       thumbnails[row.ad_id] = row.creative_thumbnail_url
     }
   }
+  console.log(`[fetchCreativeData] client=${clientId} activeAds=${activeAdIds.length} thumbRows=${thumbRows.length} thumbnailMap=${Object.keys(thumbnails).length} perfRows=${(perfRows as any[]).length}`)
 
   // Build created dates map (ad_id -> created_time) — only recent ads
   const createdDates: Record<string, string> = {}
