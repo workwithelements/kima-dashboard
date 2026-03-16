@@ -360,12 +360,8 @@ export async function fetchCreativeData(
 
   if (!client) return null
 
-  // Fetch performance rows, thumbnails, recent created_times, config, naming config, and breakdowns in parallel
-  // NOTE: Supabase PostgREST caps results at 1000 rows regardless of .limit().
-  // Thumbnails query may miss some ads for large accounts — but performance rows
-  // themselves are date-filtered so the overlap is usually good.
-  // created_time is filtered to last 6 days for test badge (well under 1000).
-  const [perfRows, thumbRows, recentMetaResult, configResult, namingResult2, demoRows, placementRows] = await Promise.all([
+  // Step 1: Fetch performance rows + config in parallel (these are fast/small)
+  const [perfRows, recentMetaResult, configResult, namingResult2] = await Promise.all([
     fetchAllRows(() =>
       supabase
         .from("meta_daily_performance")
@@ -374,15 +370,6 @@ export async function fetchCreativeData(
         .gte("date", from)
         .lte("date", to)
         .order("date")
-    ),
-    // Thumbnails — fetch most recently updated first so active ads are prioritised
-    fetchAllRows(() =>
-      supabase
-        .from("meta_ad_metadata")
-        .select("ad_id, creative_thumbnail_url")
-        .eq("client_id", clientId)
-        .not("creative_thumbnail_url", "is", null)
-        .order("created_time", { ascending: false })
     ),
     // Recent created_times for test badge (last 6 days — avoids 1000-row cap)
     supabase
@@ -400,6 +387,34 @@ export async function fetchCreativeData(
       .select("positions, value_maps")
       .eq("client_id", clientId)
       .single(),
+  ])
+
+  // Step 2: Extract unique ad IDs from perf rows, then fetch only those thumbnails
+  // This avoids fetching ALL thumbnails (e.g. 30k rows for TouchNote) which would timeout.
+  const adIdSet = new Set<string>()
+  for (const r of perfRows as any[]) { if (r.ad_id) adIdSet.add(r.ad_id) }
+  const activeAdIds = Array.from(adIdSet)
+
+  // Fetch thumbnails in batches (Supabase .in() has a ~300 item limit)
+  const thumbRows: any[] = []
+  const BATCH = 300
+  const thumbPromises: Promise<any[]>[] = []
+  for (let i = 0; i < activeAdIds.length; i += BATCH) {
+    const batch = activeAdIds.slice(i, i + BATCH)
+    thumbPromises.push(
+      fetchAllRows(() =>
+        supabase
+          .from("meta_ad_metadata")
+          .select("ad_id, creative_thumbnail_url")
+          .in("ad_id", batch)
+          .not("creative_thumbnail_url", "is", null)
+      )
+    )
+  }
+
+  // Fetch thumbnails + demographics + placements in parallel
+  const [thumbBatches, demoRows, placementRows] = await Promise.all([
+    Promise.all(thumbPromises),
     fetchAllRows(() =>
       supabase
         .from("meta_daily_demographics")
@@ -417,6 +432,7 @@ export async function fetchCreativeData(
         .lte("date", to)
     ),
   ])
+  for (const batch of thumbBatches) thumbRows.push(...batch)
 
   // Build thumbnail map (ad_id -> url)
   const thumbnails: Record<string, string> = {}
