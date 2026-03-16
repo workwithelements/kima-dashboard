@@ -7,6 +7,27 @@ import { createServiceClient } from "@/lib/supabase/server"
 import type { MetaDailyRow, MetaDemographicsRow, MetaPlacementsRow, GoogleAdsDailyRow, Client, AdPlatform, DailySpendRow } from "@/lib/utils/types"
 import type { NamingConfig } from "@/lib/utils/ad-name-parser"
 
+/**
+ * Paginated Supabase fetch — works around the PostgREST 1000-row default cap.
+ * `buildQuery` is called per page so the builder is fresh each time.
+ */
+async function fetchAllRows<T>(
+  buildQuery: () => any,
+  pageSize = 1000
+): Promise<T[]> {
+  const all: T[] = []
+  let offset = 0
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { data, error } = await buildQuery().range(offset, offset + pageSize - 1)
+    if (error || !data) break
+    all.push(...(data as T[]))
+    if (data.length < pageSize) break
+    offset += pageSize
+  }
+  return all
+}
+
 /** Columns available in meta_daily_performance */
 const PERF_COLUMNS =
   "date, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, spend, impressions, reach, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, checkouts_initiated, purchases, purchase_value, app_installs, mobile_app_registrations, video_plays, video_3s_views, video_p25, video_p50, video_p75, video_p95, video_p100"
@@ -65,32 +86,36 @@ export async function fetchClientData(
   const baselineEndStr = dayBefore.toISOString().split("T")[0]
 
   // Fetch primary range, comparison range, baseline reach, metadata, and naming config ALL in parallel
-  const [primaryResult, compResult, baselineResult, metadataResult, namingResult] = await Promise.all([
-    supabase
-      .from("meta_daily_performance")
-      .select(PERF_COLUMNS)
-      .eq("client_id", clientId)
-      .gte("date", from)
-      .lte("date", to)
-      .order("date")
-      .limit(10000),
+  // Uses fetchAllRows to paginate past the PostgREST 1000-row default cap.
+  const [primaryRows, compRows, baselineRows, metadataResult, namingResult] = await Promise.all([
+    fetchAllRows(() =>
+      supabase
+        .from("meta_daily_performance")
+        .select(PERF_COLUMNS)
+        .eq("client_id", clientId)
+        .gte("date", from)
+        .lte("date", to)
+        .order("date")
+    ),
     compFrom && compTo
-      ? supabase
-          .from("meta_daily_performance")
-          .select(PERF_COLUMNS)
-          .eq("client_id", clientId)
-          .gte("date", compFrom)
-          .lte("date", compTo)
-          .order("date")
-          .limit(10000)
-      : Promise.resolve({ data: [] as any[] }),
-    supabase
-      .from("meta_daily_performance")
-      .select("reach, impressions")
-      .eq("client_id", clientId)
-      .gte("date", baselineStartStr)
-      .lte("date", baselineEndStr)
-      .limit(10000),
+      ? fetchAllRows(() =>
+          supabase
+            .from("meta_daily_performance")
+            .select(PERF_COLUMNS)
+            .eq("client_id", clientId)
+            .gte("date", compFrom)
+            .lte("date", compTo)
+            .order("date")
+        )
+      : Promise.resolve([] as any[]),
+    fetchAllRows<{ reach: number; impressions: number }>(() =>
+      supabase
+        .from("meta_daily_performance")
+        .select("reach, impressions")
+        .eq("client_id", clientId)
+        .gte("date", baselineStartStr)
+        .lte("date", baselineEndStr)
+    ),
     // Fetch RECENT ad metadata for test badge (last 6 days only)
     // Supabase PostgREST caps results at 1000 rows regardless of .limit(),
     // so we filter to recent ads to stay well under that cap.
@@ -108,10 +133,8 @@ export async function fetchClientData(
   ])
 
   let baselineReach = 0
-  if (baselineResult.data?.length) {
-    for (const row of baselineResult.data) {
-      baselineReach += (row as { reach: number }).reach || 0
-    }
+  for (const row of baselineRows) {
+    baselineReach += row.reach || 0
   }
 
   // Build created dates map
@@ -142,8 +165,8 @@ export async function fetchClientData(
 
   return {
     client: client as Client,
-    rows: primaryResult.data || [],
-    comparisonRows: (compResult.data || []) as Partial<MetaDailyRow>[],
+    rows: primaryRows as Partial<MetaDailyRow>[],
+    comparisonRows: compRows as Partial<MetaDailyRow>[],
     baselineReach,
     namingConfig,
     createdDates,
@@ -270,55 +293,48 @@ export async function fetchReachData(
   baselineStart.setDate(baselineStart.getDate() - 30)
   const baselineStartStr = baselineStart.toISOString().split("T")[0]
 
-  // Build parallel queries
-  const queries: PromiseLike<any>[] = [
-    supabase
-      .from("meta_daily_performance")
-      .select("date, reach, impressions, spend, adset_id, adset_name")
-      .eq("client_id", clientId)
-      .gte("date", from)
-      .lte("date", to)
-      .order("date")
-      .limit(10000),
-    supabase
-      .from("meta_daily_performance")
-      .select("reach, impressions")
-      .eq("client_id", clientId)
-      .gte("date", baselineStartStr)
-      .lte("date", baselineEnd)
-      .limit(10000),
-  ]
+  // Fetch all rows with pagination to avoid PostgREST 1000-row cap
+  type ReachRow = { date: string; reach: number; impressions: number; spend?: number; adset_id?: string; adset_name?: string }
 
-  // Add comparison range query if provided
-  if (compFrom && compTo) {
-    queries.push(
+  const [reachRows, baselineRows, comparisonRows] = await Promise.all([
+    fetchAllRows<ReachRow>(() =>
       supabase
         .from("meta_daily_performance")
         .select("date, reach, impressions, spend, adset_id, adset_name")
         .eq("client_id", clientId)
-        .gte("date", compFrom)
-        .lte("date", compTo)
+        .gte("date", from)
+        .lte("date", to)
         .order("date")
-        .limit(10000)
-    )
-  }
-
-  const results = await Promise.all(queries)
-  const [rowsResult, baselineResult] = results
+    ),
+    fetchAllRows<{ reach: number; impressions: number }>(() =>
+      supabase
+        .from("meta_daily_performance")
+        .select("reach, impressions")
+        .eq("client_id", clientId)
+        .gte("date", baselineStartStr)
+        .lte("date", baselineEnd)
+    ),
+    compFrom && compTo
+      ? fetchAllRows<ReachRow>(() =>
+          supabase
+            .from("meta_daily_performance")
+            .select("date, reach, impressions, spend, adset_id, adset_name")
+            .eq("client_id", clientId)
+            .gte("date", compFrom)
+            .lte("date", compTo)
+            .order("date")
+        )
+      : Promise.resolve([] as ReachRow[]),
+  ])
 
   let baselineReach = 0
-  if (baselineResult.data?.length) {
-    for (const row of baselineResult.data) {
-      baselineReach += (row as { reach: number }).reach || 0
-    }
+  for (const row of baselineRows) {
+    baselineReach += row.reach || 0
   }
-
-  // Comparison data
-  const comparisonRows = results[2]?.data || []
 
   return {
     client,
-    rows: rowsResult.data || [],
+    rows: reachRows,
     baselineReach,
     comparisonRows,
   }
@@ -349,23 +365,25 @@ export async function fetchCreativeData(
   // Thumbnails query may miss some ads for large accounts — but performance rows
   // themselves are date-filtered so the overlap is usually good.
   // created_time is filtered to last 6 days for test badge (well under 1000).
-  const [perfResult, thumbResult, recentMetaResult, configResult, namingResult2, demoResult, placementResult] = await Promise.all([
-    supabase
-      .from("meta_daily_performance")
-      .select(PERF_COLUMNS)
-      .eq("client_id", clientId)
-      .gte("date", from)
-      .lte("date", to)
-      .order("date")
-      .limit(10000),
+  const [perfRows, thumbRows, recentMetaResult, configResult, namingResult2, demoRows, placementRows] = await Promise.all([
+    fetchAllRows(() =>
+      supabase
+        .from("meta_daily_performance")
+        .select(PERF_COLUMNS)
+        .eq("client_id", clientId)
+        .gte("date", from)
+        .lte("date", to)
+        .order("date")
+    ),
     // Thumbnails — fetch most recently updated first so active ads are prioritised
-    supabase
-      .from("meta_ad_metadata")
-      .select("ad_id, creative_thumbnail_url")
-      .eq("client_id", clientId)
-      .not("creative_thumbnail_url", "is", null)
-      .order("created_time", { ascending: false })
-      .limit(1000),
+    fetchAllRows(() =>
+      supabase
+        .from("meta_ad_metadata")
+        .select("ad_id, creative_thumbnail_url")
+        .eq("client_id", clientId)
+        .not("creative_thumbnail_url", "is", null)
+        .order("created_time", { ascending: false })
+    ),
     // Recent created_times for test badge (last 6 days — avoids 1000-row cap)
     supabase
       .from("meta_ad_metadata")
@@ -382,28 +400,27 @@ export async function fetchCreativeData(
       .select("positions, value_maps")
       .eq("client_id", clientId)
       .single(),
-    supabase
-      .from("meta_daily_demographics")
-      .select(DEMO_COLUMNS)
-      .eq("client_id", clientId)
-      .gte("date", from)
-      .lte("date", to)
-      .limit(10000),
-    supabase
-      .from("meta_daily_placements")
-      .select(PLACEMENT_COLUMNS)
-      .eq("client_id", clientId)
-      .gte("date", from)
-      .lte("date", to)
-      .limit(10000),
+    fetchAllRows(() =>
+      supabase
+        .from("meta_daily_demographics")
+        .select(DEMO_COLUMNS)
+        .eq("client_id", clientId)
+        .gte("date", from)
+        .lte("date", to)
+    ),
+    fetchAllRows(() =>
+      supabase
+        .from("meta_daily_placements")
+        .select(PLACEMENT_COLUMNS)
+        .eq("client_id", clientId)
+        .gte("date", from)
+        .lte("date", to)
+    ),
   ])
 
   // Build thumbnail map (ad_id -> url)
   const thumbnails: Record<string, string> = {}
-  if (thumbResult.error) {
-    console.warn("[fetchCreativeData] meta_ad_metadata thumbnails error:", thumbResult.error.message)
-  }
-  for (const row of thumbResult.data || []) {
+  for (const row of thumbRows as any[]) {
     if (row.creative_thumbnail_url) {
       thumbnails[row.ad_id] = row.creative_thumbnail_url
     }
@@ -411,15 +428,11 @@ export async function fetchCreativeData(
 
   // Build created dates map (ad_id -> created_time) — only recent ads
   const createdDates: Record<string, string> = {}
-  if (recentMetaResult.error) {
-    console.warn("[fetchCreativeData] recent metadata error:", recentMetaResult.error.message)
-  }
   for (const row of recentMetaResult.data || []) {
     if (row.created_time) {
       createdDates[row.ad_id] = row.created_time
     }
   }
-  console.log(`[fetchCreativeData] client=${clientId} thumbRows=${thumbResult.data?.length ?? 0} recentAds=${Object.keys(createdDates).length}`)
 
   const previewsEnabled = configResult.data?.creative_previews_enabled ?? false
   const keyAction = configResult.data?.key_action ?? undefined
@@ -437,15 +450,15 @@ export async function fetchCreativeData(
 
   return {
     client,
-    rows: perfResult.data || [],
+    rows: perfRows as Partial<MetaDailyRow>[],
     thumbnails,
     createdDates,
     previewsEnabled,
     keyAction,
     funnelSteps,
     namingConfig,
-    demographics: (demoResult.data || []) as MetaDemographicsRow[],
-    placements: (placementResult.data || []) as MetaPlacementsRow[],
+    demographics: demoRows as MetaDemographicsRow[],
+    placements: placementRows as MetaPlacementsRow[],
   }
 }
 
@@ -475,10 +488,8 @@ export async function fetchBreakdownsData(
 
   if (!client) return null
 
-  // Queries may fail if tables don't exist yet (migration not run)
-  // Wrap in Promise.resolve() so .catch() is available (Supabase returns PromiseLike)
-  const [demoResult, placementResult] = await Promise.all([
-    Promise.resolve(
+  const [demoRows, placementRows] = await Promise.all([
+    fetchAllRows<MetaDemographicsRow>(() =>
       supabase
         .from("meta_daily_demographics")
         .select(DEMO_COLUMNS)
@@ -486,11 +497,8 @@ export async function fetchBreakdownsData(
         .gte("date", from)
         .lte("date", to)
         .order("date")
-        .limit(10000)
-    )
-      .then((r) => (r.data || []) as MetaDemographicsRow[])
-      .catch(() => [] as MetaDemographicsRow[]),
-    Promise.resolve(
+    ).catch(() => [] as MetaDemographicsRow[]),
+    fetchAllRows<MetaPlacementsRow>(() =>
       supabase
         .from("meta_daily_placements")
         .select(PLACEMENT_COLUMNS)
@@ -498,16 +506,13 @@ export async function fetchBreakdownsData(
         .gte("date", from)
         .lte("date", to)
         .order("date")
-        .limit(10000)
-    )
-      .then((r) => (r.data || []) as MetaPlacementsRow[])
-      .catch(() => [] as MetaPlacementsRow[]),
+    ).catch(() => [] as MetaPlacementsRow[]),
   ])
 
   return {
     client,
-    demographics: demoResult as MetaDemographicsRow[],
-    placements: placementResult as MetaPlacementsRow[],
+    demographics: demoRows,
+    placements: placementRows,
   }
 }
 
@@ -525,18 +530,15 @@ export async function fetchGoogleAdsData(
 ): Promise<GoogleAdsDailyRow[]> {
   try {
     const supabase = createServiceClient()
-
-    const { data, error } = await supabase
-      .from("google_ads_daily_performance")
-      .select(GA_PERF_COLUMNS)
-      .eq("client_id", clientId)
-      .gte("date", from)
-      .lte("date", to)
-      .order("date")
-      .limit(10000)
-
-    if (error) return []
-    return (data || []) as GoogleAdsDailyRow[]
+    return await fetchAllRows<GoogleAdsDailyRow>(() =>
+      supabase
+        .from("google_ads_daily_performance")
+        .select(GA_PERF_COLUMNS)
+        .eq("client_id", clientId)
+        .gte("date", from)
+        .lte("date", to)
+        .order("date")
+    )
   } catch {
     return []
   }
@@ -553,32 +555,32 @@ export async function fetchConsolidatedSpend(
 ): Promise<DailySpendRow[]> {
   const supabase = createServiceClient()
 
-  // Run both queries in parallel (Google Ads table may not exist yet)
-  const [metaResult, gaResult] = await Promise.all([
-    supabase
-      .from("meta_daily_performance")
-      .select("date, spend")
-      .eq("client_id", clientId)
-      .gte("date", from)
-      .lte("date", to)
-      .limit(10000),
-    Promise.resolve(
+  // Run both queries in parallel with pagination
+  const [metaRows, gaRows] = await Promise.all([
+    fetchAllRows<{ date: string; spend: number }>(() =>
+      supabase
+        .from("meta_daily_performance")
+        .select("date, spend")
+        .eq("client_id", clientId)
+        .gte("date", from)
+        .lte("date", to)
+    ),
+    fetchAllRows<{ date: string; spend: number }>(() =>
       supabase
         .from("google_ads_daily_performance")
         .select("date, spend")
         .eq("client_id", clientId)
         .gte("date", from)
         .lte("date", to)
-        .limit(10000)
-    ).catch(() => ({ data: [] as any[] })),
+    ).catch(() => [] as { date: string; spend: number }[]),
   ])
 
   const rows: DailySpendRow[] = []
 
-  for (const r of metaResult.data || []) {
+  for (const r of metaRows) {
     rows.push({ date: r.date, spend: r.spend || 0, platform: "meta" })
   }
-  for (const r of gaResult.data || []) {
+  for (const r of gaRows) {
     rows.push({ date: r.date, spend: r.spend || 0, platform: "google_ads" })
   }
 
