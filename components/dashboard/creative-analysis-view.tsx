@@ -818,6 +818,8 @@ export default function CreativeAnalysisView({
                     tags={tags}
                     adTagMap={adTagMap}
                     currency={currency}
+                    thumbnails={thumbnails}
+                    videoAdIds={videoAdIds}
                     sortKey={sortKey}
                     sortDir={sortDir}
                     onSort={handleSort}
@@ -856,6 +858,8 @@ export default function CreativeAnalysisView({
             tags={tags}
             adTagMap={adTagMap}
             currency={currency}
+            thumbnails={thumbnails}
+            videoAdIds={videoAdIds}
             sortKey={sortKey}
             sortDir={sortDir}
             onSort={handleSort}
@@ -925,6 +929,8 @@ function CreativeTableInline({
   tags,
   adTagMap,
   currency,
+  thumbnails = {},
+  videoAdIds = new Set(),
   sortKey,
   sortDir,
   onSort,
@@ -942,6 +948,8 @@ function CreativeTableInline({
   tags: Tag[]
   adTagMap: Record<string, string[]>
   currency: string
+  thumbnails?: Record<string, string>
+  videoAdIds?: Set<string>
   sortKey: SortKey
   sortDir: "asc" | "desc"
   onSort: (key: SortKey) => void
@@ -955,7 +963,7 @@ function CreativeTableInline({
   selectedMetrics?: CreativeMetricKey[]
   newAdIds?: Set<string>
 }) {
-  // Fixed columns: 4 (Name, AdSet, Classification, Tags) + dynamic metrics
+  // Fixed columns: 4 (Thumbnail, Name, Classification, Tags) + dynamic metrics
   const fixedColCount = 4 + selectedMetrics.length
 
   return (
@@ -964,8 +972,8 @@ function CreativeTableInline({
         <table className="w-full text-left text-xs">
           <thead>
             <tr className="border-b border-neutral-800 text-neutral-500">
+              <th className="py-2 pr-2 font-medium w-10"></th>
               <ThButton col="adName" label="Ad Name" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-              <ThButton col="adsetName" label="Ad Set" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
               <ThButton col="classification" label="Classification" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
               <th className="py-2 pr-3 font-medium">Tags</th>
               {selectedMetrics.map((key) => {
@@ -995,6 +1003,27 @@ function CreativeTableInline({
                   key={ad.adId}
                   className="border-b border-neutral-800/50 transition hover:bg-neutral-800/30"
                 >
+                  {/* Thumbnail */}
+                  <td className="py-1.5 pr-2 w-10">
+                    <button
+                      onClick={() => onAdClick?.(ad)}
+                      className="block h-8 w-8 rounded overflow-hidden bg-neutral-800 flex-shrink-0"
+                    >
+                      {thumbnails[ad.adId] ? (
+                        <img
+                          src={thumbnails[ad.adId]}
+                          alt=""
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <span className="flex h-full w-full items-center justify-center text-[10px] text-neutral-600">
+                          {videoAdIds.has(ad.adId) ? "🎥" : "🖼"}
+                        </span>
+                      )}
+                    </button>
+                  </td>
                   <td className="max-w-[200px] truncate py-2.5 pr-3" title={ad.adName}>
                     <div className="flex items-center gap-1.5">
                       <button
@@ -1015,9 +1044,6 @@ function CreativeTableInline({
                         </span>
                       )}
                     </div>
-                  </td>
-                  <td className="max-w-[150px] truncate py-2.5 pr-3 text-neutral-400" title={ad.adsetName}>
-                    {ad.adsetName}
                   </td>
                   <td className="py-2.5 pr-3">
                     <span
@@ -1327,6 +1353,7 @@ function CreativeDetailModal({
               className="w-full object-contain"
               style={{ maxHeight: 400, imageRendering: "auto" }}
               loading="eager"
+              referrerPolicy="no-referrer"
               onError={() => setDetailImgError(true)}
             />
           ) : (

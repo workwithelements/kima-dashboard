@@ -128,13 +128,12 @@ function CreativeCard({
       {/* Thumbnail */}
       <div className="aspect-video bg-neutral-800 relative flex items-center justify-center">
         {thumbnailUrl && !imgError ? (
-          <Image
+          <img
             src={thumbnailUrl}
             alt={ad.adName}
-            fill
-            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
-            className="object-contain"
-            unoptimized
+            className="absolute inset-0 w-full h-full object-contain"
+            loading="lazy"
+            referrerPolicy="no-referrer"
             onError={() => setImgError(true)}
           />
         ) : (
