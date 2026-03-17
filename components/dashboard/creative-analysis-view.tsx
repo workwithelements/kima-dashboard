@@ -121,6 +121,16 @@ export default function CreativeAnalysisView({
   const pathname = usePathname()
   const searchParams = useSearchParams()
 
+  // Convert raw CDN URLs to proxy URLs — Meta CDN URLs expire after ~24h,
+  // so we proxy through our API which can re-fetch fresh URLs from Meta
+  const proxyThumbnails = useMemo(() => {
+    const map: ThumbnailMap = {}
+    for (const [adId, url] of Object.entries(thumbnails)) {
+      if (url) map[adId] = `/api/thumbnail?ad_id=${encodeURIComponent(adId)}`
+    }
+    return map
+  }, [thumbnails])
+
   const [sortKey, setSortKey] = useState<SortKey>("spend")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
   const [activeFilters, setActiveFilters] = useState<Set<ClassificationType>>(
@@ -800,7 +810,7 @@ export default function CreativeAnalysisView({
                 {viewMode === "grid" ? (
                   <CreativeCardGrid
                     ads={section.ads}
-                    thumbnails={thumbnails}
+                    thumbnails={proxyThumbnails}
                     videoAdIds={videoAdIds}
                     rows={filteredRows}
                     currency={currency}
@@ -818,7 +828,7 @@ export default function CreativeAnalysisView({
                     tags={tags}
                     adTagMap={adTagMap}
                     currency={currency}
-                    thumbnails={thumbnails}
+                    thumbnails={proxyThumbnails}
                     videoAdIds={videoAdIds}
                     sortKey={sortKey}
                     sortDir={sortDir}
@@ -840,7 +850,7 @@ export default function CreativeAnalysisView({
         ) : viewMode === "grid" ? (
           <CreativeCardGrid
             ads={sortedAds}
-            thumbnails={thumbnails}
+            thumbnails={proxyThumbnails}
             videoAdIds={videoAdIds}
             rows={filteredRows}
             currency={currency}
@@ -858,7 +868,7 @@ export default function CreativeAnalysisView({
             tags={tags}
             adTagMap={adTagMap}
             currency={currency}
-            thumbnails={thumbnails}
+            thumbnails={proxyThumbnails}
             videoAdIds={videoAdIds}
             sortKey={sortKey}
             sortDir={sortDir}
@@ -904,7 +914,7 @@ export default function CreativeAnalysisView({
       {detailAd && (
         <CreativeDetailModal
           ad={detailAd}
-          thumbnailUrl={thumbnails[detailAd.adId]}
+          thumbnailUrl={proxyThumbnails[detailAd.adId]}
           isVideo={videoAdIds.has(detailAd.adId)}
           rows={filteredRows}
           currency={currency}
