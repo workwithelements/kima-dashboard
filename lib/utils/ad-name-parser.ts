@@ -54,6 +54,9 @@ export type ParsedAdName = {
   launchDate: string | null
   conceptName: string | null
   conceptCopy: string | null
+  job: string | null
+  useCase: string | null
+  stage: string | null
   creator: string | null
   styleOfContent: string | null
   styleOfContentCode: string | null
@@ -70,6 +73,9 @@ export type AdDimension =
   | "landingPage"
   | "conceptName"
   | "conceptCopy"
+  | "job"
+  | "useCase"
+  | "stage"
   | "creator"
   | "styleOfContent"
   | "campaign"
@@ -83,6 +89,9 @@ const STANDARD_KEYS: readonly string[] = [
   "launchDate",
   "conceptName",
   "conceptCopy",
+  "job",
+  "useCase",
+  "stage",
   "creator",
   "styleOfContent",
   "styleOfContentCode",
@@ -95,6 +104,9 @@ export const DIMENSION_LABELS: Record<AdDimension, string> = {
   landingPage: "Landing Page",
   conceptName: "Concept",
   conceptCopy: "Copy",
+  job: "Job",
+  useCase: "Use Case",
+  stage: "Stage",
   creator: "Creator",
   styleOfContent: "Style",
   campaign: "Campaign",
@@ -131,6 +143,9 @@ export function parseAdName(adName: string, config?: NamingConfig): ParsedAdName
     launchDate: null,
     conceptName: null,
     conceptCopy: null,
+    job: null,
+    useCase: null,
+    stage: null,
     creator: null,
     styleOfContent: null,
     styleOfContentCode: null,
@@ -190,6 +205,10 @@ export function parseAdName(adName: string, config?: NamingConfig): ParsedAdName
   }
 
   // --- Legacy hardcoded parsing (no config) ---
+  // Detect convention by part count:
+  //   11+ parts → new: Format_LP_LaunchDate_Concept_Job_UseCase_Stage_Creator_Style_Campaign_Version
+  //   ≤10 parts → old: Format_LP_LaunchDate_Concept_Copy_Creator_Style_Campaign_Version
+  const isNewConvention = parts.length >= 11
 
   // Position 0: Format
   result.format = get(0)
@@ -205,38 +224,54 @@ export function parseAdName(adName: string, config?: NamingConfig): ParsedAdName
   // Position 3: Concept Name
   result.conceptName = get(3)
 
-  // Position 4: Concept Copy
-  result.conceptCopy = get(4)
+  if (isNewConvention) {
+    // New convention (11 parts):
+    // 4=Job, 5=UseCase, 6=Stage, 7=Creator, 8=Style, 9=Campaign, 10=Version
+    result.job = get(4)
+    result.useCase = get(5)
+    result.stage = get(6)
+    result.creator = get(7)
 
-  // Position 5: Creator
-  result.creator = get(5)
-
-  // Position 6: Style Code — also search other parts if not found at 6
-  let styleCode = get(6)
-  let styleFound = false
-
-  if (styleCode && styleCode.startsWith("SC")) {
-    styleFound = true
-  } else {
-    const scPart = parts.find((p) => /^SC\d+$/.test(p))
-    if (scPart) {
-      styleCode = scPart
-      styleFound = true
+    let styleCode = get(8)
+    if (styleCode && styleCode.startsWith("SC")) {
+      result.styleOfContentCode = styleCode
+      result.styleOfContent = STYLE_MAP[styleCode] || styleCode
+    } else if (styleCode) {
+      result.styleOfContent = styleCode
     }
+
+    result.campaign = get(9)
+    result.version = get(10)
+  } else {
+    // Old convention (9 parts):
+    // 4=Copy, 5=Creator, 6=Style, 7=Campaign, 8=Version
+    result.conceptCopy = get(4)
+    result.creator = get(5)
+
+    // Position 6: Style Code — also search other parts if not found at 6
+    let styleCode = get(6)
+    let styleFound = false
+
+    if (styleCode && styleCode.startsWith("SC")) {
+      styleFound = true
+    } else {
+      const scPart = parts.find((p) => /^SC\d+$/.test(p))
+      if (scPart) {
+        styleCode = scPart
+        styleFound = true
+      }
+    }
+
+    if (styleFound && styleCode) {
+      result.styleOfContentCode = styleCode
+      result.styleOfContent = STYLE_MAP[styleCode] || styleCode
+    } else if (styleCode) {
+      result.styleOfContent = styleCode
+    }
+
+    result.campaign = get(7)
+    result.version = get(8)
   }
-
-  if (styleFound && styleCode) {
-    result.styleOfContentCode = styleCode
-    result.styleOfContent = STYLE_MAP[styleCode] || styleCode
-  } else if (styleCode) {
-    result.styleOfContent = styleCode
-  }
-
-  // Position 7: Campaign
-  result.campaign = get(7)
-
-  // Position 8: Version
-  result.version = get(8)
 
   return result
 }
@@ -260,6 +295,9 @@ export function getAvailableDimensions(
         "landingPage",
         "conceptName",
         "conceptCopy",
+        "job",
+        "useCase",
+        "stage",
         "creator",
         "styleOfContent",
         "campaign",
