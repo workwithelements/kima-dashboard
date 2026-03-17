@@ -518,8 +518,8 @@ export default function CreativeAnalysisView({
       {/* Meta creative analysis content */}
       {<>
 
-      {/* Tag manager gear icon — shown near toolbar when tags exist */}
-      {tags.length > 0 && !readOnly && (
+      {/* Tag manager button — always visible so users can create first tags */}
+      {!readOnly && (
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowTagManager(true)}
@@ -1076,37 +1076,39 @@ function CreativeTableInline({
                           </button>
                         </span>
                       ))}
-                      <div className="relative">
-                        <button
-                          data-tag-add-btn
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            if (tagDropdownAdId === ad.adId) {
-                              setTagDropdownAdId(null)
-                              setTagDropdownAnchor(null)
-                            } else {
-                              setTagDropdownAnchor(e.currentTarget.getBoundingClientRect())
-                              setTagDropdownAdId(ad.adId)
-                            }
-                          }}
-                          className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-neutral-700 text-neutral-500 transition hover:border-neutral-500 hover:text-neutral-300"
-                          title="Add tag"
-                        >
-                          +
-                        </button>
-                        {tagDropdownAdId === ad.adId && tagDropdownAnchor && (
-                          <TagDropdown
-                            tags={unassignedTags}
-                            onSelect={(tagId) => assignTag(ad.adId, tagId)}
-                            onClose={() => {
-                              setTagDropdownAdId(null)
-                              setTagDropdownAnchor(null)
+                      {tags.length > 0 && (
+                        <div className="relative">
+                          <button
+                            data-tag-add-btn
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (tagDropdownAdId === ad.adId) {
+                                setTagDropdownAdId(null)
+                                setTagDropdownAnchor(null)
+                              } else {
+                                setTagDropdownAnchor(e.currentTarget.getBoundingClientRect())
+                                setTagDropdownAdId(ad.adId)
+                              }
                             }}
-                            anchorRect={tagDropdownAnchor}
-                          />
-                        )}
-                      </div>
+                            className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-neutral-700 text-neutral-500 transition hover:border-neutral-500 hover:text-neutral-300"
+                            title="Add tag"
+                          >
+                            +
+                          </button>
+                          {tagDropdownAdId === ad.adId && tagDropdownAnchor && (
+                            <TagDropdown
+                              tags={unassignedTags}
+                              onSelect={(tagId) => assignTag(ad.adId, tagId)}
+                              onClose={() => {
+                                setTagDropdownAdId(null)
+                                setTagDropdownAnchor(null)
+                              }}
+                              anchorRect={tagDropdownAnchor}
+                            />
+                          )}
+                        </div>
+                      )}
                     </div>
                   </td>
                   {selectedMetrics.map((key) => {
@@ -1262,8 +1264,9 @@ function TagDropdown({
 
   const content =
     tags.length === 0 ? (
-      <div ref={ref} className="w-36 rounded-lg border border-neutral-700 bg-neutral-800 p-2 shadow-xl" style={style}>
-        <p className="text-xs text-neutral-500">No more tags</p>
+      <div ref={ref} className="w-44 rounded-lg border border-neutral-700 bg-neutral-800 p-2 shadow-xl" style={style}>
+        <p className="text-xs text-neutral-500">All tags assigned</p>
+        <p className="text-[10px] text-neutral-600 mt-0.5">Use "Manage Tags" to create more</p>
       </div>
     ) : (
       <div ref={ref} className="w-40 rounded-lg border border-neutral-700 bg-neutral-800 py-1 shadow-xl" style={style}>
