@@ -633,17 +633,19 @@ export default function ClientPerformanceView({
     else if (!isAll) {
       setMetaLevel(newLevel as HierarchyLevel)
       setDrillPath([]) // reset drill-down when manually switching level
+      setPerfDimFilters({}) // reset naming convention filters
     }
   }
 
   // Drill-down breadcrumb for Meta performance table
   const drillBreadcrumb = isMeta && drillPath.length > 0 ? [
-    { label: "All Campaigns", onClick: () => { setDrillPath([]); setMetaLevel("campaign") } },
+    { label: "All Campaigns", onClick: () => { setDrillPath([]); setMetaLevel("campaign"); setPerfDimFilters({}) } },
     ...drillPath.map((crumb, i) => ({
       label: crumb.name,
       onClick: () => {
         setDrillPath(prev => prev.slice(0, i + 1))
         setMetaLevel(crumb.level === "campaign" ? "adset" : "ad")
+        setPerfDimFilters({})
       },
     })),
   ] : undefined
@@ -651,6 +653,7 @@ export default function ClientPerformanceView({
   const handleDrillDown = isMeta && metaLevel !== "ad" ? (row: { id: string; name: string }) => {
     setDrillPath(prev => [...prev, { level: metaLevel, id: row.id, name: row.name }])
     setMetaLevel(metaLevel === "campaign" ? "adset" : "ad")
+    setPerfDimFilters({}) // reset naming convention filters on drill
   } : undefined
 
   return (
