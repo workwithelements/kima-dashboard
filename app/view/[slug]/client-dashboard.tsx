@@ -8,7 +8,9 @@ import ReachAnalysisView from "@/components/dashboard/reach-analysis-view"
 import PacingCard from "@/components/dashboard/pacing-card"
 import { Card, MetricCard } from "@/components/ui/card"
 import MetricChart from "@/components/charts/metric-chart"
+import DateRangePicker from "@/components/ui/date-range-picker"
 import { fmtCurrency, fmtNumber } from "@/lib/utils/format"
+import { getPresetRange } from "@/lib/utils/dates"
 import type { PacingResult } from "@/lib/utils/pacing"
 import type { DatePreset } from "@/lib/utils/dates"
 import type { ComparisonType, Client } from "@/lib/utils/types"
@@ -84,18 +86,23 @@ export default function ClientDashboard(props: Props) {
     router.push(`${pathname}?${params.toString()}`)
   }
 
-  const currency = props.client.currency_code ?? "GBP"
+  function handlePresetChange(preset: DatePreset) {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set("preset", preset)
+    params.delete("from")
+    params.delete("to")
+    router.push(`${pathname}?${params.toString()}`)
+  }
 
-  // Format display dates
-  const displayFrom = new Date(props.from + "T00:00:00").toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-  })
-  const displayTo = new Date(props.to + "T00:00:00").toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  })
+  function handleCustomDateChange(from: string, to: string) {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set("preset", "custom")
+    params.set("from", from)
+    params.set("to", to)
+    router.push(`${pathname}?${params.toString()}`)
+  }
+
+  const currency = props.client.currency_code ?? "GBP"
 
   // Pacing chart data
   const pacingSpendChartData = props.currentMonthDailySpend.map((d) => ({
@@ -119,9 +126,13 @@ export default function ClientDashboard(props: Props) {
             <div className="h-6 w-px bg-neutral-700" />
             <h1 className="text-lg font-semibold">{props.client.name}</h1>
           </div>
-          <p className="text-xs text-neutral-500">
-            {displayFrom} – {displayTo}
-          </p>
+          <DateRangePicker
+            preset={props.preset}
+            from={props.from}
+            to={props.to}
+            onPresetChange={handlePresetChange}
+            onCustomChange={handleCustomDateChange}
+          />
         </div>
       </header>
 
