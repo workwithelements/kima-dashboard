@@ -17,10 +17,14 @@ import {
   type CreativeMetricKey,
 } from "@/lib/utils/creative-metrics"
 
-// Lazy-load chart component
+// Lazy-load chart components
 const SpendShareChart = dynamic(
   () => import("@/components/charts/spend-share-chart"),
   { ssr: false, loading: () => <div className="h-64 animate-pulse rounded bg-neutral-800/50" /> }
+)
+const DimensionPieCharts = dynamic(
+  () => import("@/components/charts/dimension-pie-charts"),
+  { ssr: false, loading: () => <div className="h-48 animate-pulse rounded bg-neutral-800/50" /> }
 )
 import TagManagerModal, { type Tag } from "@/components/dashboard/tag-manager-modal"
 import MiniRetentionCurve from "@/components/charts/mini-retention-curve"
@@ -682,6 +686,11 @@ export default function CreativeAnalysisView({
           <p className="text-sm text-neutral-500">No creative data available.</p>
         )}
       </Card>
+
+      {/* Dimension overview pie charts */}
+      {enrichedAds.length > 0 && (
+        <DimensionPieCharts ads={enrichedAds} />
+      )}
 
       {/* Spend Share Chart */}
       {adsets.length > 0 && (
