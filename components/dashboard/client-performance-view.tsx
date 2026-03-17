@@ -459,10 +459,9 @@ export default function ClientPerformanceView({
       return groupByLevel(rows, metaLevel)
     }
     if (isGoogleAds) return groupGoogleAdsByLevel(filteredGaRows, gaLevel)
-    // "all" — combine both platforms grouped by campaign
-    const metaGroups = groupByLevel(filteredRows, "campaign")
-    const gaGroups = groupGoogleAdsByLevel(filteredGaRows, "campaign")
-    // Merge: different platforms will have different campaign IDs, so just concat
+    // "all" — combine both platforms grouped by campaign, tagged with platform
+    const metaGroups = groupByLevel(filteredRows, "campaign").map(g => ({ ...g, platform: "meta" as const }))
+    const gaGroups = groupGoogleAdsByLevel(filteredGaRows, "campaign").map(g => ({ ...g, platform: "google" as const }))
     return [...metaGroups, ...gaGroups].sort((a, b) => b.metrics.spend - a.metrics.spend)
   }, [filteredRows, filteredGaRows, metaLevel, drillPath, gaLevel, platform, perfDimFilters, perfParsedAds])
 
@@ -475,8 +474,8 @@ export default function ClientPerformanceView({
       return groupByLevel(filteredCompRows, metaLevel)
     }
     if (isGoogleAds) return groupGoogleAdsByLevel(filteredGaCompRows, gaLevel)
-    const metaGroups = groupByLevel(filteredCompRows, "campaign")
-    const gaGroups = groupGoogleAdsByLevel(filteredGaCompRows, "campaign")
+    const metaGroups = groupByLevel(filteredCompRows, "campaign").map(g => ({ ...g, platform: "meta" as const }))
+    const gaGroups = groupGoogleAdsByLevel(filteredGaCompRows, "campaign").map(g => ({ ...g, platform: "google" as const }))
     return [...metaGroups, ...gaGroups].sort((a, b) => b.metrics.spend - a.metrics.spend)
   }, [filteredCompRows, filteredGaCompRows, metaLevel, gaLevel, platform])
 
@@ -969,29 +968,54 @@ export default function ClientPerformanceView({
 
       {/* "All" platforms summary — key metric conversions + CPA */}
       {isAll && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <MetricCard
-            label={`Total ${allKeyActionLabel}`}
-            value={fmtNumber(allTotalKeyCount)}
-            subValue={`Meta: ${fmtNumber(allMetaKeyCount)} · Google: ${fmtNumber(allGoogleKeyCount)}`}
-            delta={delta(metrics.purchases, compMetrics.purchases)}
-          />
-          <MetricCard
-            label={allKeyActionCostLabel}
-            value={allCpa > 0 ? fmtCurrency(allCpa, currency) : "\u2014"}
-            invertDelta
-          />
-          <MetricCard
-            label="Revenue"
-            value={fmtCurrency(metrics.revenue, currency)}
-            delta={delta(metrics.revenue, compMetrics.revenue)}
-          />
-          <MetricCard
-            label="ROAS"
-            value={derived.roas.toFixed(2) + "x"}
-            delta={delta(derived.roas, compDerived.roas)}
-          />
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <MetricCard
+              label="Spend"
+              value={fmtCurrency(metrics.spend, currency)}
+              delta={delta(metrics.spend, compMetrics.spend)}
+            />
+            <MetricCard
+              label="Impressions"
+              value={fmtNumber(metrics.impressions)}
+              delta={delta(metrics.impressions, compMetrics.impressions)}
+            />
+            <MetricCard
+              label="CPM"
+              value={fmtCurrency(derived.cpm, currency)}
+              delta={delta(derived.cpm, compDerived.cpm)}
+              invertDelta
+            />
+            <MetricCard
+              label="Purchases"
+              value={fmtNumber(allTotalKeyCount)}
+              subValue={`Meta: ${fmtNumber(allMetaKeyCount)} · Google: ${fmtNumber(allGoogleKeyCount)}`}
+              delta={delta(metrics.purchases, compMetrics.purchases)}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <MetricCard
+              label="CPA"
+              value={allCpa > 0 ? fmtCurrency(allCpa, currency) : "\u2014"}
+              invertDelta
+            />
+            <MetricCard
+              label="Revenue"
+              value={fmtCurrency(metrics.revenue, currency)}
+              delta={delta(metrics.revenue, compMetrics.revenue)}
+            />
+            <MetricCard
+              label="AOV"
+              value={fmtCurrency(derived.aov, currency)}
+              delta={delta(derived.aov, compDerived.aov)}
+            />
+            <MetricCard
+              label="ROAS"
+              value={derived.roas.toFixed(2) + "x"}
+              delta={delta(derived.roas, compDerived.roas)}
+            />
+          </div>
+        </>
       )}
 
       {/* Charts — Daily Spend + Spend Breakdown side by side */}
@@ -1148,8 +1172,8 @@ export default function ClientPerformanceView({
         )}
       </Card>
 
-      {/* Breakdowns section (Meta only) */}
-      {(isMeta || isAll) && (demographics.length > 0 || placements.length > 0) && (
+      {/* Breakdowns section (Meta only, not All Platforms) */}
+      {isMeta && (demographics.length > 0 || placements.length > 0) && (
         <BreakdownsSection
           demographics={demographics}
           placements={placements}

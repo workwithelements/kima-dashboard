@@ -10,6 +10,7 @@ type GroupRow = {
   id: string
   name: string
   metrics: AggregatedMetrics
+  platform?: "meta" | "google"
 }
 
 type ColumnDef = {
@@ -572,6 +573,17 @@ export default function PerformanceTable({
                   >
                     {isName ? (
                       <span className="inline-flex items-center gap-1.5">
+                        {row.platform && (
+                          <span
+                            className={`inline-flex shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
+                              row.platform === "meta"
+                                ? "bg-blue-500/15 text-blue-400 border border-blue-500/30"
+                                : "bg-amber-500/15 text-amber-400 border border-amber-500/30"
+                            }`}
+                          >
+                            {row.platform === "meta" ? "Meta" : "Google"}
+                          </span>
+                        )}
                         {col.format(row)}
                         {newAdIds?.has(row.id) && (
                           <span

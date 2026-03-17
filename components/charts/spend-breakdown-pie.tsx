@@ -11,7 +11,7 @@ import {
 import type { MetaDailyRow, GoogleAdsDailyRow } from "@/lib/utils/types"
 import { fmtCurrency } from "@/lib/utils/format"
 
-type BreakdownLevel = "campaign" | "adset" | "ad_group"
+type BreakdownLevel = "campaign" | "adset" | "ad_group" | "platform" | "market"
 
 type Props = {
   metaRows: Partial<MetaDailyRow>[]
@@ -38,6 +38,37 @@ const COLORS = [
   "#14b8a6",
 ]
 
+/** Common market/country codes found at the start of campaign names */
+const MARKET_PATTERNS: [RegExp, string][] = [
+  [/^UK[_ ]/i, "UK"],
+  [/^US[_ ]/i, "US"],
+  [/^AU[_ ]/i, "AU"],
+  [/^CA[_ ]/i, "CA"],
+  [/^DE[_ ]/i, "DE"],
+  [/^FR[_ ]/i, "FR"],
+  [/^EU[_ ]/i, "EU"],
+  [/^NZ[_ ]/i, "NZ"],
+  [/^IE[_ ]/i, "IE"],
+  [/^NL[_ ]/i, "NL"],
+  [/^IT[_ ]/i, "IT"],
+  [/^ES[_ ]/i, "ES"],
+  [/^JP[_ ]/i, "JP"],
+  [/^ROW[_ ]/i, "ROW"],
+  [/^INTL[_ ]/i, "International"],
+  [/^GLOBAL[_ ]/i, "Global"],
+]
+
+function inferMarket(campaignName: string): string {
+  const upper = campaignName.toUpperCase()
+  for (const [pattern, market] of MARKET_PATTERNS) {
+    if (pattern.test(upper)) return market
+  }
+  // Try to find a 2-letter country code at the start before an underscore
+  const match = upper.match(/^([A-Z]{2})_/)
+  if (match) return match[1]
+  return "Other"
+}
+
 function buildSpendMap(
   metaRows: Partial<MetaDailyRow>[],
   googleAdsRows: Partial<GoogleAdsDailyRow>[],
@@ -46,6 +77,34 @@ function buildSpendMap(
   level: BreakdownLevel
 ) {
   const map = new Map<string, { name: string; spend: number }>()
+
+  if (level === "platform") {
+    // Simple two-entry map: Meta vs Google
+    let metaSpend = 0
+    let googleSpend = 0
+    for (const r of metaRows) metaSpend += r.spend || 0
+    for (const r of googleAdsRows) googleSpend += r.spend || 0
+    if (metaSpend > 0) map.set("meta", { name: "Meta", spend: metaSpend })
+    if (googleSpend > 0) map.set("google", { name: "Google Ads", spend: googleSpend })
+    return map
+  }
+
+  if (level === "market") {
+    // Group by inferred market from campaign names
+    const marketMap = new Map<string, number>()
+    for (const r of metaRows) {
+      const market = inferMarket(r.campaign_name || "")
+      marketMap.set(market, (marketMap.get(market) || 0) + (r.spend || 0))
+    }
+    for (const r of googleAdsRows) {
+      const market = inferMarket(r.campaign_name || "")
+      marketMap.set(market, (marketMap.get(market) || 0) + (r.spend || 0))
+    }
+    marketMap.forEach((spend, market) => {
+      if (spend > 0) map.set(market, { name: market, spend })
+    })
+    return map
+  }
 
   if (!isGoogleAds) {
     for (const r of metaRows) {
@@ -84,8 +143,13 @@ export default function SpendBreakdownPie({
 }: Props) {
   const isMeta = platform === "meta"
   const isGoogleAds = platform === "google_ads"
+  const isAll = platform === "all"
 
   const levelOptions: { key: BreakdownLevel; label: string }[] = useMemo(() => {
+    if (isAll) return [
+      { key: "platform", label: "Platform" },
+      { key: "market", label: "Market" },
+    ]
     if (isGoogleAds) return [
       { key: "campaign", label: "Campaign" },
       { key: "ad_group", label: "Ad Group" },
@@ -97,7 +161,7 @@ export default function SpendBreakdownPie({
     return [{ key: "campaign", label: "Campaign" }]
   }, [platform])
 
-  const [level, setLevel] = useState<BreakdownLevel>("campaign")
+  const [level, setLevel] = useState<BreakdownLevel>(isAll ? "platform" : "campaign")
 
   // Current period data
   const data = useMemo(() => {
