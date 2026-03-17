@@ -38,11 +38,19 @@ export const STYLE_MAP: Record<string, string> = {
   SC4: "Collage",
   SC5: "Studio Shoot",
   SC6: "Product Demo",
-  SC7: "Animated Static",
+  SC7: "Animated",
   SC8: "Static Text",
   SC9: "Lo-fi",
-  SC10: "Customer Review",
+  SC10: "Customer Review Testimonial",
   SC11: "Behind The Scenes",
+}
+
+// --- Stage Codes ---
+
+export const STAGE_MAP: Record<string, string> = {
+  PU: "Problem Unaware",
+  PA: "Problem Aware",
+  SA: "Solution Aware",
 }
 
 // --- Parsed Result Type ---
@@ -229,7 +237,8 @@ export function parseAdName(adName: string, config?: NamingConfig): ParsedAdName
     // 4=Job, 5=UseCase, 6=Stage, 7=Creator, 8=Style, 9=Campaign, 10=Version
     result.job = get(4)
     result.useCase = get(5)
-    result.stage = get(6)
+    const stageCode = get(6)
+    result.stage = stageCode ? STAGE_MAP[stageCode] || stageCode : null
     result.creator = get(7)
 
     let styleCode = get(8)
