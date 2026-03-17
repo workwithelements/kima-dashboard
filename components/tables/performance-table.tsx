@@ -20,6 +20,36 @@ type ColumnDef = {
   format: (row: GroupRow) => string
 }
 
+/** Keys where lower = better (costs). For these, negative delta is green. */
+const LOWER_IS_BETTER = new Set(["cpm", "cpc", "cpa", "frequency"])
+
+function DeltaBadge({ current, previous, colKey }: { current: number; previous: number; colKey: string }) {
+  if (previous === 0 && current === 0) return null
+  if (previous === 0) return null // can't compute % change from zero
+
+  const pctChange = ((current - previous) / Math.abs(previous)) * 100
+  if (!isFinite(pctChange)) return null
+
+  // For rate columns (ending in _rate) and cost columns, interpret direction
+  const isCost = LOWER_IS_BETTER.has(colKey) || colKey.endsWith("_cost")
+  const isPositive = isCost ? pctChange < 0 : pctChange > 0
+  const isNeutral = Math.abs(pctChange) < 0.5
+
+  const color = isNeutral
+    ? "text-neutral-500"
+    : isPositive
+      ? "text-emerald-400"
+      : "text-red-400"
+
+  const arrow = pctChange > 0 ? "↑" : pctChange < 0 ? "↓" : ""
+
+  return (
+    <span className={`block text-[9px] font-medium leading-tight ${color}`}>
+      {arrow} {Math.abs(pctChange).toFixed(1)}%
+    </span>
+  )
+}
+
 /** Extra metric definitions that can be toggled on/off via column picker */
 type ExtraMetricDef = {
   key: string
@@ -253,6 +283,7 @@ function buildColumns(
 
 export default function PerformanceTable({
   data,
+  comparisonData,
   level,
   onLevelChange,
   funnelSteps = [],
@@ -263,6 +294,8 @@ export default function PerformanceTable({
   newAdIds,
 }: {
   data: GroupRow[]
+  /** Comparison period data — same shape, matched by row ID for delta badges */
+  comparisonData?: GroupRow[]
   level: string
   onLevelChange: (level: any) => void
   funnelSteps?: string[]
@@ -281,6 +314,14 @@ export default function PerformanceTable({
   const [extraCols, setExtraCols] = useState<string[]>([])
   const [showColPicker, setShowColPicker] = useState(false)
   const pickerRef = useRef<HTMLDivElement>(null)
+
+  // Build comparison lookup by row ID
+  const compMap = useMemo(() => {
+    if (!comparisonData) return null
+    const map = new Map<string, GroupRow>()
+    for (const row of comparisonData) map.set(row.id, row)
+    return map
+  }, [comparisonData])
 
   // Close picker on outside click
   useEffect(() => {
@@ -503,7 +544,9 @@ export default function PerformanceTable({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((row) => (
+            {sorted.map((row) => {
+              const compRow = compMap?.get(row.id)
+              return (
               <tr
                 key={row.id}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
@@ -513,15 +556,21 @@ export default function PerformanceTable({
                     : "hover:bg-neutral-800/30"
                 }`}
               >
-                {columns.map((col) => (
+                {columns.map((col) => {
+                  const isName = col.key === "name"
+                  // Compute delta for non-name numeric columns
+                  const currentVal = !isName ? col.getValue(row) : null
+                  const prevVal = !isName && compRow ? col.getValue(compRow) : null
+
+                  return (
                   <td
                     key={col.key}
                     className={`px-3 py-2.5 text-xs tabular-nums ${
                       col.align === "left" ? "text-left" : "text-right whitespace-nowrap"
-                    } ${col.key === "name" ? "max-w-[320px] truncate font-medium text-white" : "text-neutral-300"}`}
-                    title={col.key === "name" ? row.name : undefined}
+                    } ${isName ? "max-w-[320px] truncate font-medium text-white" : "text-neutral-300"}`}
+                    title={isName ? row.name : undefined}
                   >
-                    {col.key === "name" ? (
+                    {isName ? (
                       <span className="inline-flex items-center gap-1.5">
                         {col.format(row)}
                         {newAdIds?.has(row.id) && (
@@ -542,12 +591,19 @@ export default function PerformanceTable({
                         )}
                       </span>
                     ) : (
-                      col.format(row)
+                      <div>
+                        {col.format(row)}
+                        {compRow && typeof currentVal === "number" && typeof prevVal === "number" && (
+                          <DeltaBadge current={currentVal} previous={prevVal} colKey={col.key} />
+                        )}
+                      </div>
                     )}
                   </td>
-                ))}
+                  )
+                })}
               </tr>
-            ))}
+              )
+            })}
             {sorted.length === 0 && (
               <tr>
                 <td colSpan={columns.length} className="px-3 py-8 text-center text-xs text-neutral-500">

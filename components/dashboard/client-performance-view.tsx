@@ -466,6 +466,20 @@ export default function ClientPerformanceView({
     return [...metaGroups, ...gaGroups].sort((a, b) => b.metrics.spend - a.metrics.spend)
   }, [filteredRows, filteredGaRows, metaLevel, drillPath, gaLevel, platform, perfDimFilters, perfParsedAds])
 
+  // Comparison grouped data — same grouping logic applied to comparison rows
+  const compGroupedData = useMemo(() => {
+    if (filteredCompRows.length === 0 && filteredGaCompRows.length === 0) return []
+    if (isMeta) {
+      // Note: drill-down filters by campaign/adset ID won't match comparison rows
+      // (different date range), so comparison at drill level is approximate
+      return groupByLevel(filteredCompRows, metaLevel)
+    }
+    if (isGoogleAds) return groupGoogleAdsByLevel(filteredGaCompRows, gaLevel)
+    const metaGroups = groupByLevel(filteredCompRows, "campaign")
+    const gaGroups = groupGoogleAdsByLevel(filteredGaCompRows, "campaign")
+    return [...metaGroups, ...gaGroups].sort((a, b) => b.metrics.spend - a.metrics.spend)
+  }, [filteredCompRows, filteredGaCompRows, metaLevel, gaLevel, platform])
+
   // Has comparison data?
   const hasComp = compareType !== "none" && (filteredCompRows.length > 0 || filteredGaCompRows.length > 0)
 
@@ -1117,6 +1131,7 @@ export default function ClientPerformanceView({
             )}
             <PerformanceTable
               data={groupedData}
+              comparisonData={hasComp ? compGroupedData : undefined}
               level={currentTableLevel}
               onLevelChange={handleTableLevelChange}
               funnelSteps={isMeta ? funnelSteps : []}
