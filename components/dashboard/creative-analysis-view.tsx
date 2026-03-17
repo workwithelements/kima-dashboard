@@ -7,6 +7,7 @@ import dynamic from "next/dynamic"
 import { Card } from "@/components/ui/card"
 import DateRangePicker from "@/components/ui/date-range-picker"
 import AdSetSelector from "@/components/ui/adset-selector"
+import TagSelector, { UNTAGGED_FILTER_ID } from "@/components/ui/tag-selector"
 import CreativeCardGrid, { type TagInfo } from "@/components/dashboard/creative-card-grid"
 import {
   CREATIVE_METRICS,
@@ -311,9 +312,13 @@ export default function CreativeAnalysisView({
       ads = ads.filter((ad) => activeFilters.has(ad.classification.type))
     }
     if (selectedTagFilters.length > 0) {
+      const wantUntagged = selectedTagFilters.includes(UNTAGGED_FILTER_ID)
+      const tagFilterIds = selectedTagFilters.filter((t) => t !== UNTAGGED_FILTER_ID)
       ads = ads.filter((ad) => {
         const adTags = adTagMap[ad.adId] || []
-        return selectedTagFilters.some((t) => adTags.includes(t))
+        if (wantUntagged && adTags.length === 0) return true
+        if (tagFilterIds.length > 0 && tagFilterIds.some((t) => adTags.includes(t))) return true
+        return false
       })
     }
     // Dimension filters
@@ -479,14 +484,6 @@ export default function CreativeAnalysisView({
     })
   }
 
-  function toggleTagFilter(tagId: string) {
-    setSelectedTagFilters((prev) =>
-      prev.includes(tagId)
-        ? prev.filter((t) => t !== tagId)
-        : [...prev, tagId]
-    )
-  }
-
   return (
     <div className="space-y-6">
       {/* Toolbar */}
@@ -503,6 +500,11 @@ export default function CreativeAnalysisView({
             onChange={setSelectedAdSets}
             label="ad sets"
           />
+          <TagSelector
+            tags={tags}
+            selected={selectedTagFilters}
+            onChange={setSelectedTagFilters}
+          />
           <DateRangePicker
             preset={preset}
             from={from}
@@ -516,47 +518,20 @@ export default function CreativeAnalysisView({
       {/* Meta creative analysis content */}
       {<>
 
-      {/* Tag filters */}
-      {tags.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-neutral-500">Tags:</span>
-          {tags.map((tag) => (
-            <button
-              key={tag.id}
-              onClick={() => toggleTagFilter(tag.id)}
-              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium transition ${
-                selectedTagFilters.includes(tag.id)
-                  ? "border-white/30 text-white"
-                  : "border-transparent text-neutral-400 hover:text-neutral-200"
-              }`}
-            >
-              <span
-                className="inline-block h-2 w-2 rounded-full"
-                style={{ backgroundColor: tag.color }}
-              />
-              {tag.name}
-            </button>
-          ))}
-          {!readOnly && (
-            <button
-              onClick={() => setShowTagManager(true)}
-              className="text-xs text-neutral-500 transition hover:text-brand-lime"
-              title="Manage Tags"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </button>
-          )}
-          {selectedTagFilters.length > 0 && (
-            <button
-              onClick={() => setSelectedTagFilters([])}
-              className="text-xs text-neutral-500 transition hover:text-white"
-            >
-              Clear
-            </button>
-          )}
+      {/* Tag manager gear icon — shown near toolbar when tags exist */}
+      {tags.length > 0 && !readOnly && (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowTagManager(true)}
+            className="flex items-center gap-1.5 text-xs text-neutral-500 transition hover:text-brand-lime"
+            title="Manage Tags"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            Manage Tags
+          </button>
         </div>
       )}
 
@@ -1077,7 +1052,10 @@ function CreativeTableInline({
                       ))}
                       <div className="relative">
                         <button
+                          data-tag-add-btn
+                          onMouseDown={(e) => e.stopPropagation()}
                           onClick={(e) => {
+                            e.stopPropagation()
                             if (tagDropdownAdId === ad.adId) {
                               setTagDropdownAdId(null)
                               setTagDropdownAnchor(null)
@@ -1231,12 +1209,21 @@ function TagDropdown({
 
   useEffect(() => {
     function handleClick(e: globalThis.MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
+      // Ignore clicks on tag-add buttons (they handle their own toggle)
+      const target = e.target as HTMLElement
+      if (target.closest?.("[data-tag-add-btn]")) return
+      if (ref.current && !ref.current.contains(target)) {
         onClose()
       }
     }
-    document.addEventListener("mousedown", handleClick)
-    return () => document.removeEventListener("mousedown", handleClick)
+    // Use setTimeout to avoid capturing the same click that opened the dropdown
+    const timer = setTimeout(() => {
+      document.addEventListener("mousedown", handleClick)
+    }, 0)
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener("mousedown", handleClick)
+    }
   }, [onClose])
 
   // Position below anchor, clamp to viewport
@@ -1244,7 +1231,7 @@ function TagDropdown({
     position: "fixed",
     top: Math.min(anchorRect.bottom + 4, window.innerHeight - 200),
     left: Math.min(anchorRect.left, window.innerWidth - 170),
-    zIndex: 50,
+    zIndex: 9999,
   }
 
   const content =
