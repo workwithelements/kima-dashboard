@@ -9,6 +9,7 @@ import {
   fetchCreativeData,
   fetchReachData,
   fetchBreakdownsData,
+  fetchGoogleAdsData,
   fetchConsolidatedSpend,
   consolidateDailySpend,
 } from "@/lib/data/fetch-client-data"
@@ -81,11 +82,14 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
   const month = now.getMonth() + 1
 
   // Fetch all data in parallel for all tabs
+  const hasGoogle = !!client.google_ads_customer_id
   const [
     perfData,
     creativeData,
     reachData,
     breakdownsData,
+    googleAdsRows,
+    googleAdsComparisonRows,
     scorecardConfigRes,
     annotationsRes,
     currentMonthSpend,
@@ -95,6 +99,8 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     fetchCreativeData(client.id, range.from, range.to),
     fetchReachData(client.id, range.from, range.to, compRange?.from, compRange?.to),
     fetchBreakdownsData(client.id, range.from, range.to),
+    hasGoogle ? fetchGoogleAdsData(client.id, range.from, range.to) : Promise.resolve([]),
+    hasGoogle && compRange ? fetchGoogleAdsData(client.id, compRange.from, compRange.to) : Promise.resolve([]),
     supabase
       .from("client_scorecard_config")
       .select("funnel_steps, key_action, contribution_margin_pct")
@@ -145,6 +151,8 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
       /* Performance tab */
       perfRows={perfData?.rows || []}
       perfComparisonRows={perfData?.comparisonRows || []}
+      googleAdsRows={googleAdsRows}
+      googleAdsComparisonRows={googleAdsComparisonRows}
       baselineReach={perfData?.baselineReach || 0}
       funnelSteps={funnelSteps}
       keyAction={keyAction}

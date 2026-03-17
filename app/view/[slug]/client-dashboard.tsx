@@ -14,7 +14,7 @@ import type { DatePreset } from "@/lib/utils/dates"
 import type { ComparisonType, Client } from "@/lib/utils/types"
 import type { Annotation } from "@/components/ui/annotations-bar"
 import type { NamingConfig } from "@/lib/utils/ad-name-parser"
-import type { MetaDemographicsRow, MetaPlacementsRow, MetaDailyRow } from "@/lib/utils/types"
+import type { MetaDemographicsRow, MetaPlacementsRow, MetaDailyRow, GoogleAdsDailyRow } from "@/lib/utils/types"
 
 type Tab = "performance" | "creative" | "pacing" | "reach"
 
@@ -35,6 +35,8 @@ type Props = {
   /* Performance */
   perfRows: Partial<MetaDailyRow>[]
   perfComparisonRows: Partial<MetaDailyRow>[]
+  googleAdsRows?: Partial<GoogleAdsDailyRow>[]
+  googleAdsComparisonRows?: Partial<GoogleAdsDailyRow>[]
   baselineReach: number
   funnelSteps: string[] | null
   keyAction: string | null
@@ -147,6 +149,8 @@ export default function ClientDashboard(props: Props) {
             client={props.client}
             rows={props.perfRows}
             comparisonRows={props.perfComparisonRows}
+            googleAdsRows={props.googleAdsRows}
+            googleAdsComparisonRows={props.googleAdsComparisonRows}
             preset={props.preset}
             from={props.from}
             to={props.to}
