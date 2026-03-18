@@ -79,15 +79,13 @@ export function calculateRetentionCurve(
 
   const rate = (v: number) => Math.min(100, (v / base) * 100)
 
-  // When we have video plays, show full curve starting from plays
+  // When we have video plays, show curve: Plays → 25% → 50% → 75% → 100%
   if (hasPlays) {
     return [
       { label: "Plays", percent: 100, viewers: base },
-      { label: "3s", percent: rate(metrics.threeSecViews), viewers: metrics.threeSecViews },
       { label: "25%", percent: rate(metrics.p25), viewers: metrics.p25 },
       { label: "50%", percent: rate(metrics.p50), viewers: metrics.p50 },
       { label: "75%", percent: rate(metrics.p75), viewers: metrics.p75 },
-      { label: "95%", percent: rate(metrics.p95), viewers: metrics.p95 },
       { label: "100%", percent: rate(metrics.p100), viewers: metrics.p100 },
     ]
   }
@@ -98,7 +96,6 @@ export function calculateRetentionCurve(
     { label: "25%", percent: rate(metrics.p25), viewers: metrics.p25 },
     { label: "50%", percent: rate(metrics.p50), viewers: metrics.p50 },
     { label: "75%", percent: rate(metrics.p75), viewers: metrics.p75 },
-    { label: "95%", percent: rate(metrics.p95), viewers: metrics.p95 },
     { label: "100%", percent: rate(metrics.p100), viewers: metrics.p100 },
   ]
 }
