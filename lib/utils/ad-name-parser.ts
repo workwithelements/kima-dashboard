@@ -328,7 +328,7 @@ export function getAvailableDimensions(
 
       if (val) values.add(val)
     }
-    return values.size >= 2
+    return values.size >= 1
   })
 }
 
