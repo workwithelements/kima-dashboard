@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useEffect, useCallback, useRef, type MouseEvent as ReactMouseEvent } from "react"
+import React, { useMemo, useState, useEffect, useCallback, useRef, type MouseEvent as ReactMouseEvent } from "react"
 import { createPortal } from "react-dom"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import dynamic from "next/dynamic"
@@ -102,6 +102,24 @@ const CLASSIFICATION_ORDER: ClassificationType[] = [
   "LOSER_NO_DELIVERY",
   "INSUFFICIENT_DATA",
 ]
+
+/** Simple error boundary to prevent chart crashes from breaking the whole page */
+class ChartErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props)
+    this.state = { hasError: false }
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true }
+  }
+  render() {
+    if (this.state.hasError) return null
+    return this.props.children
+  }
+}
 
 export default function CreativeAnalysisView({
   rows,
@@ -687,9 +705,11 @@ export default function CreativeAnalysisView({
         )}
       </Card>
 
-      {/* Dimension overview pie charts */}
-      {enrichedAds.length > 0 && (
-        <DimensionPieCharts ads={enrichedAds} />
+      {/* Dimension overview pie charts — only render when parsed naming data exists */}
+      {enrichedAds.length > 0 && enrichedAds.some((a) => a.parsed?.format) && (
+        <ChartErrorBoundary>
+          <DimensionPieCharts ads={enrichedAds} />
+        </ChartErrorBoundary>
       )}
 
       {/* Spend Share Chart */}
