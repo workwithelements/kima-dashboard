@@ -389,6 +389,45 @@ export default function ClientPerformanceView({
     return byDate
   }, [filteredRows])
 
+  // Google Ads CPA chart data (conversions bar + CPA line + 7-day rolling)
+  const gaCpaChartData = useMemo(() => {
+    if (!isGoogleAds) return []
+    const byDate: Record<string, { spend: number; conversions: number }> = {}
+    for (const r of filteredGaRows) {
+      if (!r.date) continue
+      if (!byDate[r.date]) byDate[r.date] = { spend: 0, conversions: 0 }
+      byDate[r.date].spend += r.spend || 0
+      byDate[r.date].conversions += r.conversions || 0
+    }
+    const sorted = Object.entries(byDate)
+      .map(([date, d]) => ({
+        date,
+        count: d.conversions,
+        cpa: d.conversions > 0 ? d.spend / d.conversions : null,
+        spend: d.spend,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date))
+    // 7-day rolling CPA
+    return sorted.map((d, i) => {
+      const window = sorted.slice(Math.max(0, i - 6), i + 1)
+      const validCpa = window.filter((w) => w.cpa !== null).map((w) => w.cpa!)
+      const rolling = validCpa.length > 0
+        ? validCpa.reduce((a, b) => a + b, 0) / validCpa.length
+        : null
+      return { ...d, rolling }
+    })
+  }, [filteredGaRows, platform])
+
+  // Google Ads spend by date (for CPA chart)
+  const gaSpendByDate = useMemo(() => {
+    const byDate: Record<string, number> = {}
+    for (const r of filteredGaRows) {
+      if (!r.date) continue
+      byDate[r.date] = (byDate[r.date] || 0) + (r.spend || 0)
+    }
+    return byDate
+  }, [filteredGaRows])
+
   // Daily totals for conversion rates chart
   const dailyTotals = useMemo(() => {
     const byDate: Record<string, { impressions: number; clicks: number; spend: number }> = {}
@@ -1055,6 +1094,22 @@ export default function ClientPerformanceView({
           <PlatformCPAChart
             data={platformCpaData}
             conversionLabel={allKeyActionLabel}
+            currency={currency}
+          />
+        </Card>
+      )}
+
+      {/* CPA Chart (Google Ads view) */}
+      {isGoogleAds && gaCpaChartData.length > 0 && (
+        <Card>
+          <h2 className="mb-4 text-sm font-medium text-neutral-400">
+            Cost Per Conversion
+          </h2>
+          <CPAChart
+            data={gaCpaChartData.map((d) => ({ date: d.date, conversions: d.count }))}
+            stepKey="conversions"
+            stepLabel="Conversion"
+            spendByDate={gaSpendByDate}
             currency={currency}
           />
         </Card>
