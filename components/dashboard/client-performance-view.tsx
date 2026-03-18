@@ -330,11 +330,17 @@ export default function ClientPerformanceView({
   // Helper: generate all dates in the selected range so charts always span the full range
   const allDates = useMemo(() => {
     const dates: string[] = []
+    if (!from || !to) return dates
     const d = new Date(from + "T00:00:00")
     const end = new Date(to + "T00:00:00")
-    while (d <= end) {
+    if (isNaN(d.getTime()) || isNaN(end.getTime())) return dates
+    // Safety: cap at 366 days to prevent infinite loops
+    const maxDays = 366
+    let count = 0
+    while (d <= end && count < maxDays) {
       dates.push(d.toISOString().split("T")[0])
       d.setDate(d.getDate() + 1)
+      count++
     }
     return dates
   }, [from, to])
