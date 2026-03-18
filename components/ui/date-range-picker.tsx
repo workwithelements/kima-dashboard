@@ -9,6 +9,9 @@ const PRESETS: { label: string; value: DatePreset }[] = [
   { label: "Last 30 days", value: "last_30d" },
   { label: "This month", value: "this_month" },
   { label: "Last month", value: "last_month" },
+  { label: "This quarter", value: "this_quarter" },
+  { label: "Last quarter", value: "last_quarter" },
+  { label: "Year to date", value: "ytd" },
   { label: "Custom", value: "custom" },
 ]
 
@@ -26,6 +29,9 @@ export default function DateRangePicker({
   onCustomChange: (from: string, to: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  const [showCustom, setShowCustom] = useState(preset === "custom")
+  const [customFrom, setCustomFrom] = useState(from)
+  const [customTo, setCustomTo] = useState(to)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -36,15 +42,24 @@ export default function DateRangePicker({
     return () => document.removeEventListener("mousedown", handleClick)
   }, [])
 
+  // Keep local custom values in sync with props
+  useEffect(() => {
+    if (from) setCustomFrom(from)
+    if (to) setCustomTo(to)
+  }, [from, to])
+
   const activeLabel = PRESETS.find((p) => p.value === preset)?.label || "Custom"
-  const displayFrom = new Date(from + "T00:00:00").toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-  })
-  const displayTo = new Date(to + "T00:00:00").toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-  })
+
+  // Safe date display — handle empty/invalid strings
+  function formatDate(dateStr: string) {
+    if (!dateStr) return "—"
+    const d = new Date(dateStr + "T00:00:00")
+    if (isNaN(d.getTime())) return "—"
+    return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" })
+  }
+
+  const displayFrom = formatDate(from)
+  const displayTo = formatDate(to)
 
   return (
     <div className="relative" ref={ref}>
@@ -68,13 +83,16 @@ export default function DateRangePicker({
               <button
                 key={p.value}
                 onClick={() => {
-                  onPresetChange(p.value)
-                  if (p.value !== "custom") {
+                  if (p.value === "custom") {
+                    setShowCustom(true)
+                  } else {
+                    setShowCustom(false)
+                    onPresetChange(p.value)
                     setOpen(false)
                   }
                 }}
                 className={`w-full rounded-lg px-3 py-1.5 text-left text-xs transition ${
-                  preset === p.value
+                  (p.value === "custom" && showCustom) || (p.value !== "custom" && preset === p.value && !showCustom)
                     ? "bg-brand-lime/10 text-brand-lime"
                     : "text-neutral-400 hover:bg-neutral-800 hover:text-white"
                 }`}
@@ -84,14 +102,19 @@ export default function DateRangePicker({
             ))}
           </div>
 
-          {preset === "custom" && (
+          {showCustom && (
             <div className="mt-3 space-y-2 border-t border-neutral-800 pt-3">
               <div>
                 <label className="text-[10px] text-neutral-500">From</label>
                 <input
                   type="date"
-                  value={from}
-                  onChange={(e) => onCustomChange(e.target.value, to)}
+                  value={customFrom}
+                  onChange={(e) => {
+                    setCustomFrom(e.target.value)
+                    if (e.target.value && customTo) {
+                      onCustomChange(e.target.value, customTo)
+                    }
+                  }}
                   className="mt-0.5 w-full rounded-md border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-white"
                 />
               </div>
@@ -99,8 +122,13 @@ export default function DateRangePicker({
                 <label className="text-[10px] text-neutral-500">To</label>
                 <input
                   type="date"
-                  value={to}
-                  onChange={(e) => onCustomChange(from, e.target.value)}
+                  value={customTo}
+                  onChange={(e) => {
+                    setCustomTo(e.target.value)
+                    if (customFrom && e.target.value) {
+                      onCustomChange(customFrom, e.target.value)
+                    }
+                  }}
                   className="mt-0.5 w-full rounded-md border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-white"
                 />
               </div>

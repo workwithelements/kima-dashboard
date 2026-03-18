@@ -57,6 +57,9 @@ export type DatePreset =
   | "last_30d"
   | "this_month"
   | "last_month"
+  | "this_quarter"
+  | "last_quarter"
+  | "ytd"
   | "custom"
 
 export function getPresetRange(preset: DatePreset): DateRange {
@@ -77,6 +80,28 @@ export function getPresetRange(preset: DatePreset): DateRange {
         to: lastOfMonth(lastM.getFullYear(), lastM.getMonth() + 1),
       }
     }
+    case "this_quarter": {
+      const qStart = Math.floor(now.getMonth() / 3) * 3
+      const qFrom = new Date(now.getFullYear(), qStart, 1)
+      return {
+        from: qFrom.toISOString().split("T")[0],
+        to: daysAgo(1),
+      }
+    }
+    case "last_quarter": {
+      const curQStart = Math.floor(now.getMonth() / 3) * 3
+      const lqStart = new Date(now.getFullYear(), curQStart - 3, 1)
+      const lqEnd = new Date(now.getFullYear(), curQStart, 0) // last day of prev quarter
+      return {
+        from: lqStart.toISOString().split("T")[0],
+        to: lqEnd.toISOString().split("T")[0],
+      }
+    }
+    case "ytd":
+      return {
+        from: `${now.getFullYear()}-01-01`,
+        to: daysAgo(1),
+      }
     default:
       return { from: daysAgo(30), to: daysAgo(1) }
   }
