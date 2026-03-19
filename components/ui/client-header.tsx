@@ -16,6 +16,7 @@ const TABS = [
   { label: "Creative Analysis", href: "/creative" },
   { label: "Budget & Pacing", href: "/pacing" },
   { label: "Reach Analysis", href: "/reach" },
+  { label: "Retention Lift Test", href: "/retention-lift-test" },
   { label: "Settings", href: "/settings" },
 ]
 
