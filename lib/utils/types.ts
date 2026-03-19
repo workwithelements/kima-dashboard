@@ -141,6 +141,15 @@ export const BASE_METRIC_FIELDS = [
 
 export type BaseMetricField = (typeof BASE_METRIC_FIELDS)[number]["value"]
 
+/** Campaign outcome override — maps a campaign to a specific outcome metric */
+export type CampaignOutcome = {
+  id: string
+  client_id: string
+  campaign_id: string
+  campaign_name: string | null
+  outcome_key: string  // FunnelStepKey
+}
+
 /** Ad platform identifier */
 export type AdPlatform = "meta" | "google_ads"
 

@@ -110,6 +110,8 @@ type Props = {
   namingConfig?: NamingConfig
   /** ad_id → ISO created_time for test badge */
   createdDates?: Record<string, string>
+  /** campaign_id → outcome_key overrides from settings */
+  campaignOutcomes?: Record<string, string>
 }
 
 const COMPARE_OPTIONS: { value: ComparisonType; label: string }[] = [
@@ -157,6 +159,7 @@ export default function ClientPerformanceView({
   readOnly = false,
   namingConfig,
   createdDates = {},
+  campaignOutcomes = {},
 }: Props) {
   const currency = client.currency_code ?? "GBP"
   const router = useRouter()
@@ -589,6 +592,19 @@ export default function ClientPerformanceView({
   // Show reach only for Meta (or all with Meta)
   const showReach = isMeta
 
+  // Campaign outcome override: when drilled into a campaign with a configured outcome,
+  // use that outcome as the active CPA step and show a banner
+  const drilledCampaignId = drillPath.length >= 1 ? drillPath[0].id : null
+  const drilledCampaignOutcome = drilledCampaignId
+    ? campaignOutcomes[drilledCampaignId] || null
+    : null
+  const drilledOutcomeDef = drilledCampaignOutcome
+    ? FUNNEL_STEP_DEFS[drilledCampaignOutcome]
+    : null
+
+  // When a campaign outcome is active, override the CPA step
+  const effectiveCpaStep = drilledCampaignOutcome || activeCpaStep || keyAction || (funnelSteps.length > 0 ? funnelSteps[funnelSteps.length - 1] : null)
+
   // "All Platforms" key action: resolve field + label for the conversion metric
   const allKeyActionStep = keyAction || (funnelSteps.length > 0 ? funnelSteps[funnelSteps.length - 1] : null)
   const allKeyActionDef = allKeyActionStep ? FUNNEL_STEP_DEFS[allKeyActionStep] : null
@@ -749,6 +765,21 @@ export default function ClientPerformanceView({
         />
       </div>
 
+      {/* Campaign outcome banner — shown when drilled into a campaign with an assigned outcome */}
+      {drilledOutcomeDef && (
+        <div className="flex items-center gap-2 rounded-lg border border-brand-lime/20 bg-brand-lime/5 px-4 py-2">
+          <svg className="h-4 w-4 text-brand-lime" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          <span className="text-xs text-neutral-300">
+            Optimised for <span className="font-medium text-brand-lime">{drilledOutcomeDef.label}</span>
+          </span>
+          <span className="text-[10px] text-neutral-500">
+            — metrics adapted to {drilledOutcomeDef.costLabel} &amp; {drilledOutcomeDef.rateLabel}
+          </span>
+        </div>
+      )}
+
       {/* Core metrics — always shown */}
       <div className={`grid grid-cols-2 gap-3 ${showReach ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
         <MetricCard
@@ -790,6 +821,41 @@ export default function ClientPerformanceView({
         )}
       </div>
 
+      {/* Campaign outcome summary — shown when drilled into a campaign with an outcome */}
+      {drilledOutcomeDef && drilledCampaignOutcome && (() => {
+        const outcomeVals = calculateFunnelStep(drilledCampaignOutcome, metrics)
+        const compOutcomeVals = hasComp ? calculateFunnelStep(drilledCampaignOutcome, compMetrics) : null
+        const rateDecimals = drilledOutcomeDef.rateDecimals ?? 1
+        return (
+          <div className="grid grid-cols-3 gap-3">
+            <MetricCard
+              label={drilledOutcomeDef.label}
+              value={fmtNumber(outcomeVals.count)}
+              delta={compOutcomeVals ? delta(outcomeVals.count, compOutcomeVals.count) : null}
+            />
+            <MetricCard
+              label={drilledOutcomeDef.rateLabel}
+              value={outcomeVals.rate !== null ? fmtPercent(outcomeVals.rate, rateDecimals) : "—"}
+              delta={
+                compOutcomeVals && outcomeVals.rate !== null && compOutcomeVals.rate !== null
+                  ? delta(outcomeVals.rate, compOutcomeVals.rate)
+                  : null
+              }
+            />
+            <MetricCard
+              label={drilledOutcomeDef.costLabel}
+              value={outcomeVals.costPer !== null ? fmtCurrency(outcomeVals.costPer, currency) : "—"}
+              delta={
+                compOutcomeVals && outcomeVals.costPer !== null && compOutcomeVals.costPer !== null
+                  ? delta(outcomeVals.costPer, compOutcomeVals.costPer)
+                  : null
+              }
+              invertDelta
+            />
+          </div>
+        )
+      })()}
+
       {/* Funnel steps — per-client configurable (Meta only) */}
       {showFunnel && (
         <div>
@@ -819,8 +885,7 @@ export default function ClientPerformanceView({
               const vals = calculateFunnelStep(stepKey, metrics, prevStepField)
               const compVals = hasComp ? calculateFunnelStep(stepKey, compMetrics, prevStepField) : null
               const rateDecimals = def.rateDecimals ?? 1
-              const resolvedCpaStep = activeCpaStep || keyAction || funnelSteps[funnelSteps.length - 1]
-              const isActive = stepKey === resolvedCpaStep
+              const isActive = stepKey === effectiveCpaStep
               return [
                 <button
                   key={`${stepKey}-count`}
@@ -1123,7 +1188,7 @@ export default function ClientPerformanceView({
 
       {/* CPA Chart (Meta only, when funnel steps exist) */}
       {showFunnel && (() => {
-        const cpaStepKey = activeCpaStep || keyAction || funnelSteps[funnelSteps.length - 1]
+        const cpaStepKey = effectiveCpaStep || funnelSteps[funnelSteps.length - 1]
         const cpaStepLabel = FUNNEL_STEP_DEFS[cpaStepKey]?.label || "Action"
         return (
           <Card>

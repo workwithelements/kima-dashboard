@@ -33,7 +33,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
   const supabase = createServiceClient()
 
   const minDelay = new Promise((r) => setTimeout(r, 1000))
-  const [data, configRes, gaRows, gaCompRows, breakdownsData, annotationsRes] = await Promise.all([
+  const [data, configRes, gaRows, gaCompRows, breakdownsData, annotationsRes, outcomesRes] = await Promise.all([
     fetchClientData(
       params.id,
       range.from,
@@ -58,6 +58,10 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       .gte("date", range.from)
       .lte("date", range.to)
       .order("date"),
+    supabase
+      .from("client_campaign_outcomes")
+      .select("id, client_id, campaign_id, campaign_name, outcome_key")
+      .eq("client_id", params.id),
     minDelay,
   ])
 
@@ -74,6 +78,12 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
     text: a.text,
     created_at: a.created_at,
   }))
+
+  // Build campaign outcome lookup: campaign_id → outcome_key
+  const campaignOutcomes: Record<string, string> = {}
+  for (const row of outcomesRes.data || []) {
+    campaignOutcomes[row.campaign_id] = row.outcome_key
+  }
 
   return (
     <ClientPerformanceView
@@ -95,6 +105,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       annotations={annotations}
       namingConfig={data.namingConfig}
       createdDates={data.createdDates}
+      campaignOutcomes={campaignOutcomes}
     />
   )
 }

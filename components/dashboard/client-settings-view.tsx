@@ -1,9 +1,25 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
+import {
+  FUNNEL_STEP_DEFS,
+  FUNNEL_STEP_ORDER,
+} from "@/lib/utils/funnel-steps"
 
 /* ── Types ── */
 type NamingPosition = { index: number; key: string; label: string }
+
+type CampaignOutcomeConfig = {
+  id?: string
+  campaign_id: string
+  campaign_name: string | null
+  outcome_key: string
+}
+
+type CampaignOption = {
+  campaign_id: string
+  campaign_name: string
+}
 
 type AlertConfig = {
   id?: string
@@ -64,13 +80,22 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
   const [alertsSaving, setAlertsSaving] = useState(false)
   const [alertsSaved, setAlertsSaved] = useState(false)
 
+  /* ── Campaign Outcomes state ── */
+  const [campaignOutcomes, setCampaignOutcomes] = useState<CampaignOutcomeConfig[]>([])
+  const [availableCampaigns, setAvailableCampaigns] = useState<CampaignOption[]>([])
+  const [outcomesLoading, setOutcomesLoading] = useState(true)
+  const [outcomesSaving, setOutcomesSaving] = useState(false)
+  const [outcomesSaved, setOutcomesSaved] = useState(false)
+
   /* ── Load existing config ── */
   useEffect(() => {
     async function load() {
       try {
-        const [namingRes, alertsRes] = await Promise.all([
+        const [namingRes, alertsRes, outcomesRes, campaignsRes] = await Promise.all([
           fetch(`/api/naming-config/${clientId}`),
           fetch(`/api/alert-config/${clientId}`),
+          fetch(`/api/campaign-outcomes/${clientId}`),
+          fetch(`/api/campaign-outcomes/${clientId}/campaigns`),
         ])
         if (namingRes.ok) {
           const data = await namingRes.json()
@@ -83,11 +108,20 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
           const data = await alertsRes.json()
           if (Array.isArray(data)) setAlerts(data)
         }
+        if (outcomesRes.ok) {
+          const data = await outcomesRes.json()
+          if (Array.isArray(data)) setCampaignOutcomes(data)
+        }
+        if (campaignsRes.ok) {
+          const data = await campaignsRes.json()
+          if (Array.isArray(data)) setAvailableCampaigns(data)
+        }
       } catch {
         /* ignore */
       }
       setLoading(false)
       setAlertsLoading(false)
+      setOutcomesLoading(false)
     }
     load()
   }, [clientId])
@@ -272,6 +306,72 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
       setTimeout(() => setAlertsSaved(false), 3000)
     } catch { /* ignore */ }
     setAlertsSaving(false)
+  }
+
+  /* ── Campaign Outcome CRUD ── */
+  const assignedCampaignIds = useMemo(
+    () => new Set(campaignOutcomes.map((o) => o.campaign_id)),
+    [campaignOutcomes]
+  )
+
+  const unassignedCampaigns = useMemo(
+    () => availableCampaigns.filter((c) => !assignedCampaignIds.has(c.campaign_id)),
+    [availableCampaigns, assignedCampaignIds]
+  )
+
+  function addCampaignOutcome(campaign: CampaignOption) {
+    setCampaignOutcomes((prev) => [
+      ...prev,
+      {
+        campaign_id: campaign.campaign_id,
+        campaign_name: campaign.campaign_name,
+        outcome_key: FUNNEL_STEP_ORDER[0],
+      },
+    ])
+    setOutcomesSaved(false)
+  }
+
+  function updateCampaignOutcome(idx: number, outcome_key: string) {
+    const next = [...campaignOutcomes]
+    next[idx] = { ...next[idx], outcome_key }
+    setCampaignOutcomes(next)
+    setOutcomesSaved(false)
+  }
+
+  function removeCampaignOutcome(idx: number) {
+    const outcome = campaignOutcomes[idx]
+    // If it has an id, delete from DB immediately
+    if (outcome.id) {
+      fetch(`/api/campaign-outcomes/${clientId}?campaign_id=${outcome.campaign_id}`, {
+        method: "DELETE",
+      }).catch(() => {})
+    }
+    setCampaignOutcomes((prev) => prev.filter((_, i) => i !== idx))
+    setOutcomesSaved(false)
+  }
+
+  async function handleSaveOutcomes() {
+    setOutcomesSaving(true)
+    try {
+      const updated: CampaignOutcomeConfig[] = []
+      for (const outcome of campaignOutcomes) {
+        const res = await fetch(`/api/campaign-outcomes/${clientId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            campaign_id: outcome.campaign_id,
+            campaign_name: outcome.campaign_name,
+            outcome_key: outcome.outcome_key,
+          }),
+        })
+        if (res.ok) updated.push(await res.json())
+        else updated.push(outcome)
+      }
+      setCampaignOutcomes(updated)
+      setOutcomesSaved(true)
+      setTimeout(() => setOutcomesSaved(false), 3000)
+    } catch { /* ignore */ }
+    setOutcomesSaving(false)
   }
 
   /* ── Render ── */
@@ -758,6 +858,149 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
                 {alertsSaving ? "Saving..." : "Save Alerts"}
               </button>
             </div>
+          </div>
+        )}
+      </section>
+
+      {/* ── Campaign Outcomes Section ── */}
+      <section className="rounded-xl border border-neutral-800 bg-neutral-900/50">
+        <div className="border-b border-neutral-800 px-5 py-4">
+          <h2 className="text-sm font-semibold text-neutral-100">
+            Campaign Outcomes
+          </h2>
+          <p className="mt-1 text-[11px] text-neutral-500">
+            Assign specific outcome metrics to individual campaigns. When you
+            drill into a campaign on the Performance tab, the metrics will adapt
+            to focus on that campaign&apos;s assigned outcome.
+          </p>
+        </div>
+
+        {outcomesLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-lime border-t-transparent" />
+          </div>
+        ) : (
+          <div className="space-y-4 p-5">
+            {campaignOutcomes.length === 0 && (
+              <p className="rounded-lg border border-dashed border-neutral-700 px-4 py-6 text-center text-xs text-neutral-500">
+                No campaign outcomes configured. Campaigns will use the default
+                client-wide funnel steps and key action.
+              </p>
+            )}
+
+            {campaignOutcomes.map((outcome, idx) => (
+              <div
+                key={outcome.campaign_id}
+                className="flex flex-wrap items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-800/50 px-3 py-2.5"
+              >
+                {/* Campaign name */}
+                <div className="flex-1 min-w-[140px]">
+                  <span className="text-xs text-neutral-200 truncate block">
+                    {outcome.campaign_name || outcome.campaign_id}
+                  </span>
+                  {outcome.campaign_name && (
+                    <span className="text-[10px] text-neutral-500 truncate block">
+                      {outcome.campaign_id}
+                    </span>
+                  )}
+                </div>
+
+                {/* Outcome selector */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-neutral-500">Outcome:</span>
+                  <select
+                    value={outcome.outcome_key}
+                    onChange={(e) => updateCampaignOutcome(idx, e.target.value)}
+                    className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 focus:border-brand-lime focus:outline-none"
+                  >
+                    {FUNNEL_STEP_ORDER.map((key) => {
+                      const def = FUNNEL_STEP_DEFS[key]
+                      if (!def) return null
+                      return (
+                        <option key={key} value={key}>
+                          {def.label}
+                        </option>
+                      )
+                    })}
+                  </select>
+                </div>
+
+                {/* Remove */}
+                <button
+                  onClick={() => removeCampaignOutcome(idx)}
+                  className="rounded p-0.5 text-neutral-500 transition hover:text-red-400"
+                  title="Remove outcome"
+                >
+                  <svg
+                    className="h-3.5 w-3.5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </div>
+            ))}
+
+            {/* Add campaign dropdown */}
+            {unassignedCampaigns.length > 0 && (
+              <div className="flex items-center gap-2">
+                <select
+                  id="add-campaign-outcome"
+                  defaultValue=""
+                  onChange={(e) => {
+                    const cid = e.target.value
+                    if (!cid) return
+                    const campaign = availableCampaigns.find(
+                      (c) => c.campaign_id === cid
+                    )
+                    if (campaign) addCampaignOutcome(campaign)
+                    e.target.value = ""
+                  }}
+                  className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-400 focus:border-brand-lime focus:outline-none"
+                >
+                  <option value="" disabled>
+                    + Add campaign...
+                  </option>
+                  {unassignedCampaigns.map((c) => (
+                    <option key={c.campaign_id} value={c.campaign_id}>
+                      {c.campaign_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {availableCampaigns.length === 0 && !outcomesLoading && (
+              <p className="text-[10px] text-neutral-600">
+                No campaigns found. Campaign data will appear once performance
+                data has been ingested.
+              </p>
+            )}
+
+            {/* Save */}
+            {campaignOutcomes.length > 0 && (
+              <div className="flex items-center justify-end gap-3 border-t border-neutral-800 pt-4">
+                {outcomesSaved && (
+                  <span className="text-xs font-medium text-green-400">
+                    Saved
+                  </span>
+                )}
+                <button
+                  onClick={handleSaveOutcomes}
+                  disabled={outcomesSaving}
+                  className="rounded-lg bg-brand-lime px-5 py-2 text-xs font-semibold text-black transition hover:bg-brand-lime/90 disabled:opacity-50"
+                >
+                  {outcomesSaving ? "Saving..." : "Save Outcomes"}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </section>
