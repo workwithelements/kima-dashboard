@@ -26,6 +26,10 @@ const DimensionPieCharts = dynamic(
   () => import("@/components/charts/dimension-pie-charts"),
   { ssr: false, loading: () => <div className="h-48 animate-pulse rounded bg-neutral-800/50" /> }
 )
+const CoverageAnalysis = dynamic(
+  () => import("@/components/charts/coverage-analysis"),
+  { ssr: false, loading: () => <div className="h-48 animate-pulse rounded bg-neutral-800/50" /> }
+)
 import TagManagerModal, { type Tag } from "@/components/dashboard/tag-manager-modal"
 import MiniRetentionCurve from "@/components/charts/mini-retention-curve"
 import { fmtCurrency, fmtNumber, fmtPercent } from "@/lib/utils/format"
@@ -709,6 +713,13 @@ export default function CreativeAnalysisView({
       {enrichedAds.length > 0 && enrichedAds.some((a) => a.parsed?.format) && (
         <ChartErrorBoundary>
           <DimensionPieCharts ads={enrichedAds} />
+        </ChartErrorBoundary>
+      )}
+
+      {/* Coverage Analysis — gap identification for stages & jobs */}
+      {enrichedAds.length > 0 && enrichedAds.some((a) => a.parsed?.stage || a.parsed?.job) && (
+        <ChartErrorBoundary>
+          <CoverageAnalysis ads={enrichedAds} currency={currency} />
         </ChartErrorBoundary>
       )}
 
