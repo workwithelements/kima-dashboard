@@ -1,0 +1,60 @@
+import { NextRequest, NextResponse } from "next/server"
+import { createServiceClient } from "@/lib/supabase/server"
+import { requireAuth, safeError } from "@/lib/auth/authorize"
+
+/**
+ * PATCH /api/creative-tests/[testId] — manual resolution for flagged/unmatched tests
+ *
+ * Body options:
+ *   { notion_page_url: string }  — link a Notion card manually
+ *   { dismiss: true }            — dismiss a flagged test
+ */
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { testId: string } }
+) {
+  const { user, error: authError } = await requireAuth()
+  if (authError) return authError
+
+  const body = await request.json()
+  const db = createServiceClient()
+  const now = new Date().toISOString()
+
+  if (body.notion_page_url) {
+    // Extract page ID from URL if possible
+    const url = body.notion_page_url.trim()
+    const { data, error } = await db
+      .from("creative_tests")
+      .update({
+        notion_page_url: url,
+        notion_matched: true,
+        flag_reason: null,
+        status: "analysed",
+        updated_at: now,
+      })
+      .eq("id", params.testId)
+      .select()
+      .single()
+
+    if (error) return safeError(error)
+    return NextResponse.json(data)
+  }
+
+  if (body.dismiss) {
+    const { data, error } = await db
+      .from("creative_tests")
+      .update({
+        status: "monitoring",
+        flag_reason: null,
+        updated_at: now,
+      })
+      .eq("id", params.testId)
+      .select()
+      .single()
+
+    if (error) return safeError(error)
+    return NextResponse.json(data)
+  }
+
+  return NextResponse.json({ error: "Invalid request body" }, { status: 400 })
+}

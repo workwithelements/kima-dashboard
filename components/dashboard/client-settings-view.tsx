@@ -64,13 +64,28 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
   const [alertsSaving, setAlertsSaving] = useState(false)
   const [alertsSaved, setAlertsSaved] = useState(false)
 
+  /* ── Creative Tests config state ── */
+  const [testConfig, setTestConfig] = useState({
+    enabled: false,
+    min_days_live: 7,
+    min_spend: 100,
+    min_conversions: 10,
+    high_spend_alert: 150,
+    notion_board_id: "",
+    slack_channel_id: "",
+  })
+  const [testConfigLoading, setTestConfigLoading] = useState(true)
+  const [testConfigSaving, setTestConfigSaving] = useState(false)
+  const [testConfigSaved, setTestConfigSaved] = useState(false)
+
   /* ── Load existing config ── */
   useEffect(() => {
     async function load() {
       try {
-        const [namingRes, alertsRes] = await Promise.all([
+        const [namingRes, alertsRes, testConfigRes] = await Promise.all([
           fetch(`/api/naming-config/${clientId}`),
           fetch(`/api/alert-config/${clientId}`),
+          fetch(`/api/creative-test-config/${clientId}`),
         ])
         if (namingRes.ok) {
           const data = await namingRes.json()
@@ -83,11 +98,26 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
           const data = await alertsRes.json()
           if (Array.isArray(data)) setAlerts(data)
         }
+        if (testConfigRes.ok) {
+          const data = await testConfigRes.json()
+          if (data) {
+            setTestConfig({
+              enabled: data.enabled ?? false,
+              min_days_live: data.min_days_live ?? 7,
+              min_spend: data.min_spend ?? 100,
+              min_conversions: data.min_conversions ?? 10,
+              high_spend_alert: data.high_spend_alert ?? 150,
+              notion_board_id: data.notion_board_id ?? "",
+              slack_channel_id: data.slack_channel_id ?? "",
+            })
+          }
+        }
       } catch {
         /* ignore */
       }
       setLoading(false)
       setAlertsLoading(false)
+      setTestConfigLoading(false)
     }
     load()
   }, [clientId])
@@ -272,6 +302,23 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
       setTimeout(() => setAlertsSaved(false), 3000)
     } catch { /* ignore */ }
     setAlertsSaving(false)
+  }
+
+  /* ── Save creative test config ── */
+  async function handleSaveTestConfig() {
+    setTestConfigSaving(true)
+    try {
+      const res = await fetch(`/api/creative-test-config/${clientId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(testConfig),
+      })
+      if (res.ok) {
+        setTestConfigSaved(true)
+        setTimeout(() => setTestConfigSaved(false), 3000)
+      }
+    } catch { /* ignore */ }
+    setTestConfigSaving(false)
   }
 
   /* ── Render ── */
@@ -756,6 +803,138 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
                 className="rounded-lg bg-brand-lime px-5 py-2 text-xs font-semibold text-black transition hover:bg-brand-lime/90 disabled:opacity-50"
               >
                 {alertsSaving ? "Saving..." : "Save Alerts"}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ── Creative Tests Config Section ── */}
+      <section className="rounded-xl border border-neutral-800 bg-neutral-900/50">
+        <div className="border-b border-neutral-800 px-5 py-4">
+          <h2 className="text-sm font-semibold text-neutral-100">
+            Creative Tests
+          </h2>
+          <p className="mt-1 text-[11px] text-neutral-500">
+            Automatically detect and analyse A/B tests from your ad naming convention.
+            Results appear in the Creative Tests tab.
+          </p>
+        </div>
+
+        {testConfigLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-lime border-t-transparent" />
+          </div>
+        ) : (
+          <div className="space-y-4 p-5">
+            {/* Enable toggle */}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-neutral-300">Enable scanning</p>
+                <p className="text-[11px] text-neutral-500">Runs daily after data sync</p>
+              </div>
+              <button
+                onClick={() => setTestConfig((c) => ({ ...c, enabled: !c.enabled }))}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
+                  testConfig.enabled ? "bg-brand-lime" : "bg-neutral-700"
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                    testConfig.enabled ? "translate-x-[18px]" : "translate-x-[3px]"
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Thresholds */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="mb-1 block text-[11px] text-neutral-500">Min days live</label>
+                <input
+                  type="number"
+                  value={testConfig.min_days_live}
+                  onChange={(e) => setTestConfig((c) => ({ ...c, min_days_live: parseInt(e.target.value) || 7 }))}
+                  min={1}
+                  className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-brand-lime"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-neutral-500">Min spend</label>
+                <input
+                  type="number"
+                  value={testConfig.min_spend}
+                  onChange={(e) => setTestConfig((c) => ({ ...c, min_spend: parseFloat(e.target.value) || 100 }))}
+                  min={0}
+                  className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-brand-lime"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-neutral-500">Min conversions</label>
+                <input
+                  type="number"
+                  value={testConfig.min_conversions}
+                  onChange={(e) => setTestConfig((c) => ({ ...c, min_conversions: parseInt(e.target.value) || 10 }))}
+                  min={0}
+                  className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-brand-lime"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-neutral-500">High spend alert</label>
+                <input
+                  type="number"
+                  value={testConfig.high_spend_alert}
+                  onChange={(e) => setTestConfig((c) => ({ ...c, high_spend_alert: parseFloat(e.target.value) || 150 }))}
+                  min={0}
+                  className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-brand-lime"
+                />
+              </div>
+            </div>
+
+            {/* Notion Board ID */}
+            <div>
+              <label className="mb-1 block text-[11px] text-neutral-500">
+                Notion Creative Board ID
+              </label>
+              <input
+                type="text"
+                value={testConfig.notion_board_id}
+                onChange={(e) => setTestConfig((c) => ({ ...c, notion_board_id: e.target.value }))}
+                placeholder="e.g. abc123def456..."
+                className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-brand-lime"
+              />
+              <p className="mt-1 text-[10px] text-neutral-600">
+                The database ID from your Notion creative board URL
+              </p>
+            </div>
+
+            {/* Slack channel override */}
+            <div>
+              <label className="mb-1 block text-[11px] text-neutral-500">
+                Slack channel (optional override)
+              </label>
+              <input
+                type="text"
+                value={testConfig.slack_channel_id}
+                onChange={(e) => setTestConfig((c) => ({ ...c, slack_channel_id: e.target.value }))}
+                placeholder="e.g. C087TGJERS5"
+                className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-brand-lime"
+              />
+            </div>
+
+            {/* Save */}
+            <div className="flex items-center justify-end gap-3 border-t border-neutral-800 pt-4">
+              {testConfigSaved && (
+                <span className="text-xs font-medium text-green-400">
+                  Saved
+                </span>
+              )}
+              <button
+                onClick={handleSaveTestConfig}
+                disabled={testConfigSaving}
+                className="rounded-lg bg-brand-lime px-5 py-2 text-xs font-semibold text-black transition hover:bg-brand-lime/90 disabled:opacity-50"
+              >
+                {testConfigSaving ? "Saving..." : "Save Config"}
               </button>
             </div>
           </div>

@@ -14,6 +14,7 @@ type Props = {
 const TABS = [
   { label: "Performance", href: "" },
   { label: "Creative Analysis", href: "/creative" },
+  { label: "Creative Tests", href: "/tests" },
   { label: "Budget & Pacing", href: "/pacing" },
   { label: "Reach Analysis", href: "/reach" },
   { label: "Retention Lift Test", href: "/retention-lift-test", clientOnly: "TouchNote" },
