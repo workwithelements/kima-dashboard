@@ -95,13 +95,13 @@ export function calculatePacing(
       totalAvg += data.total / data.count
     }
 
-    // Project remaining by scaling
-    if (totalAvg > 0) {
+    // Project remaining: average daily spend for remaining days based on day-of-month pattern
+    if (totalAvg > 0 && remaining > 0) {
       let remainingDomAvg = 0
       for (let d = elapsed + 1; d <= total; d++) {
         remainingDomAvg += domAvgs[d] || totalAvg / total
       }
-      domWeight = (spentToDate + remainingDomAvg) / total * (total / (remaining || 1))
+      domWeight = remainingDomAvg / remaining
     }
   }
 
@@ -123,7 +123,7 @@ export function calculatePacing(
       dowAvgs[Number(dow)] = data.total / data.count
     }
 
-    // Project remaining days by day-of-week
+    // Project remaining days by day-of-week: average daily spend for remaining days
     let remainingDowProjection = 0
     const todayDate = new Date()
     for (let i = 1; i <= remaining; i++) {
@@ -132,8 +132,8 @@ export function calculatePacing(
       const dow = futureDate.getDay()
       remainingDowProjection += dowAvgs[dow] || globalDailyAvg
     }
-    dowWeight = (spentToDate + remainingDowProjection) > 0
-      ? (spentToDate + remainingDowProjection) / total * (total / (remaining || 1))
+    dowWeight = remaining > 0 && remainingDowProjection > 0
+      ? remainingDowProjection / remaining
       : recentAvg
   }
 
