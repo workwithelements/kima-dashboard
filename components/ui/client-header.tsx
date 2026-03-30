@@ -16,7 +16,7 @@ const TABS = [
   { label: "Creative Analysis", href: "/creative" },
   { label: "Budget & Pacing", href: "/pacing" },
   { label: "Reach Analysis", href: "/reach" },
-  { label: "Retention Lift Test", href: "/retention-lift-test" },
+  { label: "Retention Lift Test", href: "/retention-lift-test", clientOnly: "TouchNote" },
   { label: "Settings", href: "/settings" },
 ]
 
@@ -58,7 +58,7 @@ export default function ClientHeader({ clientId, clientName, slug }: Props) {
 
       {/* Tab bar */}
       <div className="flex gap-1 border-b border-neutral-800">
-        {TABS.map((tab) => {
+        {TABS.filter((tab) => !tab.clientOnly || tab.clientOnly === clientName).map((tab) => {
           const href = basePath + tab.href + (tab.href === "/settings" ? "" : suffix)
           const tabPath = basePath + tab.href
           const isActive =
