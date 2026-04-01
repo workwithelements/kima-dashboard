@@ -1,5 +1,6 @@
 -- Migration: Enable Row-Level Security on all public tables
 -- Fixes Supabase security advisory: rls_disabled_in_public
+-- Safe to re-run: drops policies before recreating them.
 -- Tables that already have RLS (from prior migrations):
 --   client_alert_config, alert_log, creative_test_config,
 --   creative_tests, creative_test_results, client_naming_config
@@ -9,9 +10,11 @@
 -- ============================================================
 ALTER TABLE clients ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Service role full access on clients" ON clients;
 CREATE POLICY "Service role full access on clients"
   ON clients FOR ALL TO service_role USING (true);
 
+DROP POLICY IF EXISTS "Authenticated users can read clients" ON clients;
 CREATE POLICY "Authenticated users can read clients"
   ON clients FOR SELECT TO authenticated USING (true);
 
@@ -20,9 +23,11 @@ CREATE POLICY "Authenticated users can read clients"
 -- ============================================================
 ALTER TABLE meta_daily_performance ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Service role full access on meta_daily_performance" ON meta_daily_performance;
 CREATE POLICY "Service role full access on meta_daily_performance"
   ON meta_daily_performance FOR ALL TO service_role USING (true);
 
+DROP POLICY IF EXISTS "Authenticated users can read meta_daily_performance" ON meta_daily_performance;
 CREATE POLICY "Authenticated users can read meta_daily_performance"
   ON meta_daily_performance FOR SELECT TO authenticated USING (true);
 
@@ -31,9 +36,11 @@ CREATE POLICY "Authenticated users can read meta_daily_performance"
 -- ============================================================
 ALTER TABLE meta_ad_metadata ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Service role full access on meta_ad_metadata" ON meta_ad_metadata;
 CREATE POLICY "Service role full access on meta_ad_metadata"
   ON meta_ad_metadata FOR ALL TO service_role USING (true);
 
+DROP POLICY IF EXISTS "Authenticated users can read meta_ad_metadata" ON meta_ad_metadata;
 CREATE POLICY "Authenticated users can read meta_ad_metadata"
   ON meta_ad_metadata FOR SELECT TO authenticated USING (true);
 
@@ -42,9 +49,11 @@ CREATE POLICY "Authenticated users can read meta_ad_metadata"
 -- ============================================================
 ALTER TABLE meta_daily_demographics ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Service role full access on meta_daily_demographics" ON meta_daily_demographics;
 CREATE POLICY "Service role full access on meta_daily_demographics"
   ON meta_daily_demographics FOR ALL TO service_role USING (true);
 
+DROP POLICY IF EXISTS "Authenticated users can read meta_daily_demographics" ON meta_daily_demographics;
 CREATE POLICY "Authenticated users can read meta_daily_demographics"
   ON meta_daily_demographics FOR SELECT TO authenticated USING (true);
 
@@ -53,9 +62,11 @@ CREATE POLICY "Authenticated users can read meta_daily_demographics"
 -- ============================================================
 ALTER TABLE meta_daily_placements ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Service role full access on meta_daily_placements" ON meta_daily_placements;
 CREATE POLICY "Service role full access on meta_daily_placements"
   ON meta_daily_placements FOR ALL TO service_role USING (true);
 
+DROP POLICY IF EXISTS "Authenticated users can read meta_daily_placements" ON meta_daily_placements;
 CREATE POLICY "Authenticated users can read meta_daily_placements"
   ON meta_daily_placements FOR SELECT TO authenticated USING (true);
 
@@ -64,9 +75,11 @@ CREATE POLICY "Authenticated users can read meta_daily_placements"
 -- ============================================================
 ALTER TABLE google_ads_daily_performance ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Service role full access on google_ads_daily_performance" ON google_ads_daily_performance;
 CREATE POLICY "Service role full access on google_ads_daily_performance"
   ON google_ads_daily_performance FOR ALL TO service_role USING (true);
 
+DROP POLICY IF EXISTS "Authenticated users can read google_ads_daily_performance" ON google_ads_daily_performance;
 CREATE POLICY "Authenticated users can read google_ads_daily_performance"
   ON google_ads_daily_performance FOR SELECT TO authenticated USING (true);
 
@@ -75,9 +88,11 @@ CREATE POLICY "Authenticated users can read google_ads_daily_performance"
 -- ============================================================
 ALTER TABLE client_scorecard_config ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Service role full access on client_scorecard_config" ON client_scorecard_config;
 CREATE POLICY "Service role full access on client_scorecard_config"
   ON client_scorecard_config FOR ALL TO service_role USING (true);
 
+DROP POLICY IF EXISTS "Authenticated users can read client_scorecard_config" ON client_scorecard_config;
 CREATE POLICY "Authenticated users can read client_scorecard_config"
   ON client_scorecard_config FOR SELECT TO authenticated USING (true);
 
@@ -86,12 +101,15 @@ CREATE POLICY "Authenticated users can read client_scorecard_config"
 -- ============================================================
 ALTER TABLE custom_metrics ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Service role full access on custom_metrics" ON custom_metrics;
 CREATE POLICY "Service role full access on custom_metrics"
   ON custom_metrics FOR ALL TO service_role USING (true);
 
+DROP POLICY IF EXISTS "Authenticated users can read custom_metrics" ON custom_metrics;
 CREATE POLICY "Authenticated users can read custom_metrics"
   ON custom_metrics FOR SELECT TO authenticated USING (true);
 
+DROP POLICY IF EXISTS "Authenticated users can manage custom_metrics" ON custom_metrics;
 CREATE POLICY "Authenticated users can manage custom_metrics"
   ON custom_metrics FOR ALL TO authenticated USING (true);
 
@@ -100,12 +118,15 @@ CREATE POLICY "Authenticated users can manage custom_metrics"
 -- ============================================================
 ALTER TABLE annotations ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Service role full access on annotations" ON annotations;
 CREATE POLICY "Service role full access on annotations"
   ON annotations FOR ALL TO service_role USING (true);
 
+DROP POLICY IF EXISTS "Authenticated users can read annotations" ON annotations;
 CREATE POLICY "Authenticated users can read annotations"
   ON annotations FOR SELECT TO authenticated USING (true);
 
+DROP POLICY IF EXISTS "Authenticated users can manage annotations" ON annotations;
 CREATE POLICY "Authenticated users can manage annotations"
   ON annotations FOR ALL TO authenticated USING (true);
 
@@ -114,12 +135,15 @@ CREATE POLICY "Authenticated users can manage annotations"
 -- ============================================================
 ALTER TABLE creative_tags ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Service role full access on creative_tags" ON creative_tags;
 CREATE POLICY "Service role full access on creative_tags"
   ON creative_tags FOR ALL TO service_role USING (true);
 
+DROP POLICY IF EXISTS "Authenticated users can read creative_tags" ON creative_tags;
 CREATE POLICY "Authenticated users can read creative_tags"
   ON creative_tags FOR SELECT TO authenticated USING (true);
 
+DROP POLICY IF EXISTS "Authenticated users can manage creative_tags" ON creative_tags;
 CREATE POLICY "Authenticated users can manage creative_tags"
   ON creative_tags FOR ALL TO authenticated USING (true);
 
@@ -128,12 +152,15 @@ CREATE POLICY "Authenticated users can manage creative_tags"
 -- ============================================================
 ALTER TABLE creative_ad_tags ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Service role full access on creative_ad_tags" ON creative_ad_tags;
 CREATE POLICY "Service role full access on creative_ad_tags"
   ON creative_ad_tags FOR ALL TO service_role USING (true);
 
+DROP POLICY IF EXISTS "Authenticated users can read creative_ad_tags" ON creative_ad_tags;
 CREATE POLICY "Authenticated users can read creative_ad_tags"
   ON creative_ad_tags FOR SELECT TO authenticated USING (true);
 
+DROP POLICY IF EXISTS "Authenticated users can manage creative_ad_tags" ON creative_ad_tags;
 CREATE POLICY "Authenticated users can manage creative_ad_tags"
   ON creative_ad_tags FOR ALL TO authenticated USING (true);
 
@@ -142,5 +169,6 @@ CREATE POLICY "Authenticated users can manage creative_ad_tags"
 -- ============================================================
 ALTER TABLE view_sessions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Service role full access on view_sessions" ON view_sessions;
 CREATE POLICY "Service role full access on view_sessions"
   ON view_sessions FOR ALL TO service_role USING (true);
