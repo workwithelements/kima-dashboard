@@ -59,7 +59,7 @@ export async function fetchClientData(
   let client: any = null
   const { data: fullClient, error: clientError } = await supabase
     .from("clients")
-    .select("id, name, active, meta_account_id, google_ads_customer_id, currency_code")
+    .select("id, name, active, meta_account_id, google_ads_customer_id, shopify_store_domain, currency_code")
     .eq("id", clientId)
     .single()
 
@@ -70,7 +70,7 @@ export async function fetchClientData(
       .eq("id", clientId)
       .single()
     if (!fallback) return null
-    client = { ...fallback, meta_account_id: null, google_ads_customer_id: null, monthly_budget: null, currency_code: "GBP" }
+    client = { ...fallback, meta_account_id: null, google_ads_customer_id: null, shopify_store_domain: null, monthly_budget: null, currency_code: "GBP" }
   } else {
     client = { ...fullClient, monthly_budget: (fullClient as any)?.monthly_budget ?? null }
   }
@@ -181,7 +181,7 @@ export async function fetchClientsList(from: string, to: string) {
 
   const { data: clients, error: clientsError } = await supabase
     .from("clients")
-    .select("id, name, active, meta_account_id, google_ads_customer_id, currency_code")
+    .select("id, name, active, meta_account_id, google_ads_customer_id, shopify_store_domain, currency_code")
     .eq("active", true)
     .order("name")
 
@@ -198,6 +198,7 @@ export async function fetchClientsList(from: string, to: string) {
       ...c,
       meta_account_id: null,
       google_ads_customer_id: null,
+      shopify_store_domain: null,
       monthly_budget: null,
       currency_code: "GBP",
     }))
@@ -205,9 +206,9 @@ export async function fetchClientsList(from: string, to: string) {
 
   if (!clientsList?.length) return []
 
-  // Fetch spend per client from both Meta and Google Ads in parallel
-  // Wrap Google Ads query in .catch() in case the table doesn't exist yet
-  const [metaSpendResult, gaSpendResult] = await Promise.all([
+  // Fetch spend per client from Meta, Google Ads, and Shopify in parallel
+  // Wrap queries in .catch() in case tables don't exist yet
+  const [metaSpendResult, gaSpendResult, shopifyResult] = await Promise.all([
     supabase
       .from("meta_daily_performance")
       .select("client_id, spend, impressions, purchases, purchase_value")
@@ -221,17 +222,24 @@ export async function fetchClientsList(from: string, to: string) {
         .gte("date", from)
         .lte("date", to)
     ).catch(() => ({ data: [] as any[] })),
+    Promise.resolve(
+      supabase
+        .from("shopify_daily_orders")
+        .select("client_id, orders, net_revenue")
+        .gte("date", from)
+        .lte("date", to)
+    ).catch(() => ({ data: [] as any[] })),
   ])
 
   // Aggregate spend by client (combined across platforms)
   const spendByClient: Record<
     string,
-    { spend: number; impressions: number; purchases: number; revenue: number }
+    { spend: number; impressions: number; purchases: number; revenue: number; shopifyOrders: number; shopifyRevenue: number }
   > = {}
 
   for (const row of metaSpendResult.data || []) {
     if (!spendByClient[row.client_id]) {
-      spendByClient[row.client_id] = { spend: 0, impressions: 0, purchases: 0, revenue: 0 }
+      spendByClient[row.client_id] = { spend: 0, impressions: 0, purchases: 0, revenue: 0, shopifyOrders: 0, shopifyRevenue: 0 }
     }
     spendByClient[row.client_id].spend += row.spend || 0
     spendByClient[row.client_id].impressions += row.impressions || 0
@@ -241,12 +249,20 @@ export async function fetchClientsList(from: string, to: string) {
 
   for (const row of gaSpendResult.data || []) {
     if (!spendByClient[row.client_id]) {
-      spendByClient[row.client_id] = { spend: 0, impressions: 0, purchases: 0, revenue: 0 }
+      spendByClient[row.client_id] = { spend: 0, impressions: 0, purchases: 0, revenue: 0, shopifyOrders: 0, shopifyRevenue: 0 }
     }
     spendByClient[row.client_id].spend += row.spend || 0
     spendByClient[row.client_id].impressions += row.impressions || 0
     spendByClient[row.client_id].purchases += row.conversions || 0
     spendByClient[row.client_id].revenue += row.conversion_value || 0
+  }
+
+  for (const row of shopifyResult.data || []) {
+    if (!spendByClient[row.client_id]) {
+      spendByClient[row.client_id] = { spend: 0, impressions: 0, purchases: 0, revenue: 0, shopifyOrders: 0, shopifyRevenue: 0 }
+    }
+    spendByClient[row.client_id].shopifyOrders += row.orders || 0
+    spendByClient[row.client_id].shopifyRevenue += row.net_revenue || 0
   }
 
   return clientsList.map((c) => ({
@@ -255,6 +271,8 @@ export async function fetchClientsList(from: string, to: string) {
     impressions: spendByClient[c.id]?.impressions || 0,
     purchases: spendByClient[c.id]?.purchases || 0,
     revenue: spendByClient[c.id]?.revenue || 0,
+    shopifyOrders: spendByClient[c.id]?.shopifyOrders || 0,
+    shopifyRevenue: spendByClient[c.id]?.shopifyRevenue || 0,
     roas:
       (spendByClient[c.id]?.spend || 0) > 0
         ? (spendByClient[c.id]?.revenue || 0) / (spendByClient[c.id]?.spend || 0)
