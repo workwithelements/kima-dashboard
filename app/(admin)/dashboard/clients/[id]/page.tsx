@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic"
 
 import { notFound } from "next/navigation"
 import { fetchClientData, fetchGoogleAdsData, fetchBreakdownsData } from "@/lib/data/fetch-client-data"
+import { fetchShopifyData } from "@/lib/data/fetch-shopify-data"
 import { createServiceClient } from "@/lib/supabase/server"
 import { getPresetRange, getComparisonRange } from "@/lib/utils/dates"
 import type { DatePreset } from "@/lib/utils/dates"
@@ -33,7 +34,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
   const supabase = createServiceClient()
 
   const minDelay = new Promise((r) => setTimeout(r, 1000))
-  const [data, configRes, gaRows, gaCompRows, breakdownsData, annotationsRes] = await Promise.all([
+  const [data, configRes, gaRows, gaCompRows, breakdownsData, annotationsRes, shopifyData, shopifyCompData] = await Promise.all([
     fetchClientData(
       params.id,
       range.from,
@@ -58,6 +59,10 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       .gte("date", range.from)
       .lte("date", range.to)
       .order("date"),
+    fetchShopifyData(params.id, range.from, range.to),
+    compRange
+      ? fetchShopifyData(params.id, compRange.from, compRange.to)
+      : Promise.resolve({ orders: [], attribution: [] }),
     minDelay,
   ])
 
@@ -95,6 +100,10 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       annotations={annotations}
       namingConfig={data.namingConfig}
       createdDates={data.createdDates}
+      shopifyOrders={shopifyData.orders}
+      shopifyAttribution={shopifyData.attribution}
+      shopifyCompOrders={shopifyCompData.orders}
+      shopifyCompAttribution={shopifyCompData.attribution}
     />
   )
 }
