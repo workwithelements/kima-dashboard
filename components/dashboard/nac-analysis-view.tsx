@@ -68,6 +68,7 @@ export default function NacAnalysisView() {
   const [uploading, setUploading] = useState(false)
   const [uploadMsg, setUploadMsg] = useState<{ type: "success" | "error"; text: string } | null>(null)
   const [productFilter, setProductFilter] = useState<string>("all")
+  const [regionFilter, setRegionFilter] = useState<string>("all")
   const [breakdownBy, setBreakdownBy] = useState<BreakdownKey>("region")
 
   const fetchData = useCallback(async () => {
@@ -91,10 +92,18 @@ export default function NacAnalysisView() {
     return Array.from(set).sort()
   }, [data])
 
+  const regions = useMemo(() => {
+    const set = new Set(data.map((r) => r.region))
+    return Array.from(set).sort()
+  }, [data])
+
   const filtered = useMemo(() => {
-    if (productFilter === "all") return data
-    return data.filter((r) => r.first_product === productFilter)
-  }, [data, productFilter])
+    return data.filter((r) => {
+      if (productFilter !== "all" && r.first_product !== productFilter) return false
+      if (regionFilter !== "all" && r.region !== regionFilter) return false
+      return true
+    })
+  }, [data, productFilter, regionFilter])
 
   const totalNacs = useMemo(() => filtered.reduce((s, r) => s + r.nacs, 0), [filtered])
 
@@ -133,6 +142,27 @@ export default function NacAnalysisView() {
   const barData = useMemo(() => {
     return pieData.map((d) => ({ ...d }))
   }, [pieData])
+
+  // Campaign-level breakdown (grouped by channel)
+  const campaignTableData = useMemo(() => {
+    const map: Record<string, Record<string, number>> = {}
+    for (const r of filtered) {
+      const channel = r.channel
+      const campaign = r.campaign || "(no campaign)"
+      if (!map[channel]) map[channel] = {}
+      map[channel][campaign] = (map[channel][campaign] || 0) + r.nacs
+    }
+    // Sort channels by total NACs desc, campaigns within each channel by NACs desc
+    return Object.entries(map)
+      .map(([channel, campaigns]) => ({
+        channel,
+        campaigns: Object.entries(campaigns)
+          .map(([campaign, nacs]) => ({ campaign, nacs }))
+          .sort((a, b) => b.nacs - a.nacs),
+        total: Object.values(campaigns).reduce((s, n) => s + n, 0),
+      }))
+      .sort((a, b) => b.total - a.total)
+  }, [filtered])
 
   // Product mix breakdown (always by product, ignoring productFilter)
   const productMixData = useMemo(() => {
@@ -263,6 +293,36 @@ export default function NacAnalysisView() {
               </div>
             </div>
 
+            {/* Region filter */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-neutral-500">Region:</span>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setRegionFilter("all")}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                    regionFilter === "all"
+                      ? "bg-brand-lime text-neutral-900"
+                      : "border border-neutral-700 text-neutral-400 hover:bg-neutral-800 hover:text-white"
+                  }`}
+                >
+                  All
+                </button>
+                {regions.map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => setRegionFilter(r)}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                      regionFilter === r
+                        ? "bg-brand-lime text-neutral-900"
+                        : "border border-neutral-700 text-neutral-400 hover:bg-neutral-800 hover:text-white"
+                    }`}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Breakdown selector */}
             <div className="flex items-center gap-2">
               <span className="text-xs text-neutral-500">Breakdown:</span>
@@ -294,7 +354,10 @@ export default function NacAnalysisView() {
               <p className="text-xs text-neutral-400">Total NACs</p>
               <p className="mt-1 text-2xl font-semibold tabular-nums">{totalNacs.toLocaleString()}</p>
               <p className="mt-1 text-xs text-neutral-500">
-                {productFilter === "all" ? "All products" : productFilter}
+                {[
+                  productFilter === "all" ? "All products" : productFilter,
+                  regionFilter === "all" ? "All regions" : regionFilter,
+                ].join(" · ")}
               </p>
             </Card>
             <Card>
@@ -405,6 +468,64 @@ export default function NacAnalysisView() {
                 ))}
               </LineChart>
             </ResponsiveContainer>
+          </Card>
+
+          {/* Campaign breakdown table */}
+          <Card>
+            <h3 className="mb-4 text-sm font-medium text-neutral-300">
+              Campaign Breakdown by Channel
+              {regionFilter !== "all" && (
+                <span className="ml-2 text-xs font-normal text-neutral-500">
+                  ({regionFilter})
+                </span>
+              )}
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-neutral-800 text-left text-xs uppercase tracking-wider text-neutral-500">
+                    <th className="pb-2 pr-4">Channel</th>
+                    <th className="pb-2 pr-4">Campaign</th>
+                    <th className="pb-2 pr-4 text-right">NACs</th>
+                    <th className="pb-2 text-right">% of Channel</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {campaignTableData.map((ch) => (
+                    ch.campaigns.map((camp, j) => (
+                      <tr
+                        key={`${ch.channel}-${camp.campaign}`}
+                        className="border-b border-neutral-800/50 text-neutral-300"
+                      >
+                        {j === 0 ? (
+                          <td
+                            className="py-2 pr-4 align-top font-medium text-white"
+                            rowSpan={ch.campaigns.length}
+                          >
+                            {ch.channel}
+                            <span className="ml-2 text-xs text-neutral-500">
+                              ({ch.total.toLocaleString()})
+                            </span>
+                          </td>
+                        ) : null}
+                        <td className="py-2 pr-4 text-neutral-400">
+                          {camp.campaign}
+                        </td>
+                        <td className="py-2 pr-4 text-right tabular-nums">
+                          {camp.nacs.toLocaleString()}
+                        </td>
+                        <td className="py-2 text-right tabular-nums text-neutral-500">
+                          {((camp.nacs / ch.total) * 100).toFixed(1)}%
+                        </td>
+                      </tr>
+                    ))
+                  ))}
+                </tbody>
+              </table>
+              {campaignTableData.length === 0 && (
+                <p className="py-4 text-center text-xs text-neutral-500">No data</p>
+              )}
+            </div>
           </Card>
 
           {/* Chart Row 3: Product mix (always shown, ignores product filter) */}
