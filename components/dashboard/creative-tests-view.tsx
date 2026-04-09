@@ -20,24 +20,13 @@ type Props = {
   currency: string
   keyAction: string
   clientId: string
-  /** ad_id → ad_name for all variant ads */
   adNames: Record<string, string>
-  /** Client naming convention config */
   namingConfig?: NamingConfig
-  /** ad_id → rank within its ad set */
   adsetRanks: Record<string, AdsetRank>
-  /** ad_id → total spend in last 14 days */
   recentAdSpend: Record<string, number>
 }
 
-type StatusFilter = "all" | "monitoring" | "ready" | "analysed" | "flagged"
-
-const STATUS_COLORS: Record<string, string> = {
-  monitoring: "bg-blue-500/15 text-blue-400 border-blue-500/30",
-  ready: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-  analysed: "bg-green-500/15 text-green-400 border-green-500/30",
-  flagged: "bg-red-500/15 text-red-400 border-red-500/30",
-}
+type ViewTab = "current" | "completed"
 
 const OUTCOME_BADGES: Record<string, { label: string; emoji: string; className: string }> = {
   win: { label: "Win", emoji: "\u{1F3C6}", className: "bg-green-500/15 text-green-400 border-green-500/30" },
@@ -45,7 +34,17 @@ const OUTCOME_BADGES: Record<string, { label: string; emoji: string; className: 
   inconclusive: { label: "Inconclusive", emoji: "\u{1F50D}", className: "bg-neutral-500/15 text-neutral-400 border-neutral-500/30" },
 }
 
-/** Return the conversion count from a test result based on the client key action */
+/** Group of tests sharing the same concept name across different adsets */
+type ConceptGroup = {
+  conceptName: string
+  tests: CreativeTest[]
+  totalSpend: number
+  totalConversions: number
+  variantCount: number
+  adsetCount: number
+  allAdIds: string[]
+}
+
 function getResultConversions(r: CreativeTestResult, keyAction: string): number {
   switch (keyAction) {
     case "landing_page_views": return r.landing_page_views
@@ -68,8 +67,9 @@ export default function CreativeTestsView({
   adsetRanks,
   recentAdSpend,
 }: Props) {
-  const [filter, setFilter] = useState<StatusFilter>("all")
-  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [tab, setTab] = useState<ViewTab>("current")
+  const [expandedConcept, setExpandedConcept] = useState<string | null>(null)
+  const [expandedTestId, setExpandedTestId] = useState<string | null>(null)
   const [linkingId, setLinkingId] = useState<string | null>(null)
   const [notionUrl, setNotionUrl] = useState("")
   const [showConformingOnly, setShowConformingOnly] = useState(true)
@@ -81,42 +81,67 @@ export default function CreativeTestsView({
     minConversions: config?.min_conversions ?? 10,
   }
 
-  // Filter tests by naming convention conformity
-  const conformingTests = useMemo(() => {
-    let filtered = tests
-
-    // Only show tests with active ads (spend in last 14 days) or already analysed
-    filtered = filtered.filter((test) =>
-      test.status === "analysed" ||
-      test.variant_ad_ids.some((adId) => (recentAdSpend[adId] || 0) > 0)
-    )
-
-    if (!showConformingOnly) return filtered
-    return filtered.filter((test) =>
-      test.variant_ad_ids.length > 0 &&
-      test.variant_ad_ids.every((adId) => {
-        const name = adNames[adId]
-        return name && isConformingAdName(name, namingConfig)
-      })
-    )
-  }, [tests, showConformingOnly, adNames, namingConfig, recentAdSpend])
-
-  const hiddenCount = tests.length - conformingTests.length
-
-  // Counts by status (using filtered set)
-  const counts = { monitoring: 0, ready: 0, analysed: 0, flagged: 0 }
-  for (const t of conformingTests) counts[t.status]++
-
-  const filtered = filter === "all"
-    ? conformingTests
-    : conformingTests.filter((t) => t.status === filter)
-
   const convLabel =
     keyAction === "adds_to_cart" ? "ATCs" :
     keyAction === "registrations_completed" ? "Regs" :
     keyAction === "checkouts_initiated" ? "Checkouts" :
     keyAction === "landing_page_views" ? "LPVs" :
     "Purchases"
+
+  // Apply naming convention filter
+  const conformingTests = useMemo(() => {
+    if (!showConformingOnly) return tests
+    return tests.filter((test) =>
+      test.variant_ad_ids.length > 0 &&
+      test.variant_ad_ids.every((adId) => {
+        const name = adNames[adId]
+        return name && isConformingAdName(name, namingConfig)
+      })
+    )
+  }, [tests, showConformingOnly, adNames, namingConfig])
+
+  const hiddenCount = tests.length - conformingTests.length
+
+  // Split into current (active, not yet analysed) and completed (analysed)
+  const currentTests = useMemo(() =>
+    conformingTests.filter((t) =>
+      t.status !== "analysed" &&
+      t.variant_ad_ids.some((adId) => (recentAdSpend[adId] || 0) > 0)
+    ),
+    [conformingTests, recentAdSpend]
+  )
+
+  const completedTests = useMemo(() =>
+    conformingTests.filter((t) => t.status === "analysed"),
+    [conformingTests]
+  )
+
+  // Group current tests by concept name (across adsets)
+  const conceptGroups = useMemo(() => {
+    const map = new Map<string, ConceptGroup>()
+    for (const test of currentTests) {
+      const existing = map.get(test.concept_name)
+      if (existing) {
+        existing.tests.push(test)
+        existing.totalSpend += test.total_spend
+        existing.totalConversions += test.total_conversions
+        existing.variantCount += test.variant_count
+        existing.adsetCount += 1
+        existing.allAdIds.push(...test.variant_ad_ids)
+      } else {
+        map.set(test.concept_name, {
+          conceptName: test.concept_name,
+          tests: [test],
+          totalSpend: test.total_spend,
+          totalConversions: test.total_conversions,
+          variantCount: test.variant_count,
+          adsetCount: 1,
+          allAdIds: [...test.variant_ad_ids],
+        })
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => b.totalSpend - a.totalSpend)
+  }, [currentTests])
 
   async function handleLinkNotion(testId: string) {
     if (!notionUrl.trim()) return
@@ -132,41 +157,55 @@ export default function CreativeTestsView({
     }
   }
 
-  async function handleDismiss(testId: string) {
-    try {
-      await fetch(`/api/creative-tests/${testId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dismiss: true }),
-      })
-      window.location.reload()
-    } catch (e) {
-      console.error("Failed to dismiss:", e)
-    }
-  }
-
   async function handleRunAnalysis(testId: string) {
     setAnalyzingId(testId)
     try {
-      const res = await fetch(`/api/creative-tests/${testId}/analyze`, {
+      await fetch(`/api/creative-tests/${testId}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        console.error("Failed to queue analysis:", err)
-      }
     } catch (e) {
       console.error("Failed to queue analysis:", e)
     }
-    // Keep the button in "queued" state (don't reset analyzingId)
   }
 
   return (
     <div className="space-y-6">
-      {/* Naming convention filter toggle */}
+      {/* Header: tabs + naming filter */}
       <div className="flex items-center justify-between">
-        <div />
+        <div className="flex gap-1">
+          <button
+            onClick={() => setTab("current")}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+              tab === "current"
+                ? "bg-brand-lime/10 text-brand-lime border border-brand-lime/30"
+                : "text-neutral-400 hover:text-white"
+            }`}
+          >
+            Current Tests
+            {currentTests.length > 0 && (
+              <span className="ml-2 rounded-full bg-neutral-800 px-2 py-0.5 text-xs">
+                {conceptGroups.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setTab("completed")}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+              tab === "completed"
+                ? "bg-brand-lime/10 text-brand-lime border border-brand-lime/30"
+                : "text-neutral-400 hover:text-white"
+            }`}
+          >
+            Completed
+            {completedTests.length > 0 && (
+              <span className="ml-2 rounded-full bg-neutral-800 px-2 py-0.5 text-xs">
+                {completedTests.length}
+              </span>
+            )}
+          </button>
+        </div>
+
         <label className="flex items-center gap-2 text-sm text-neutral-400 cursor-pointer select-none">
           <span>Naming conventions only</span>
           <button
@@ -195,197 +234,265 @@ export default function CreativeTestsView({
         </label>
       </div>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-4 gap-4">
-        {(["monitoring", "ready", "analysed", "flagged"] as const).map((s) => (
-          <button
-            key={s}
-            onClick={() => setFilter(filter === s ? "all" : s)}
-            className={`rounded-xl border p-4 text-left transition ${
-              filter === s
-                ? "border-brand-lime/40 bg-brand-lime/5"
-                : "border-neutral-800 bg-neutral-900 hover:border-neutral-700"
-            }`}
-          >
-            <div className="text-xs font-medium uppercase tracking-wider text-neutral-500">
-              {s === "monitoring" ? "Active" : s.charAt(0).toUpperCase() + s.slice(1)}
+      {/* ── CURRENT TESTS TAB ── */}
+      {tab === "current" && (
+        <>
+          {conceptGroups.length === 0 && (
+            <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-12 text-center">
+              <div className="text-neutral-500">
+                {config?.enabled
+                  ? "No active creative tests. Tests appear when ads with conforming names have recent spend."
+                  : "Creative test scanning is not enabled for this client. Enable it in Settings."}
+              </div>
             </div>
-            <div className="mt-1 text-2xl font-semibold">{counts[s]}</div>
-          </button>
-        ))}
-      </div>
+          )}
 
-      {/* Empty state */}
-      {conformingTests.length === 0 && (
-        <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-12 text-center">
-          <div className="text-neutral-500">
-            {tests.length > 0 && showConformingOnly
-              ? `${tests.length} test${tests.length !== 1 ? "s" : ""} hidden — none follow the naming convention. Toggle the filter above to view all.`
-              : config?.enabled
-                ? "No creative tests detected yet. Tests will appear after the next daily sync."
-                : "Creative test scanning is not enabled for this client. Enable it in Settings."}
-          </div>
-        </div>
-      )}
+          <div className="space-y-3">
+            {conceptGroups.map((group) => {
+              const isExpanded = expandedConcept === group.conceptName
+              // Collect all thumbnails for the concept
+              const thumbIds = group.allAdIds.filter((id) => thumbnails[id]).slice(0, 4)
 
-      {/* Test cards */}
-      <div className="space-y-3">
-        {filtered.map((test) => {
-          const testResults = results[test.id] ?? []
-          const isExpanded = expandedId === test.id
-          const isLinking = linkingId === test.id
+              return (
+                <div
+                  key={group.conceptName}
+                  className="rounded-xl border border-neutral-800 bg-neutral-900 overflow-hidden"
+                >
+                  {/* Concept header */}
+                  <div
+                    className="flex items-center gap-4 p-4 cursor-pointer hover:bg-neutral-800/50 transition"
+                    onClick={() => setExpandedConcept(isExpanded ? null : group.conceptName)}
+                  >
+                    {/* Thumbnails */}
+                    <div className="flex -space-x-2 shrink-0">
+                      {thumbIds.map((adId) => (
+                        <img
+                          key={adId}
+                          src={thumbnails[adId]}
+                          alt=""
+                          className="h-10 w-10 rounded-lg border-2 border-neutral-900 object-cover"
+                        />
+                      ))}
+                      {thumbIds.length === 0 && (
+                        <div className="h-10 w-10 rounded-lg border-2 border-neutral-900 bg-neutral-800" />
+                      )}
+                    </div>
 
-          return (
-            <div
-              key={test.id}
-              className="rounded-xl border border-neutral-800 bg-neutral-900 overflow-hidden"
-            >
-              {/* Card header */}
-              <div
-                className="flex items-center gap-4 p-4 cursor-pointer hover:bg-neutral-800/50 transition"
-                onClick={() => setExpandedId(isExpanded ? null : test.id)}
-              >
-                {/* Thumbnails */}
-                <div className="flex -space-x-2 shrink-0">
-                  {test.variant_ad_ids.slice(0, 4).map((adId) => (
-                    thumbnails[adId] ? (
-                      <img
-                        key={adId}
-                        src={thumbnails[adId]}
-                        alt=""
-                        className="h-10 w-10 rounded-lg border-2 border-neutral-900 object-cover"
-                      />
-                    ) : (
-                      <div
-                        key={adId}
-                        className="h-10 w-10 rounded-lg border-2 border-neutral-900 bg-neutral-800"
-                      />
-                    )
-                  ))}
-                  {test.variant_count > 4 && (
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg border-2 border-neutral-900 bg-neutral-800 text-xs text-neutral-400">
-                      +{test.variant_count - 4}
+                    {/* Info */}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium truncate">{group.conceptName}</span>
+                        <span className="shrink-0 rounded-full bg-neutral-800 px-2 py-0.5 text-xs text-neutral-400">
+                          {group.variantCount} variants
+                        </span>
+                        {group.adsetCount > 1 && (
+                          <span className="shrink-0 rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-400 border border-blue-500/30">
+                            {group.adsetCount} ad sets
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 text-xs text-neutral-500 truncate">
+                        {group.tests.map((t) => t.adset_name || t.adset_id).join(", ")}
+                      </div>
+                    </div>
+
+                    {/* Metrics */}
+                    <div className="hidden sm:flex items-center gap-6 text-sm text-neutral-400">
+                      <div>
+                        <span className="text-neutral-500 text-xs">Spend</span>
+                        <div>{fmtCurrency(group.totalSpend, currency)}</div>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500 text-xs">{convLabel}</span>
+                        <div>{fmtNumber(group.totalConversions)}</div>
+                      </div>
+                    </div>
+
+                    {/* Status badges */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {group.tests.some((t) => t.status === "ready") && (
+                        <span className="rounded-full border px-2.5 py-0.5 text-xs font-medium bg-amber-500/15 text-amber-400 border-amber-500/30">
+                          Ready
+                        </span>
+                      )}
+                      {group.tests.every((t) => t.status === "monitoring") && (
+                        <span className="rounded-full border px-2.5 py-0.5 text-xs font-medium bg-blue-500/15 text-blue-400 border-blue-500/30">
+                          Monitoring
+                        </span>
+                      )}
+                    </div>
+
+                    <svg
+                      className={`h-4 w-4 shrink-0 text-neutral-500 transition ${isExpanded ? "rotate-180" : ""}`}
+                      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+
+                  {/* Expanded: show per-adset breakdown */}
+                  {isExpanded && (
+                    <div className="border-t border-neutral-800">
+                      {group.tests.map((test) => (
+                        <div key={test.id} className="border-b border-neutral-800 last:border-b-0">
+                          <div className="flex items-center gap-4 px-4 py-3 bg-neutral-800/30">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-medium text-neutral-300">
+                                {test.adset_name || test.adset_id}
+                              </div>
+                              <div className="text-xs text-neutral-500">
+                                {test.variant_count} variants &middot; {test.days_live} days &middot; {fmtCurrency(test.total_spend, currency)} spend
+                              </div>
+                            </div>
+
+                            {/* Progress or ready button */}
+                            {test.status === "ready" ? (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleRunAnalysis(test.id) }}
+                                disabled={analyzingId === test.id}
+                                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                                  analyzingId === test.id
+                                    ? "bg-neutral-700 text-neutral-500 cursor-not-allowed"
+                                    : "bg-brand-lime text-black hover:bg-brand-lime/90"
+                                }`}
+                              >
+                                {analyzingId === test.id ? "Queued" : "Run Analysis"}
+                              </button>
+                            ) : (
+                              <div className="flex items-center gap-3 text-xs text-neutral-500">
+                                <span>{test.days_live} / {thresholds.minDays} days</span>
+                                <span>{fmtCurrency(test.total_spend, currency)} / {fmtCurrency(thresholds.minSpend, currency)}</span>
+                                <span>{test.total_conversions} / {thresholds.minConversions} {convLabel.toLowerCase()}</span>
+                              </div>
+                            )}
+
+                            <span className={`rounded-full border px-2 py-0.5 text-xs font-medium capitalize ${
+                              test.status === "ready"
+                                ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                                : "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                            }`}>
+                              {test.status === "monitoring" ? "Active" : test.status}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
+              )
+            })}
+          </div>
+        </>
+      )}
 
-                {/* Info */}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium truncate">{test.concept_name}</span>
-                    <span className="shrink-0 rounded-full bg-neutral-800 px-2 py-0.5 text-xs text-neutral-400">
-                      {test.variant_count} variants
-                    </span>
-                  </div>
-                  <div className="mt-0.5 text-xs text-neutral-500 truncate">
-                    {test.adset_name || test.adset_id}
-                  </div>
-                </div>
-
-                {/* Metrics summary */}
-                <div className="hidden sm:flex items-center gap-6 text-sm text-neutral-400">
-                  <div>
-                    <span className="text-neutral-500 text-xs">Spend</span>
-                    <div>{fmtCurrency(test.total_spend, currency)}</div>
-                  </div>
-                  <div>
-                    <span className="text-neutral-500 text-xs">{convLabel}</span>
-                    <div>{fmtNumber(test.total_conversions)}</div>
-                  </div>
-                  <div>
-                    <span className="text-neutral-500 text-xs">Days</span>
-                    <div>{test.days_live}</div>
-                  </div>
-                </div>
-
-                {/* Status + outcome badges */}
-                <div className="flex items-center gap-2 shrink-0">
-                  {test.outcome && OUTCOME_BADGES[test.outcome] && (
-                    <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${OUTCOME_BADGES[test.outcome].className}`}>
-                      {OUTCOME_BADGES[test.outcome].emoji} {OUTCOME_BADGES[test.outcome].label}
-                    </span>
-                  )}
-                  <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize ${STATUS_COLORS[test.status]}`}>
-                    {test.status}
-                  </span>
-                </div>
-
-                {/* Expand chevron */}
-                <svg
-                  className={`h-4 w-4 shrink-0 text-neutral-500 transition ${isExpanded ? "rotate-180" : ""}`}
-                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
+      {/* ── COMPLETED TESTS TAB ── */}
+      {tab === "completed" && (
+        <>
+          {completedTests.length === 0 && (
+            <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-12 text-center">
+              <div className="text-neutral-500">
+                No completed tests yet. Tests move here after analysis.
               </div>
+            </div>
+          )}
 
-              {/* Progress bars (for monitoring/ready) */}
-              {(test.status === "monitoring" || test.status === "ready") && (
-                <div className="grid grid-cols-3 gap-4 border-t border-neutral-800 px-4 py-3">
-                  <ProgressBar
-                    label="Days live"
-                    value={test.days_live}
-                    target={thresholds.minDays}
-                    suffix={`/ ${thresholds.minDays}`}
-                  />
-                  <ProgressBar
-                    label="Spend"
-                    value={test.total_spend}
-                    target={thresholds.minSpend}
-                    displayValue={fmtCurrency(test.total_spend, currency)}
-                    suffix={`/ ${fmtCurrency(thresholds.minSpend, currency)}`}
-                  />
-                  <ProgressBar
-                    label={convLabel}
-                    value={test.total_conversions}
-                    target={thresholds.minConversions}
-                    suffix={`/ ${thresholds.minConversions}`}
-                  />
-                </div>
-              )}
+          <div className="space-y-3">
+            {completedTests.map((test) => {
+              const testResults = results[test.id] ?? []
+              const isExpanded = expandedTestId === test.id
+              const isLinking = linkingId === test.id
 
-              {/* Run Analysis button for ready tests */}
-              {test.status === "ready" && (
-                <div className="flex items-center border-t border-neutral-800 px-4 py-2.5">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleRunAnalysis(test.id) }}
-                    disabled={analyzingId === test.id}
-                    className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                      analyzingId === test.id
-                        ? "bg-neutral-800 text-neutral-500 cursor-not-allowed"
-                        : "bg-brand-lime text-black hover:bg-brand-lime/90"
-                    }`}
+              return (
+                <div
+                  key={test.id}
+                  className="rounded-xl border border-neutral-800 bg-neutral-900 overflow-hidden"
+                >
+                  {/* Card header */}
+                  <div
+                    className="flex items-center gap-4 p-4 cursor-pointer hover:bg-neutral-800/50 transition"
+                    onClick={() => setExpandedTestId(isExpanded ? null : test.id)}
                   >
-                    {analyzingId === test.id ? "Analysis Queued" : "Run Analysis"}
-                  </button>
-                </div>
-              )}
+                    {/* Thumbnails */}
+                    <div className="flex -space-x-2 shrink-0">
+                      {test.variant_ad_ids.slice(0, 4).map((adId) => (
+                        thumbnails[adId] ? (
+                          <img
+                            key={adId}
+                            src={thumbnails[adId]}
+                            alt=""
+                            className="h-10 w-10 rounded-lg border-2 border-neutral-900 object-cover"
+                          />
+                        ) : (
+                          <div
+                            key={adId}
+                            className="h-10 w-10 rounded-lg border-2 border-neutral-900 bg-neutral-800"
+                          />
+                        )
+                      ))}
+                    </div>
 
-              {/* Flag reason */}
-              {test.flag_reason && (
-                <div className="flex items-center gap-2 border-t border-neutral-800 bg-red-500/5 px-4 py-2.5 text-sm text-red-400">
-                  <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
-                  </svg>
-                  {test.flag_reason}
-                </div>
-              )}
+                    {/* Info */}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium truncate">{test.concept_name}</span>
+                        <span className="shrink-0 rounded-full bg-neutral-800 px-2 py-0.5 text-xs text-neutral-400">
+                          {test.variant_count} variants
+                        </span>
+                      </div>
+                      <div className="mt-0.5 text-xs text-neutral-500 truncate">
+                        {test.adset_name || test.adset_id}
+                      </div>
+                    </div>
 
-              {/* Notion link / actions */}
-              {(test.status === "analysed" || test.status === "flagged") && (
-                <div className="flex items-center gap-3 border-t border-neutral-800 px-4 py-2.5">
-                  {test.notion_page_url ? (
-                    <a
-                      href={test.notion_page_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-blue-400 hover:underline"
-                      onClick={(e) => e.stopPropagation()}
+                    {/* Metrics */}
+                    <div className="hidden sm:flex items-center gap-6 text-sm text-neutral-400">
+                      <div>
+                        <span className="text-neutral-500 text-xs">Spend</span>
+                        <div>{fmtCurrency(test.total_spend, currency)}</div>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500 text-xs">{convLabel}</span>
+                        <div>{fmtNumber(test.total_conversions)}</div>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500 text-xs">Days</span>
+                        <div>{test.days_live}</div>
+                      </div>
+                    </div>
+
+                    {/* Outcome badge */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {test.outcome && OUTCOME_BADGES[test.outcome] && (
+                        <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${OUTCOME_BADGES[test.outcome].className}`}>
+                          {OUTCOME_BADGES[test.outcome].emoji} {OUTCOME_BADGES[test.outcome].label}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Notion link */}
+                    {test.notion_page_url && (
+                      <a
+                        href={test.notion_page_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="shrink-0 text-sm text-blue-400 hover:underline"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        View &rarr;
+                      </a>
+                    )}
+
+                    <svg
+                      className={`h-4 w-4 shrink-0 text-neutral-500 transition ${isExpanded ? "rotate-180" : ""}`}
+                      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
                     >
-                      View Notion card &rarr;
-                    </a>
-                  ) : (
-                    <>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+
+                  {/* Link Notion (if not linked) */}
+                  {!test.notion_page_url && (
+                    <div className="flex items-center gap-3 border-t border-neutral-800 px-4 py-2.5">
                       {isLinking ? (
                         <div className="flex items-center gap-2 flex-1" onClick={(e) => e.stopPropagation()}>
                           <input
@@ -417,182 +524,86 @@ export default function CreativeTestsView({
                           Link Notion card
                         </button>
                       )}
-                    </>
+                    </div>
                   )}
 
-                  {test.status === "flagged" && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleDismiss(test.id) }}
-                      className="ml-auto text-sm text-neutral-500 hover:text-white"
-                    >
-                      Dismiss
-                    </button>
-                  )}
-                </div>
-              )}
+                  {/* Expanded results table */}
+                  {isExpanded && testResults.length > 0 && (
+                    <div className="border-t border-neutral-800 p-4">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-xs uppercase tracking-wider text-neutral-500">
+                              <th className="pb-2 pr-4">Variant</th>
+                              <th className="pb-2 pr-4 text-right">Spend</th>
+                              <th className="pb-2 pr-4 text-right">Impr</th>
+                              <th className="pb-2 pr-4 text-right">LPV</th>
+                              <th className="pb-2 pr-4 text-right">ATC</th>
+                              <th className="pb-2 pr-4 text-right">{convLabel}</th>
+                              <th className="pb-2 pr-4 text-right">CPA</th>
+                              <th className="pb-2 pr-4 text-right">ROAS</th>
+                              <th className="pb-2 pr-4 text-right">Rank</th>
+                              <th className="pb-2 pr-4">Class</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {testResults
+                              .sort((a, b) => (a.cpa ?? 9999) - (b.cpa ?? 9999))
+                              .map((r) => {
+                                const classKey = r.classification as keyof typeof CLASSIFICATIONS
+                                const classDef = CLASSIFICATIONS[classKey]
+                                const rank = adsetRanks[r.ad_id]
 
-              {/* Expanded results table */}
-              {isExpanded && testResults.length > 0 && (
-                <div className="border-t border-neutral-800 p-4">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-left text-xs uppercase tracking-wider text-neutral-500">
-                          <th className="pb-2 pr-4">Variant</th>
-                          <th className="pb-2 pr-4 text-right">Spend</th>
-                          <th className="pb-2 pr-4 text-right">Impr</th>
-                          <th className="pb-2 pr-4 text-right">LPV</th>
-                          <th className="pb-2 pr-4 text-right">ATC</th>
-                          <th className="pb-2 pr-4 text-right">{convLabel}</th>
-                          <th className="pb-2 pr-4 text-right">CPA</th>
-                          <th className="pb-2 pr-4 text-right">ROAS</th>
-                          <th className="pb-2 pr-4 text-right">Landing</th>
-                          <th className="pb-2 pr-4 text-right">Rank</th>
-                          <th className="pb-2 pr-4">Status</th>
-                          <th className="pb-2 pr-4">Class</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {testResults
-                          .sort((a, b) => (a.cpa ?? 9999) - (b.cpa ?? 9999))
-                          .map((r) => {
-                            const classKey = r.classification as keyof typeof CLASSIFICATIONS
-                            const classDef = CLASSIFICATIONS[classKey]
-                            const rank = adsetRanks[r.ad_id]
-
-                            return (
-                              <tr
-                                key={r.ad_id}
-                                className={`border-t border-neutral-800 ${r.is_best_variant ? "bg-green-500/5" : ""}`}
-                              >
-                                <td className="py-2 pr-4">
-                                  <div className="flex items-center gap-2">
-                                    {r.is_best_variant && (
-                                      <span className="text-green-400" title="Best variant">&#9733;</span>
-                                    )}
-                                    <span className="truncate max-w-[200px]">
-                                      {r.hook_label || r.ad_name?.split("_").slice(3, 5).join(" ") || r.ad_id}
-                                    </span>
-                                  </div>
-                                </td>
-                                <td className="py-2 pr-4 text-right">{fmtCurrency(r.spend, currency)}</td>
-                                <td className="py-2 pr-4 text-right">{fmtNumber(r.impressions)}</td>
-                                <td className="py-2 pr-4 text-right">{fmtNumber(r.landing_page_views)}</td>
-                                <td className="py-2 pr-4 text-right">{fmtNumber(r.adds_to_cart)}</td>
-                                <td className="py-2 pr-4 text-right">{fmtNumber(getResultConversions(r, keyAction))}</td>
-                                <td className="py-2 pr-4 text-right">
-                                  {r.cpa != null ? fmtCurrency(r.cpa, currency) : "—"}
-                                </td>
-                                <td className="py-2 pr-4 text-right">
-                                  {r.roas != null ? `${r.roas.toFixed(1)}x` : "—"}
-                                </td>
-                                <td className="py-2 pr-4 text-right">
-                                  {r.landing_rate != null ? fmtPercent(r.landing_rate) : "—"}
-                                </td>
-                                <td className="py-2 pr-4 text-right text-neutral-400">
-                                  {rank ? `${rank.rank} / ${rank.total}` : "—"}
-                                </td>
-                                <td className="py-2 pr-4">
-                                  {r.fatigue_status && r.fatigue_status !== "healthy" && (
-                                    <span className={`rounded-full border px-2 py-0.5 text-xs ${
-                                      r.fatigue_status === "fatigued"
-                                        ? "border-red-500/30 bg-red-500/15 text-red-400"
-                                        : "border-amber-500/30 bg-amber-500/15 text-amber-400"
-                                    }`}>
-                                      {r.fatigue_status}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="py-2 pr-4">
-                                  {classDef && (
-                                    <span className={`rounded-full border px-2 py-0.5 text-xs ${classDef.bgColor}`}>
-                                      {classDef.label}
-                                    </span>
-                                  )}
-                                </td>
-                              </tr>
-                            )
-                          })}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* Recent performance note */}
-                  {testResults.some((r) => r.recent_spend > 0) && (
-                    <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-800/50 p-3">
-                      <div className="text-xs font-medium uppercase tracking-wider text-neutral-500 mb-2">
-                        Last 7 Days
-                      </div>
-                      <div className="flex gap-6 text-sm">
-                        {testResults
-                          .filter((r) => r.recent_spend > 0)
-                          .sort((a, b) => (a.recent_cpa ?? 9999) - (b.recent_cpa ?? 9999))
-                          .map((r) => (
-                            <div key={r.ad_id} className="flex items-center gap-2">
-                              <span className="text-neutral-400">{r.hook_label || "—"}</span>
-                              <span className="text-neutral-500">
-                                {fmtCurrency(r.recent_spend, currency)} spend
-                              </span>
-                              <span>
-                                {r.recent_conversions} {convLabel.toLowerCase()}
-                              </span>
-                              {r.recent_cpa != null && (
-                                <span className="text-neutral-400">
-                                  CPA {fmtCurrency(r.recent_cpa, currency)}
-                                </span>
-                              )}
-                            </div>
-                          ))}
+                                return (
+                                  <tr
+                                    key={r.ad_id}
+                                    className={`border-t border-neutral-800 ${r.is_best_variant ? "bg-green-500/5" : ""}`}
+                                  >
+                                    <td className="py-2 pr-4">
+                                      <div className="flex items-center gap-2">
+                                        {r.is_best_variant && (
+                                          <span className="text-green-400" title="Best variant">&#9733;</span>
+                                        )}
+                                        <span className="truncate max-w-[200px]">
+                                          {r.hook_label || r.ad_name?.split("_").slice(3, 5).join(" ") || r.ad_id}
+                                        </span>
+                                      </div>
+                                    </td>
+                                    <td className="py-2 pr-4 text-right">{fmtCurrency(r.spend, currency)}</td>
+                                    <td className="py-2 pr-4 text-right">{fmtNumber(r.impressions)}</td>
+                                    <td className="py-2 pr-4 text-right">{fmtNumber(r.landing_page_views)}</td>
+                                    <td className="py-2 pr-4 text-right">{fmtNumber(r.adds_to_cart)}</td>
+                                    <td className="py-2 pr-4 text-right">{fmtNumber(getResultConversions(r, keyAction))}</td>
+                                    <td className="py-2 pr-4 text-right">
+                                      {r.cpa != null ? fmtCurrency(r.cpa, currency) : "—"}
+                                    </td>
+                                    <td className="py-2 pr-4 text-right">
+                                      {r.roas != null ? `${r.roas.toFixed(1)}x` : "—"}
+                                    </td>
+                                    <td className="py-2 pr-4 text-right text-neutral-400">
+                                      {rank ? `${rank.rank} / ${rank.total}` : "—"}
+                                    </td>
+                                    <td className="py-2 pr-4">
+                                      {classDef && (
+                                        <span className={`rounded-full border px-2 py-0.5 text-xs ${classDef.bgColor}`}>
+                                          {classDef.label}
+                                        </span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
                   )}
                 </div>
-              )}
-
-              {/* Expanded empty state for non-analysed */}
-              {isExpanded && testResults.length === 0 && test.status !== "analysed" && (
-                <div className="border-t border-neutral-800 p-4 text-sm text-neutral-500">
-                  Variant analysis will run automatically once this test reaches readiness thresholds.
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-function ProgressBar({
-  label,
-  value,
-  target,
-  displayValue,
-  suffix,
-}: {
-  label: string
-  value: number
-  target: number
-  displayValue?: string
-  suffix: string
-}) {
-  const pct = Math.min((value / target) * 100, 100)
-  const complete = value >= target
-
-  return (
-    <div>
-      <div className="flex items-baseline justify-between text-xs">
-        <span className="text-neutral-500">{label}</span>
-        <span className={complete ? "text-green-400" : "text-neutral-400"}>
-          {displayValue ?? value} {suffix}
-        </span>
-      </div>
-      <div className="mt-1 h-1.5 rounded-full bg-neutral-800">
-        <div
-          className={`h-1.5 rounded-full transition-all ${complete ? "bg-green-500" : "bg-brand-lime"}`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+              )
+            })}
+          </div>
+        </>
+      )}
     </div>
   )
 }
