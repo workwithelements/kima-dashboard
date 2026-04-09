@@ -37,14 +37,14 @@ export async function middleware(request: NextRequest) {
   }
 
   // Protect API routes (except public endpoints) — return 401 if not authenticated
-  if (pathname.startsWith("/api/") && !pathname.startsWith("/api/view-auth")) {
+  if (pathname.startsWith("/api/") && !pathname.startsWith("/api/view-auth") && !pathname.startsWith("/api/cron/")) {
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
   }
 
   // CSRF protection: verify Origin on state-changing API requests
-  if (pathname.startsWith("/api/") && ["POST", "PUT", "DELETE", "PATCH"].includes(request.method)) {
+  if (pathname.startsWith("/api/") && !pathname.startsWith("/api/cron/") && ["POST", "PUT", "DELETE", "PATCH"].includes(request.method)) {
     const origin = request.headers.get("origin")
     const host = request.headers.get("host")
     if (origin && host) {
