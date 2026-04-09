@@ -59,6 +59,24 @@ type NacRow = {
 
 type BreakdownKey = "region" | "channel" | "first_product"
 
+/* ─── Channel grouping: roll up Google campaign types into "Paid Search" ─── */
+const PAID_SEARCH_CHANNELS = new Set([
+  "generic ppc",
+  "competitor ppc",
+  "brand ppc",
+  "google ads",
+])
+
+function groupChannel(channel: string): string {
+  return PAID_SEARCH_CHANNELS.has(channel.toLowerCase()) ? "Paid Search" : channel
+}
+
+/** Get the display value for a row's breakdown dimension */
+function getBreakdownValue(row: NacRow, key: BreakdownKey): string {
+  if (key === "channel") return groupChannel(row.channel)
+  return row[key]
+}
+
 export default function NacAnalysisView() {
   const params = useParams()
   const clientId = params.id as string
@@ -110,7 +128,7 @@ export default function NacAnalysisView() {
   const pieData = useMemo(() => {
     const map: Record<string, number> = {}
     for (const r of filtered) {
-      const key = r[breakdownBy]
+      const key = getBreakdownValue(r, breakdownBy)
       map[key] = (map[key] || 0) + r.nacs
     }
     return Object.entries(map)
@@ -125,7 +143,7 @@ export default function NacAnalysisView() {
 
     for (const r of filtered) {
       if (!dateMap[r.date]) dateMap[r.date] = {}
-      const key = r[breakdownBy]
+      const key = getBreakdownValue(r, breakdownBy)
       categories.add(key)
       dateMap[r.date][key] = (dateMap[r.date][key] || 0) + r.nacs
     }
@@ -143,23 +161,35 @@ export default function NacAnalysisView() {
     return pieData.map((d) => ({ ...d }))
   }, [pieData])
 
-  // Campaign-level breakdown (grouped by channel)
+  // Campaign-level breakdown (grouped by consolidated channel)
   const campaignTableData = useMemo(() => {
-    const map: Record<string, Record<string, number>> = {}
+    const map: Record<string, Record<string, { nacs: number; rawChannel: string }>> = {}
     for (const r of filtered) {
-      const channel = r.channel
+      const channel = groupChannel(r.channel)
       const campaign = r.campaign || "(no campaign)"
+      // Use rawChannel + campaign as key to avoid merging different raw channels with same campaign name
+      const key = `${r.channel}|||${campaign}`
       if (!map[channel]) map[channel] = {}
-      map[channel][campaign] = (map[channel][campaign] || 0) + r.nacs
+      if (!map[channel][key]) map[channel][key] = { nacs: 0, rawChannel: r.channel }
+      map[channel][key].nacs += r.nacs
     }
-    // Sort channels by total NACs desc, campaigns within each channel by NACs desc
     return Object.entries(map)
       .map(([channel, campaigns]) => ({
         channel,
         campaigns: Object.entries(campaigns)
-          .map(([campaign, nacs]) => ({ campaign, nacs }))
+          .map(([, v]) => ({
+            campaign: v.rawChannel === channel
+              ? v.rawChannel + " — " + v.rawChannel // same name, skip tag
+              : v.rawChannel, // show original channel as context
+            displayName: (() => {
+              const parts = Object.keys(campaigns).find((k) => campaigns[k] === v)?.split("|||") || []
+              return parts[1] || "(no campaign)"
+            })(),
+            rawChannel: v.rawChannel,
+            nacs: v.nacs,
+          }))
           .sort((a, b) => b.nacs - a.nacs),
-        total: Object.values(campaigns).reduce((s, n) => s + n, 0),
+        total: Object.values(campaigns).reduce((s, v) => s + v.nacs, 0),
       }))
       .sort((a, b) => b.total - a.total)
   }, [filtered])
@@ -546,7 +576,7 @@ export default function NacAnalysisView() {
                   {campaignTableData.map((ch) => (
                     ch.campaigns.map((camp, j) => (
                       <tr
-                        key={`${ch.channel}-${camp.campaign}`}
+                        key={`${ch.channel}-${camp.rawChannel}-${camp.displayName}-${j}`}
                         className="border-b border-neutral-800/50 text-neutral-300"
                       >
                         {j === 0 ? (
@@ -561,7 +591,12 @@ export default function NacAnalysisView() {
                           </td>
                         ) : null}
                         <td className="py-2 pr-4 text-neutral-400">
-                          {camp.campaign}
+                          <span>{camp.displayName}</span>
+                          {ch.channel === "Paid Search" && camp.rawChannel !== ch.channel && (
+                            <span className="ml-2 rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-500">
+                              {camp.rawChannel}
+                            </span>
+                          )}
                         </td>
                         <td className="py-2 pr-4 text-right tabular-nums">
                           {camp.nacs.toLocaleString()}
