@@ -80,6 +80,8 @@ export type CreativeTestsData = {
   namingConfig?: NamingConfig
   /** ad_id → rank within its ad set (by CPA) */
   adsetRanks: Record<string, AdsetRank>
+  /** ad_id → total spend in last 14 days (0 = inactive) */
+  recentAdSpend: Record<string, number>
 }
 
 /** Map key_action to the corresponding meta_daily_performance column */
@@ -212,6 +214,26 @@ export async function fetchCreativeTests(
     fetchPromises.push(fetchNameBatch(chunk))
   }
 
+  // Fetch recent spend per variant ad (last 14 days) to detect inactive tests
+  const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000).toISOString().split("T")[0]
+  const recentAdSpend: Record<string, number> = {}
+
+  async function fetchRecentSpendBatch(chunk: string[]): Promise<void> {
+    const { data } = await supabase
+      .from("meta_daily_performance")
+      .select("ad_id, spend")
+      .in("ad_id", chunk)
+      .gte("date", fourteenDaysAgo)
+    for (const row of data ?? []) {
+      recentAdSpend[row.ad_id] = (recentAdSpend[row.ad_id] || 0) + (row.spend || 0)
+    }
+  }
+
+  for (let i = 0; i < allAdIds.length; i += BATCH) {
+    const chunk = allAdIds.slice(i, i + BATCH)
+    fetchPromises.push(fetchRecentSpendBatch(chunk))
+  }
+
   // Fetch adset-level performance for ranking (all ads in each adset, last 30 days)
   const convCol = getConversionColumn(keyAction)
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString().split("T")[0]
@@ -284,5 +306,6 @@ export async function fetchCreativeTests(
     adNames,
     namingConfig,
     adsetRanks,
+    recentAdSpend,
   }
 }

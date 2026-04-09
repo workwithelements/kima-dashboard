@@ -26,6 +26,8 @@ type Props = {
   namingConfig?: NamingConfig
   /** ad_id → rank within its ad set */
   adsetRanks: Record<string, AdsetRank>
+  /** ad_id → total spend in last 14 days */
+  recentAdSpend: Record<string, number>
 }
 
 type StatusFilter = "all" | "monitoring" | "ready" | "analysed" | "flagged"
@@ -64,6 +66,7 @@ export default function CreativeTestsView({
   adNames,
   namingConfig,
   adsetRanks,
+  recentAdSpend,
 }: Props) {
   const [filter, setFilter] = useState<StatusFilter>("all")
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -80,15 +83,23 @@ export default function CreativeTestsView({
 
   // Filter tests by naming convention conformity
   const conformingTests = useMemo(() => {
-    if (!showConformingOnly) return tests
-    return tests.filter((test) =>
+    let filtered = tests
+
+    // Only show tests with active ads (spend in last 14 days) or already analysed
+    filtered = filtered.filter((test) =>
+      test.status === "analysed" ||
+      test.variant_ad_ids.some((adId) => (recentAdSpend[adId] || 0) > 0)
+    )
+
+    if (!showConformingOnly) return filtered
+    return filtered.filter((test) =>
       test.variant_ad_ids.length > 0 &&
       test.variant_ad_ids.every((adId) => {
         const name = adNames[adId]
         return name && isConformingAdName(name, namingConfig)
       })
     )
-  }, [tests, showConformingOnly, adNames, namingConfig])
+  }, [tests, showConformingOnly, adNames, namingConfig, recentAdSpend])
 
   const hiddenCount = tests.length - conformingTests.length
 
