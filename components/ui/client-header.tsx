@@ -30,6 +30,27 @@ export default function ClientHeader({ clientId, clientName, slug }: Props) {
   const suffix = qs ? `?${qs}` : ""
 
   const [showShare, setShowShare] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshMsg, setRefreshMsg] = useState<string | null>(null)
+
+  async function handleRefresh() {
+    setRefreshing(true)
+    setRefreshMsg(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/refresh`, { method: "POST" })
+      if (res.ok) {
+        setRefreshMsg("Sync triggered")
+        setTimeout(() => setRefreshMsg(null), 4000)
+      } else {
+        setRefreshMsg("Failed")
+        setTimeout(() => setRefreshMsg(null), 4000)
+      }
+    } catch {
+      setRefreshMsg("Failed")
+      setTimeout(() => setRefreshMsg(null), 4000)
+    }
+    setRefreshing(false)
+  }
 
   return (
     <div className="space-y-4">
@@ -43,6 +64,26 @@ export default function ClientHeader({ clientId, clientName, slug }: Props) {
           </svg>
         </Link>
         <h1 className="text-2xl font-semibold">{clientName}</h1>
+
+        {/* Refresh data button */}
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="rounded-lg p-1.5 text-neutral-500 transition hover:bg-neutral-800 hover:text-white disabled:opacity-50"
+          title="Refresh data"
+        >
+          <svg
+            className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182M20.016 4.656v4.992" />
+          </svg>
+        </button>
+        {refreshMsg && (
+          <span className={`text-xs ${refreshMsg === "Sync triggered" ? "text-green-400" : "text-red-400"}`}>
+            {refreshMsg}
+          </span>
+        )}
 
         {/* Share button */}
         {slug && (
