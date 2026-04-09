@@ -350,3 +350,30 @@ export function getDimensionValue(
   // Custom dimension
   return parsed.customDimensions?.[dim] || null
 }
+
+/**
+ * Check whether an ad name follows the naming convention.
+ *
+ * Requires enough underscore-separated parts so that `conceptName` is a
+ * genuinely extracted value rather than the fallback (where the entire name
+ * is used as the concept).
+ *
+ * With a client config the check uses the configured conceptName position;
+ * without config the default position 3 is assumed (needs ≥ 4 parts).
+ */
+export function isConformingAdName(
+  adName: string,
+  config?: NamingConfig
+): boolean {
+  if (!adName || !adName.includes("_")) return false
+  const parts = adName.split("_")
+
+  if (config && config.positions.length > 0) {
+    const conceptPos = config.positions.find((p) => p.key === "conceptName")
+    if (!conceptPos) return parts.length >= 4
+    return parts.length > conceptPos.index && !!parts[conceptPos.index]
+  }
+
+  // Default: need ≥ 4 parts (positions 0-3, where 3 is conceptName)
+  return parts.length >= 4
+}

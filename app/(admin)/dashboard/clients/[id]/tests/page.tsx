@@ -21,6 +21,9 @@ export default async function CreativeTestsPage({ params }: Props) {
       currency={data.currency}
       keyAction={data.keyAction}
       clientId={params.id}
+      adNames={data.adNames}
+      namingConfig={data.namingConfig}
+      adsetRanks={data.adsetRanks}
     />
   )
 }

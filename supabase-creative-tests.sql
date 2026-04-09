@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS creative_test_config (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   client_id         UUID REFERENCES clients(id) ON DELETE CASCADE NOT NULL UNIQUE,
   enabled           BOOLEAN NOT NULL DEFAULT false,
-  min_days_live     INTEGER NOT NULL DEFAULT 7,
+  min_days_live     INTEGER NOT NULL DEFAULT 5,
   min_spend         NUMERIC NOT NULL DEFAULT 100,
   min_conversions   INTEGER NOT NULL DEFAULT 10,
   high_spend_alert  NUMERIC NOT NULL DEFAULT 150,
