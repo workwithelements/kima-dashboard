@@ -1,11 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import type {
   CreativeTest,
   CreativeTestResult,
   CreativeTestConfig,
+  AdsetRank,
 } from "@/lib/data/fetch-creative-tests"
+import type { NamingConfig } from "@/lib/utils/ad-name-parser"
+import { isConformingAdName } from "@/lib/utils/ad-name-parser"
 import { CLASSIFICATIONS } from "@/lib/utils/creative-classification"
 import { fmtCurrency, fmtNumber, fmtPercent } from "@/lib/utils/format"
 
@@ -17,6 +20,12 @@ type Props = {
   currency: string
   keyAction: string
   clientId: string
+  /** ad_id → ad_name for all variant ads */
+  adNames: Record<string, string>
+  /** Client naming convention config */
+  namingConfig?: NamingConfig
+  /** ad_id → rank within its ad set */
+  adsetRanks: Record<string, AdsetRank>
 }
 
 type StatusFilter = "all" | "monitoring" | "ready" | "analysed" | "flagged"
@@ -34,6 +43,16 @@ const OUTCOME_BADGES: Record<string, { label: string; emoji: string; className: 
   inconclusive: { label: "Inconclusive", emoji: "\u{1F50D}", className: "bg-neutral-500/15 text-neutral-400 border-neutral-500/30" },
 }
 
+/** Return the conversion count from a test result based on the client key action */
+function getResultConversions(r: CreativeTestResult, keyAction: string): number {
+  switch (keyAction) {
+    case "landing_page_views": return r.landing_page_views
+    case "adds_to_cart": return r.adds_to_cart
+    case "checkouts_initiated": return r.checkouts_initiated
+    default: return r.purchases
+  }
+}
+
 export default function CreativeTestsView({
   tests,
   results,
@@ -42,23 +61,44 @@ export default function CreativeTestsView({
   currency,
   keyAction,
   clientId,
+  adNames,
+  namingConfig,
+  adsetRanks,
 }: Props) {
   const [filter, setFilter] = useState<StatusFilter>("all")
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [linkingId, setLinkingId] = useState<string | null>(null)
   const [notionUrl, setNotionUrl] = useState("")
+  const [showConformingOnly, setShowConformingOnly] = useState(true)
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null)
 
   const thresholds = {
-    minDays: config?.min_days_live ?? 7,
+    minDays: config?.min_days_live ?? 5,
     minSpend: config?.min_spend ?? 100,
     minConversions: config?.min_conversions ?? 10,
   }
 
-  // Counts by status
-  const counts = { monitoring: 0, ready: 0, analysed: 0, flagged: 0 }
-  for (const t of tests) counts[t.status]++
+  // Filter tests by naming convention conformity
+  const conformingTests = useMemo(() => {
+    if (!showConformingOnly) return tests
+    return tests.filter((test) =>
+      test.variant_ad_ids.length > 0 &&
+      test.variant_ad_ids.every((adId) => {
+        const name = adNames[adId]
+        return name && isConformingAdName(name, namingConfig)
+      })
+    )
+  }, [tests, showConformingOnly, adNames, namingConfig])
 
-  const filtered = filter === "all" ? tests : tests.filter((t) => t.status === filter)
+  const hiddenCount = tests.length - conformingTests.length
+
+  // Counts by status (using filtered set)
+  const counts = { monitoring: 0, ready: 0, analysed: 0, flagged: 0 }
+  for (const t of conformingTests) counts[t.status]++
+
+  const filtered = filter === "all"
+    ? conformingTests
+    : conformingTests.filter((t) => t.status === filter)
 
   const convLabel =
     keyAction === "adds_to_cart" ? "ATCs" :
@@ -94,8 +134,56 @@ export default function CreativeTestsView({
     }
   }
 
+  async function handleRunAnalysis(testId: string) {
+    setAnalyzingId(testId)
+    try {
+      const res = await fetch(`/api/creative-tests/${testId}/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        console.error("Failed to queue analysis:", err)
+      }
+    } catch (e) {
+      console.error("Failed to queue analysis:", e)
+    }
+    // Keep the button in "queued" state (don't reset analyzingId)
+  }
+
   return (
     <div className="space-y-6">
+      {/* Naming convention filter toggle */}
+      <div className="flex items-center justify-between">
+        <div />
+        <label className="flex items-center gap-2 text-sm text-neutral-400 cursor-pointer select-none">
+          <span>Naming conventions only</span>
+          <button
+            role="switch"
+            aria-checked={showConformingOnly}
+            onClick={() => setShowConformingOnly((v) => !v)}
+            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition ${
+              showConformingOnly
+                ? "border-brand-lime/40 bg-brand-lime/20"
+                : "border-neutral-700 bg-neutral-800"
+            }`}
+          >
+            <span
+              className={`inline-block h-3.5 w-3.5 rounded-full transition-transform ${
+                showConformingOnly
+                  ? "translate-x-[18px] bg-brand-lime"
+                  : "translate-x-[3px] bg-neutral-500"
+              }`}
+            />
+          </button>
+          {hiddenCount > 0 && (
+            <span className="text-xs text-neutral-600">
+              ({hiddenCount} hidden)
+            </span>
+          )}
+        </label>
+      </div>
+
       {/* Summary cards */}
       <div className="grid grid-cols-4 gap-4">
         {(["monitoring", "ready", "analysed", "flagged"] as const).map((s) => (
@@ -117,12 +205,14 @@ export default function CreativeTestsView({
       </div>
 
       {/* Empty state */}
-      {tests.length === 0 && (
+      {conformingTests.length === 0 && (
         <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-12 text-center">
           <div className="text-neutral-500">
-            {config?.enabled
-              ? "No creative tests detected yet. Tests will appear after the next daily sync."
-              : "Creative test scanning is not enabled for this client. Enable it in Settings."}
+            {tests.length > 0 && showConformingOnly
+              ? `${tests.length} test${tests.length !== 1 ? "s" : ""} hidden — none follow the naming convention. Toggle the filter above to view all.`
+              : config?.enabled
+                ? "No creative tests detected yet. Tests will appear after the next daily sync."
+                : "Creative test scanning is not enabled for this client. Enable it in Settings."}
           </div>
         </div>
       )}
@@ -243,6 +333,23 @@ export default function CreativeTestsView({
                 </div>
               )}
 
+              {/* Run Analysis button for ready tests */}
+              {test.status === "ready" && (
+                <div className="flex items-center border-t border-neutral-800 px-4 py-2.5">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleRunAnalysis(test.id) }}
+                    disabled={analyzingId === test.id}
+                    className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                      analyzingId === test.id
+                        ? "bg-neutral-800 text-neutral-500 cursor-not-allowed"
+                        : "bg-brand-lime text-black hover:bg-brand-lime/90"
+                    }`}
+                  >
+                    {analyzingId === test.id ? "Analysis Queued" : "Run Analysis"}
+                  </button>
+                </div>
+              )}
+
               {/* Flag reason */}
               {test.flag_reason && (
                 <div className="flex items-center gap-2 border-t border-neutral-800 bg-red-500/5 px-4 py-2.5 text-sm text-red-400">
@@ -329,6 +436,7 @@ export default function CreativeTestsView({
                           <th className="pb-2 pr-4 text-right">CPA</th>
                           <th className="pb-2 pr-4 text-right">ROAS</th>
                           <th className="pb-2 pr-4 text-right">Landing</th>
+                          <th className="pb-2 pr-4 text-right">Rank</th>
                           <th className="pb-2 pr-4">Status</th>
                           <th className="pb-2 pr-4">Class</th>
                         </tr>
@@ -339,6 +447,7 @@ export default function CreativeTestsView({
                           .map((r) => {
                             const classKey = r.classification as keyof typeof CLASSIFICATIONS
                             const classDef = CLASSIFICATIONS[classKey]
+                            const rank = adsetRanks[r.ad_id]
 
                             return (
                               <tr
@@ -359,7 +468,7 @@ export default function CreativeTestsView({
                                 <td className="py-2 pr-4 text-right">{fmtNumber(r.impressions)}</td>
                                 <td className="py-2 pr-4 text-right">{fmtNumber(r.landing_page_views)}</td>
                                 <td className="py-2 pr-4 text-right">{fmtNumber(r.adds_to_cart)}</td>
-                                <td className="py-2 pr-4 text-right">{fmtNumber(r.purchases)}</td>
+                                <td className="py-2 pr-4 text-right">{fmtNumber(getResultConversions(r, keyAction))}</td>
                                 <td className="py-2 pr-4 text-right">
                                   {r.cpa != null ? fmtCurrency(r.cpa, currency) : "—"}
                                 </td>
@@ -368,6 +477,9 @@ export default function CreativeTestsView({
                                 </td>
                                 <td className="py-2 pr-4 text-right">
                                   {r.landing_rate != null ? fmtPercent(r.landing_rate) : "—"}
+                                </td>
+                                <td className="py-2 pr-4 text-right text-neutral-400">
+                                  {rank ? `${rank.rank} / ${rank.total}` : "—"}
                                 </td>
                                 <td className="py-2 pr-4">
                                   {r.fatigue_status && r.fatigue_status !== "healthy" && (

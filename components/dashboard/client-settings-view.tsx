@@ -67,7 +67,7 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
   /* ── Creative Tests config state ── */
   const [testConfig, setTestConfig] = useState({
     enabled: false,
-    min_days_live: 7,
+    min_days_live: 5,
     min_spend: 100,
     min_conversions: 10,
     high_spend_alert: 150,
@@ -103,7 +103,7 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
           if (data) {
             setTestConfig({
               enabled: data.enabled ?? false,
-              min_days_live: data.min_days_live ?? 7,
+              min_days_live: data.min_days_live ?? 5,
               min_spend: data.min_spend ?? 100,
               min_conversions: data.min_conversions ?? 10,
               high_spend_alert: data.high_spend_alert ?? 150,
@@ -854,7 +854,7 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
                 <input
                   type="number"
                   value={testConfig.min_days_live}
-                  onChange={(e) => setTestConfig((c) => ({ ...c, min_days_live: parseInt(e.target.value) || 7 }))}
+                  onChange={(e) => setTestConfig((c) => ({ ...c, min_days_live: parseInt(e.target.value) || 5 }))}
                   min={1}
                   className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-brand-lime"
                 />
