@@ -1,0 +1,51 @@
+name: Creative Test Analysis
+
+on:
+  # Triggered by kima-sync after daily data pull
+  repository_dispatch:
+    types: [run-test-analysis]
+  # Fallback daily schedule (9am UTC — runs after kima-sync typically finishes)
+  schedule:
+    - cron: "0 9 * * *"
+  # Manual trigger from GitHub UI
+  workflow_dispatch:
+
+jobs:
+  check-and-analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for ready tests
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${{ secrets.DASHBOARD_URL }}/api/cron/check-ready-tests" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -1)
+          echo "Status: $HTTP_CODE"
+          echo "Response: $BODY"
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "::error::Cron endpoint returned $HTTP_CODE"
+            exit 1
+          fi
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run test analysis worker
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+        run: npx tsx scripts/run-test-analysis.ts
