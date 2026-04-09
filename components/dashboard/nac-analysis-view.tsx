@@ -208,8 +208,41 @@ export default function NacAnalysisView() {
 
   /* ─── render helpers ─── */
 
-  const pctLabel = ({ name, percent }: { name: string; percent: number }) =>
-    `${name} ${(percent * 100).toFixed(1)}%`
+  const MIN_LABEL_PCT = 0.03 // Only label slices >= 3%
+
+  const renderPieLabel = ({
+    name,
+    percent,
+    cx,
+    cy,
+    midAngle,
+    outerRadius,
+  }: {
+    name: string
+    percent: number
+    cx: number
+    cy: number
+    midAngle: number
+    outerRadius: number
+  }) => {
+    if (percent < MIN_LABEL_PCT) return null
+    const RADIAN = Math.PI / 180
+    const radius = outerRadius + 20
+    const x = cx + radius * Math.cos(-midAngle * RADIAN)
+    const y = cy + radius * Math.sin(-midAngle * RADIAN)
+    return (
+      <text
+        x={x}
+        y={y}
+        fill="#a3a3a3"
+        fontSize={12}
+        textAnchor={x > cx ? "start" : "end"}
+        dominantBaseline="central"
+      >
+        {name} {(percent * 100).toFixed(1)}%
+      </text>
+    )
+  }
 
   if (loading) {
     return (
@@ -400,8 +433,8 @@ export default function NacAnalysisView() {
                     outerRadius={100}
                     paddingAngle={2}
                     dataKey="value"
-                    label={pctLabel}
-                    fontSize={12}
+                    label={renderPieLabel}
+                    labelLine={false}
                   >
                     {pieData.map((_, i) => (
                       <Cell key={i} fill={COLORS[i % COLORS.length]} />
@@ -410,6 +443,25 @@ export default function NacAnalysisView() {
                   <Tooltip {...tooltipStyle} />
                 </PieChart>
               </ResponsiveContainer>
+              {/* Legend for small slices */}
+              {pieData.some((d) => d.value / totalNacs < MIN_LABEL_PCT) && (
+                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-neutral-800 pt-3">
+                  {pieData
+                    .filter((d) => d.value / totalNacs < MIN_LABEL_PCT)
+                    .map((d, i) => {
+                      const globalIdx = pieData.findIndex((p) => p.name === d.name)
+                      return (
+                        <span key={d.name} className="flex items-center gap-1.5 text-xs text-neutral-500">
+                          <span
+                            className="inline-block h-2 w-2 rounded-full"
+                            style={{ backgroundColor: COLORS[globalIdx % COLORS.length] }}
+                          />
+                          {d.name} {((d.value / totalNacs) * 100).toFixed(1)}%
+                        </span>
+                      )
+                    })}
+                </div>
+              )}
             </Card>
 
             {/* Bar chart: volume */}
@@ -543,8 +595,8 @@ export default function NacAnalysisView() {
                   outerRadius={100}
                   paddingAngle={2}
                   dataKey="value"
-                  label={pctLabel}
-                  fontSize={12}
+                  label={renderPieLabel}
+                  labelLine={false}
                 >
                   {productMixData.map((_, i) => (
                     <Cell key={i} fill={COLORS[i % COLORS.length]} />
@@ -553,6 +605,27 @@ export default function NacAnalysisView() {
                 <Tooltip {...tooltipStyle} />
               </PieChart>
             </ResponsiveContainer>
+            {(() => {
+              const prodTotal = productMixData.reduce((s, d) => s + d.value, 0)
+              const small = productMixData.filter((d) => d.value / prodTotal < MIN_LABEL_PCT)
+              if (small.length === 0) return null
+              return (
+                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-neutral-800 pt-3">
+                  {small.map((d) => {
+                    const idx = productMixData.findIndex((p) => p.name === d.name)
+                    return (
+                      <span key={d.name} className="flex items-center gap-1.5 text-xs text-neutral-500">
+                        <span
+                          className="inline-block h-2 w-2 rounded-full"
+                          style={{ backgroundColor: COLORS[idx % COLORS.length] }}
+                        />
+                        {d.name} {((d.value / prodTotal) * 100).toFixed(1)}%
+                      </span>
+                    )
+                  })}
+                </div>
+              )
+            })()}
           </Card>
         </>
       )}
