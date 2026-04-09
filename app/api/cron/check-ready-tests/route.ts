@@ -18,14 +18,16 @@ export async function POST(request: NextRequest) {
   // Verify cron secret
   const authHeader = request.headers.get("authorization")
   const cronSecret = process.env.CRON_SECRET
-  console.log("[check-ready-tests] auth debug:", {
-    hasAuthHeader: !!authHeader,
-    authHeaderPrefix: authHeader?.substring(0, 10),
-    hasCronSecret: !!cronSecret,
-    cronSecretLength: cronSecret?.length,
-  })
   if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    return NextResponse.json({
+      error: "Unauthorized",
+      debug: {
+        hasCronSecret: !!cronSecret,
+        cronSecretLength: cronSecret?.length ?? 0,
+        hasAuthHeader: !!authHeader,
+        authHeaderLength: authHeader?.length ?? 0,
+      },
+    }, { status: 401 })
   }
 
   const db = createServiceClient()
