@@ -16,7 +16,7 @@ import type { DatePreset } from "@/lib/utils/dates"
 import type { ComparisonType, Client } from "@/lib/utils/types"
 import type { Annotation } from "@/components/ui/annotations-bar"
 import type { NamingConfig } from "@/lib/utils/ad-name-parser"
-import type { MetaDemographicsRow, MetaPlacementsRow, MetaDailyRow, GoogleAdsDailyRow } from "@/lib/utils/types"
+import type { MetaDemographicsRow, MetaPlacementsRow, MetaDailyRow, GoogleAdsDailyRow, ShopifyDailyOrdersRow, ShopifyAttributionRow } from "@/lib/utils/types"
 
 type Tab = "performance" | "creative" | "pacing" | "reach"
 
@@ -48,6 +48,11 @@ type Props = {
   annotations: Annotation[]
   namingConfig?: NamingConfig
   createdDates: Record<string, string>
+  /* Shopify */
+  shopifyOrders?: ShopifyDailyOrdersRow[]
+  shopifyAttribution?: ShopifyAttributionRow[]
+  shopifyCompOrders?: ShopifyDailyOrdersRow[]
+  shopifyCompAttribution?: ShopifyAttributionRow[]
   /* Creative */
   creativeRows: Partial<MetaDailyRow>[]
   thumbnails: Record<string, string>
@@ -175,6 +180,10 @@ export default function ClientDashboard(props: Props) {
             annotations={props.annotations}
             namingConfig={props.namingConfig}
             createdDates={props.createdDates}
+            shopifyOrders={props.shopifyOrders}
+            shopifyAttribution={props.shopifyAttribution}
+            shopifyCompOrders={props.shopifyCompOrders}
+            shopifyCompAttribution={props.shopifyCompAttribution}
             readOnly
           />
         )}

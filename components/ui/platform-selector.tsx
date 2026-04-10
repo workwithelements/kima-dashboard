@@ -8,6 +8,7 @@ const PLATFORM_LABELS: Record<PlatformView, string> = {
   all: "All Platforms",
   meta: "Meta",
   google_ads: "Google Ads",
+  shopify: "Shopify",
 }
 
 export default function PlatformSelector({

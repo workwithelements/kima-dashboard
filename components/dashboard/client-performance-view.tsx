@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
-import type { MetaDailyRow, GoogleAdsDailyRow, MetaDemographicsRow, MetaPlacementsRow, Client, ComparisonType, HierarchyLevel, AggregatedMetrics } from "@/lib/utils/types"
+import type { MetaDailyRow, GoogleAdsDailyRow, MetaDemographicsRow, MetaPlacementsRow, Client, ComparisonType, HierarchyLevel, AggregatedMetrics, ShopifyDailyOrdersRow, ShopifyAttributionRow } from "@/lib/utils/types"
 import { getClientPlatforms } from "@/lib/utils/types"
 import {
   aggregateMetrics,
@@ -13,6 +13,9 @@ import {
   dailyFunnelSeries,
   groupByLevel,
   groupGoogleAdsByLevel,
+  aggregateShopifyMetrics,
+  calculateCM3,
+  calculateMetaAttribution,
 } from "@/lib/utils/aggregate"
 import { fmtCurrency, fmtNumber, fmtPercent, fmtDelta } from "@/lib/utils/format"
 import { calculateFunnelStep, calculateNetNewReach, FUNNEL_STEP_DEFS, type FunnelStepKey } from "@/lib/utils/funnel-steps"
@@ -102,8 +105,16 @@ type Props = {
   placements?: MetaPlacementsRow[]
   /** Annotations / notes for this client in date range */
   annotations?: Annotation[]
-  /** Contribution margin percentage (0-100) for CM3 calculation */
+  /** Contribution margin percentage (0-100) for CM3 calculation (fallback when no Shopify) */
   contributionMarginPct?: number | null
+  /** Shopify daily order data */
+  shopifyOrders?: ShopifyDailyOrdersRow[]
+  /** Shopify UTM attribution data */
+  shopifyAttribution?: ShopifyAttributionRow[]
+  /** Shopify comparison period orders */
+  shopifyCompOrders?: ShopifyDailyOrdersRow[]
+  /** Shopify comparison period attribution */
+  shopifyCompAttribution?: ShopifyAttributionRow[]
   /** Hide configure button (for public view) */
   readOnly?: boolean
   /** Client-specific naming convention config */
@@ -154,6 +165,10 @@ export default function ClientPerformanceView({
   demographics = [],
   placements = [],
   contributionMarginPct = null,
+  shopifyOrders = [],
+  shopifyAttribution = [],
+  shopifyCompOrders = [],
+  shopifyCompAttribution = [],
   readOnly = false,
   namingConfig,
   createdDates = {},
@@ -562,6 +577,67 @@ export default function ClientPerformanceView({
   const delta = (current: number, prev: number) =>
     hasComp ? fmtDelta(current, prev) : null
 
+  // Shopify aggregated metrics
+  const hasShopify = shopifyOrders.length > 0
+  const shopifyMetrics = useMemo(() => aggregateShopifyMetrics(shopifyOrders), [shopifyOrders])
+  const shopifyCompMetrics = useMemo(() => aggregateShopifyMetrics(shopifyCompOrders), [shopifyCompOrders])
+  const hasShopifyComp = hasComp && shopifyCompOrders.length > 0
+
+  // Shopify AOV
+  const shopifyAov = shopifyMetrics.orders > 0 ? shopifyMetrics.netRevenue / shopifyMetrics.orders : 0
+  const shopifyCompAov = shopifyCompMetrics.orders > 0 ? shopifyCompMetrics.netRevenue / shopifyCompMetrics.orders : 0
+
+  // CM3 from real Shopify data (total ad spend across all platforms)
+  const totalAdSpend = metrics.spend
+  const compTotalAdSpend = compMetrics.spend
+  const shopifyCm3 = useMemo(
+    () => hasShopify ? calculateCM3(shopifyMetrics, totalAdSpend) : null,
+    [hasShopify, shopifyMetrics, totalAdSpend]
+  )
+  const shopifyCompCm3 = useMemo(
+    () => hasShopifyComp ? calculateCM3(shopifyCompMetrics, compTotalAdSpend) : null,
+    [hasShopifyComp, shopifyCompMetrics, compTotalAdSpend]
+  )
+
+  // Meta attribution comparison
+  const hasMetaAndShopify = hasShopify && !!client.meta_account_id && shopifyAttribution.length > 0
+  const metaAttribution = useMemo(
+    () => hasMetaAndShopify
+      ? calculateMetaAttribution(
+          { purchases: metrics.purchases, revenue: metrics.revenue },
+          shopifyAttribution
+        )
+      : null,
+    [hasMetaAndShopify, metrics.purchases, metrics.revenue, shopifyAttribution]
+  )
+  const compMetaAttribution = useMemo(
+    () => hasShopifyComp && hasMetaAndShopify
+      ? calculateMetaAttribution(
+          { purchases: compMetrics.purchases, revenue: compMetrics.revenue },
+          shopifyCompAttribution
+        )
+      : null,
+    [hasShopifyComp, hasMetaAndShopify, compMetrics.purchases, compMetrics.revenue, shopifyCompAttribution]
+  )
+
+  // Incremental Meta revenue metrics
+  const metaSpend = useMemo(() => {
+    return rows.reduce((sum, r) => sum + (r.spend || 0), 0)
+  }, [rows])
+  const shopifyMetaRevenue = metaAttribution?.shopifyAttributedRevenue ?? 0
+  const metaBlendedRoas = metaSpend > 0 ? shopifyMetaRevenue / metaSpend : 0
+  const blendedRoas = totalAdSpend > 0 ? shopifyMetrics.netRevenue / totalAdSpend : 0
+  const metaRevenueSharePct = shopifyMetrics.netRevenue > 0 ? (shopifyMetaRevenue / shopifyMetrics.netRevenue) * 100 : 0
+
+  // Comparison incremental metrics
+  const compMetaSpend = useMemo(() => {
+    return comparisonRows.reduce((sum, r) => sum + (r.spend || 0), 0)
+  }, [comparisonRows])
+  const compShopifyMetaRevenue = compMetaAttribution?.shopifyAttributedRevenue ?? 0
+  const compMetaBlendedRoas = compMetaSpend > 0 ? compShopifyMetaRevenue / compMetaSpend : 0
+  const compBlendedRoas = compTotalAdSpend > 0 ? shopifyCompMetrics.netRevenue / compTotalAdSpend : 0
+  const compMetaRevenueSharePct = shopifyCompMetrics.netRevenue > 0 ? (compShopifyMetaRevenue / shopifyCompMetrics.netRevenue) * 100 : 0
+
   // Navigation helpers
   function updateSearchParams(updates: Record<string, string>) {
     const params = new URLSearchParams()
@@ -891,8 +967,97 @@ export default function ClientPerformanceView({
         </div>
       )}
 
-      {/* CM3 — Contribution Margin 3 (shown when CM% is set and revenue > 0) */}
-      {cmPct != null && metrics.revenue > 0 && (() => {
+      {/* Shopify Overview — shown when Shopify data exists */}
+      {hasShopify && (
+        <>
+          <h2 className="text-sm font-medium text-neutral-400">Shopify Store</h2>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+            <MetricCard
+              label="Shopify Orders"
+              value={fmtNumber(shopifyMetrics.orders)}
+              delta={hasShopifyComp ? fmtDelta(shopifyMetrics.orders, shopifyCompMetrics.orders) : undefined}
+            />
+            <MetricCard
+              label="Net Revenue"
+              value={fmtCurrency(shopifyMetrics.netRevenue, currency)}
+              subValue="After discounts & refunds"
+              delta={hasShopifyComp ? fmtDelta(shopifyMetrics.netRevenue, shopifyCompMetrics.netRevenue) : undefined}
+            />
+            <MetricCard
+              label="Shopify AOV"
+              value={fmtCurrency(shopifyAov, currency)}
+              delta={hasShopifyComp ? fmtDelta(shopifyAov, shopifyCompAov) : undefined}
+            />
+          </div>
+        </>
+      )}
+
+      {/* Meta: Platform vs Shopify Attribution — shown when both Meta and Shopify data exist */}
+      {metaAttribution && (
+        <>
+          <h2 className="text-sm font-medium text-neutral-400">Meta: Platform vs Shopify Attribution</h2>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <MetricCard
+              label="Meta Reported Revenue"
+              value={fmtCurrency(metaAttribution.metaReportedRevenue, currency)}
+              subValue="Meta platform data"
+              delta={compMetaAttribution ? fmtDelta(metaAttribution.metaReportedRevenue, compMetaAttribution.metaReportedRevenue) : undefined}
+            />
+            <MetricCard
+              label="Shopify Attributed to Meta"
+              value={fmtCurrency(metaAttribution.shopifyAttributedRevenue, currency)}
+              subValue="Shopify UTM data"
+              delta={compMetaAttribution ? fmtDelta(metaAttribution.shopifyAttributedRevenue, compMetaAttribution.shopifyAttributedRevenue) : undefined}
+            />
+            <MetricCard
+              label="Revenue Gap"
+              value={fmtCurrency(metaAttribution.revenueDiscrepancy, currency)}
+              subValue={`${metaAttribution.revenueDiscrepancyPct >= 0 ? "+" : ""}${metaAttribution.revenueDiscrepancyPct.toFixed(1)}% ${metaAttribution.revenueDiscrepancyPct >= 0 ? "over" : "under"}-reported`}
+            />
+            <MetricCard
+              label="Order Gap"
+              value={fmtNumber(metaAttribution.metaReportedPurchases - metaAttribution.shopifyAttributedOrders)}
+              subValue={`Meta: ${fmtNumber(metaAttribution.metaReportedPurchases)} · Shopify: ${fmtNumber(metaAttribution.shopifyAttributedOrders)}`}
+            />
+          </div>
+        </>
+      )}
+
+      {/* CM3 — Contribution Margin 3 */}
+      {/* Uses real Shopify COGS/shipping when available, falls back to cmPct when not */}
+      {shopifyCm3 ? (
+        <>
+          <h2 className="text-sm font-medium text-neutral-400">Contribution Margin 3</h2>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <MetricCard
+              label="Net Revenue"
+              value={fmtCurrency(shopifyCm3.netRevenue, currency)}
+              subValue="Shopify store revenue"
+              delta={shopifyCompCm3 ? fmtDelta(shopifyCm3.netRevenue, shopifyCompCm3.netRevenue) : undefined}
+            />
+            <MetricCard
+              label="Gross Profit"
+              value={fmtCurrency(shopifyCm3.grossProfit, currency)}
+              subValue="After COGS & shipping"
+              delta={shopifyCompCm3 ? fmtDelta(shopifyCm3.grossProfit, shopifyCompCm3.grossProfit) : undefined}
+            />
+            <MetricCard
+              label="CM3"
+              value={fmtCurrency(shopifyCm3.cm3, currency)}
+              subValue={`CM3 margin: ${shopifyCm3.cm3Pct.toFixed(1)}%`}
+              delta={shopifyCompCm3 ? fmtDelta(shopifyCm3.cm3, shopifyCompCm3.cm3) : undefined}
+            />
+            <MetricCard
+              label="CM3 ROAS"
+              value={shopifyCm3.totalAdSpend > 0 ? (shopifyCm3.cm3 / shopifyCm3.totalAdSpend).toFixed(2) + "x" : "—"}
+              subValue="Profit per ad spend"
+              delta={shopifyCompCm3 && shopifyCompCm3.totalAdSpend > 0
+                ? fmtDelta(shopifyCm3.cm3 / shopifyCm3.totalAdSpend, shopifyCompCm3.cm3 / shopifyCompCm3.totalAdSpend)
+                : undefined}
+            />
+          </div>
+        </>
+      ) : cmPct != null && metrics.revenue > 0 ? (() => {
         const cm3 = (metrics.revenue * cmPct / 100) - metrics.spend
         const cm3Roas = metrics.spend > 0 ? cm3 / metrics.spend : 0
         const compCm3 = hasComp && compMetrics.revenue > 0
@@ -917,7 +1082,34 @@ export default function ClientPerformanceView({
             />
           </div>
         )
-      })()}
+      })() : null}
+
+      {/* Meta Incremental Revenue — shown when both Meta and Shopify attribution exist */}
+      {metaAttribution && hasShopify && (
+        <>
+          <h2 className="text-sm font-medium text-neutral-400">Meta Incremental Revenue</h2>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+            <MetricCard
+              label="Blended ROAS"
+              value={blendedRoas > 0 ? blendedRoas.toFixed(2) + "x" : "—"}
+              subValue="Shopify revenue / all ad spend"
+              delta={hasShopifyComp ? fmtDelta(blendedRoas, compBlendedRoas) : undefined}
+            />
+            <MetricCard
+              label="Meta Blended ROAS"
+              value={metaBlendedRoas > 0 ? metaBlendedRoas.toFixed(2) + "x" : "—"}
+              subValue={`vs Meta reported: ${derived.roas.toFixed(2)}x`}
+              delta={hasShopifyComp ? fmtDelta(metaBlendedRoas, compMetaBlendedRoas) : undefined}
+            />
+            <MetricCard
+              label="Meta Revenue Share"
+              value={fmtPercent(metaRevenueSharePct)}
+              subValue={`${fmtCurrency(shopifyMetaRevenue, currency)} of ${fmtCurrency(shopifyMetrics.netRevenue, currency)}`}
+              delta={hasShopifyComp ? fmtDelta(metaRevenueSharePct, compMetaRevenueSharePct) : undefined}
+            />
+          </div>
+        </>
+      )}
 
       {/* Configure button when no steps configured (Meta only) */}
       {isMeta && funnelSteps.length === 0 && !readOnly && (

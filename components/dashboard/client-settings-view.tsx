@@ -78,14 +78,22 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
   const [testConfigSaving, setTestConfigSaving] = useState(false)
   const [testConfigSaved, setTestConfigSaved] = useState(false)
 
+  /* ── Shopify config state ── */
+  const [shopifyEnabled, setShopifyEnabled] = useState(false)
+  const [shopifyDomain, setShopifyDomain] = useState("")
+  const [shopifyLoading, setShopifyLoading] = useState(true)
+  const [shopifySaving, setShopifySaving] = useState(false)
+  const [shopifySaved, setShopifySaved] = useState(false)
+
   /* ── Load existing config ── */
   useEffect(() => {
     async function load() {
       try {
-        const [namingRes, alertsRes, testConfigRes] = await Promise.all([
+        const [namingRes, alertsRes, testConfigRes, shopifyRes] = await Promise.all([
           fetch(`/api/naming-config/${clientId}`),
           fetch(`/api/alert-config/${clientId}`),
           fetch(`/api/creative-test-config/${clientId}`),
+          fetch(`/api/clients/${clientId}/shopify`),
         ])
         if (namingRes.ok) {
           const data = await namingRes.json()
@@ -112,12 +120,20 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
             })
           }
         }
+        if (shopifyRes.ok) {
+          const data = await shopifyRes.json()
+          if (data) {
+            setShopifyEnabled(data.enabled ?? false)
+            setShopifyDomain(data.store_domain ?? "")
+          }
+        }
       } catch {
         /* ignore */
       }
       setLoading(false)
       setAlertsLoading(false)
       setTestConfigLoading(false)
+      setShopifyLoading(false)
     }
     load()
   }, [clientId])
@@ -319,6 +335,23 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
       }
     } catch { /* ignore */ }
     setTestConfigSaving(false)
+  }
+
+  /* ── Save Shopify config ── */
+  async function handleSaveShopify() {
+    setShopifySaving(true)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/shopify`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: shopifyEnabled, store_domain: shopifyDomain }),
+      })
+      if (res.ok) {
+        setShopifySaved(true)
+        setTimeout(() => setShopifySaved(false), 3000)
+      }
+    } catch { /* ignore */ }
+    setShopifySaving(false)
   }
 
   /* ── Render ── */
@@ -935,6 +968,95 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
                 className="rounded-lg bg-brand-lime px-5 py-2 text-xs font-semibold text-black transition hover:bg-brand-lime/90 disabled:opacity-50"
               >
                 {testConfigSaving ? "Saving..." : "Save Config"}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ── Shopify Integration Section ── */}
+      <section className="rounded-xl border border-neutral-800 bg-neutral-900/50">
+        <div className="border-b border-neutral-800 px-5 py-4">
+          <h2 className="text-sm font-semibold text-neutral-100">
+            Shopify Integration
+          </h2>
+          <p className="mt-1 text-[11px] text-neutral-500">
+            Connect a Shopify store to show real revenue, CM3, and attribution comparison data
+            on the Performance tab.
+          </p>
+        </div>
+
+        {shopifyLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-lime border-t-transparent" />
+          </div>
+        ) : (
+          <div className="space-y-4 p-5">
+            {/* Enable toggle */}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-neutral-300">Enable Shopify data</p>
+                <p className="text-[11px] text-neutral-500">Shows Shopify metrics on Performance tab when synced</p>
+              </div>
+              <button
+                onClick={() => setShopifyEnabled((v) => !v)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
+                  shopifyEnabled ? "bg-brand-lime" : "bg-neutral-700"
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                    shopifyEnabled ? "translate-x-[18px]" : "translate-x-[3px]"
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Store domain (shown when enabled) */}
+            {shopifyEnabled && (
+              <div>
+                <label className="mb-1 block text-[11px] text-neutral-500">
+                  Store domain
+                </label>
+                <input
+                  type="text"
+                  value={shopifyDomain}
+                  onChange={(e) => setShopifyDomain(e.target.value)}
+                  placeholder="your-store.myshopify.com"
+                  className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-brand-lime"
+                />
+                <p className="mt-1 text-[10px] text-neutral-600">
+                  Your Shopify store domain (e.g. my-store.myshopify.com)
+                </p>
+              </div>
+            )}
+
+            {/* Sync instructions (shown when enabled) */}
+            {shopifyEnabled && (
+              <div className="rounded-lg border border-neutral-800 bg-neutral-950/50 p-3">
+                <p className="text-[11px] font-medium text-neutral-400">Sync data</p>
+                <p className="mt-1 text-[10px] text-neutral-500">
+                  After saving, run the sync script in your terminal to pull Shopify order data:
+                </p>
+                <code className="mt-2 block rounded bg-neutral-900 px-2 py-1.5 text-[10px] text-neutral-300">
+                  npm run sync:shopify -- --client-id {clientId}
+                </code>
+              </div>
+            )}
+
+            {/* Save */}
+            <div className="flex items-center justify-end gap-3 border-t border-neutral-800 pt-4">
+              {shopifySaved && (
+                <span className="text-xs font-medium text-green-400">
+                  Saved
+                </span>
+              )}
+              <button
+                onClick={handleSaveShopify}
+                disabled={shopifySaving || (shopifyEnabled && !shopifyDomain.trim())}
+                className="rounded-lg bg-brand-lime px-5 py-2 text-xs font-semibold text-black transition hover:bg-brand-lime/90 disabled:opacity-50"
+              >
+                {shopifySaving ? "Saving..." : "Save"}
               </button>
             </div>
           </div>

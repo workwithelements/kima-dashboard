@@ -3,7 +3,17 @@
  * Used across all dashboard pages.
  */
 
-import type { MetaDailyRow, GoogleAdsDailyRow, AggregatedMetrics, HierarchyLevel } from "./types"
+import type {
+  MetaDailyRow,
+  GoogleAdsDailyRow,
+  AggregatedMetrics,
+  HierarchyLevel,
+  ShopifyDailyOrdersRow,
+  ShopifyAttributionRow,
+  ShopifyAggregatedMetrics,
+  ContributionMargin3,
+  MetaAttributionComparison,
+} from "./types"
 
 /** Sum all metric rows into a single aggregate */
 export function aggregateMetrics(rows: Partial<MetaDailyRow>[]): AggregatedMetrics {
@@ -219,4 +229,111 @@ export function groupByLevel(
       metrics: aggregateMetrics(groupRows),
     }))
     .sort((a, b) => b.metrics.spend - a.metrics.spend) // Default sort by spend desc
+}
+
+/** Aggregate Shopify daily order rows into totals */
+export function aggregateShopifyMetrics(rows: Partial<ShopifyDailyOrdersRow>[]): ShopifyAggregatedMetrics {
+  return rows.reduce<ShopifyAggregatedMetrics>(
+    (acc, row) => ({
+      orders: acc.orders + (row.orders || 0),
+      grossRevenue: acc.grossRevenue + (row.gross_revenue || 0),
+      discounts: acc.discounts + (row.discounts || 0),
+      refunds: acc.refunds + (row.refunds || 0),
+      netRevenue: acc.netRevenue + (row.net_revenue || 0),
+      cogs: acc.cogs + (row.cogs || 0),
+      shippingCosts: acc.shippingCosts + (row.shipping_costs || 0),
+    }),
+    { orders: 0, grossRevenue: 0, discounts: 0, refunds: 0, netRevenue: 0, cogs: 0, shippingCosts: 0 }
+  )
+}
+
+/** Calculate Contribution Margin 3 from Shopify metrics and total ad spend */
+export function calculateCM3(shopify: ShopifyAggregatedMetrics, totalAdSpend: number): ContributionMargin3 {
+  const grossProfit = shopify.netRevenue - shopify.cogs - shopify.shippingCosts
+  const cm3 = grossProfit - totalAdSpend
+  const cm3Pct = shopify.netRevenue > 0 ? (cm3 / shopify.netRevenue) * 100 : 0
+
+  return {
+    netRevenue: shopify.netRevenue,
+    cogs: shopify.cogs,
+    shippingCosts: shopify.shippingCosts,
+    grossProfit,
+    totalAdSpend,
+    cm3,
+    cm3Pct,
+  }
+}
+
+/**
+ * Patterns used to match Shopify UTM sources to Meta/Facebook traffic.
+ * Matches common UTM source values from Meta campaigns.
+ */
+const META_SOURCE_PATTERNS = ["facebook", "fb", "meta", "ig", "instagram"]
+
+/** Compare Meta platform-reported performance vs Shopify-attributed Meta performance */
+export function calculateMetaAttribution(
+  metaMetrics: { purchases: number; revenue: number },
+  attributionRows: Partial<ShopifyAttributionRow>[]
+): MetaAttributionComparison {
+  // Filter attribution rows for Meta-sourced traffic
+  let shopifyAttributedRevenue = 0
+  let shopifyAttributedOrders = 0
+
+  for (const row of attributionRows) {
+    const source = (row.source || "").toLowerCase()
+    if (META_SOURCE_PATTERNS.some((p) => source.includes(p))) {
+      shopifyAttributedRevenue += row.revenue || 0
+      shopifyAttributedOrders += row.orders || 0
+    }
+  }
+
+  const revenueDiscrepancy = metaMetrics.revenue - shopifyAttributedRevenue
+  const revenueDiscrepancyPct =
+    shopifyAttributedRevenue > 0
+      ? ((metaMetrics.revenue - shopifyAttributedRevenue) / shopifyAttributedRevenue) * 100
+      : 0
+
+  return {
+    metaReportedRevenue: metaMetrics.revenue,
+    metaReportedPurchases: metaMetrics.purchases,
+    shopifyAttributedRevenue,
+    shopifyAttributedOrders,
+    revenueDiscrepancy,
+    revenueDiscrepancyPct,
+  }
+}
+
+/** Group Shopify daily orders by date for time-series charts */
+export function dailyShopifySeries(
+  rows: Partial<ShopifyDailyOrdersRow>[],
+  fromDate?: string,
+  toDate?: string
+): { date: string; orders: number; netRevenue: number }[] {
+  const byDate: Record<string, { orders: number; netRevenue: number }> = {}
+
+  for (const row of rows) {
+    if (!row.date) continue
+    if (!byDate[row.date]) byDate[row.date] = { orders: 0, netRevenue: 0 }
+    byDate[row.date].orders += row.orders || 0
+    byDate[row.date].netRevenue += row.net_revenue || 0
+  }
+
+  // Fill in missing days with zeroes
+  if (fromDate && toDate) {
+    const cursor = new Date(fromDate + "T00:00:00")
+    const end = new Date(toDate + "T00:00:00")
+    while (cursor <= end) {
+      const key = cursor.toISOString().split("T")[0]
+      if (!(key in byDate)) byDate[key] = { orders: 0, netRevenue: 0 }
+      cursor.setDate(cursor.getDate() + 1)
+    }
+  }
+
+  return Object.entries(byDate)
+    .map(([date, vals]) => ({
+      date,
+      orders: vals.orders,
+      netRevenue: Math.round(vals.netRevenue * 100) / 100,
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date))
 }

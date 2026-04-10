@@ -58,6 +58,7 @@ export type Client = {
   view_password_hash?: string | null
   meta_account_id?: string | null
   google_ads_customer_id?: string | null
+  shopify_store_domain?: string | null
   monthly_budget?: number | null
   currency_code?: string | null
 }
@@ -142,7 +143,7 @@ export const BASE_METRIC_FIELDS = [
 export type BaseMetricField = (typeof BASE_METRIC_FIELDS)[number]["value"]
 
 /** Ad platform identifier */
-export type AdPlatform = "meta" | "google_ads"
+export type AdPlatform = "meta" | "google_ads" | "shopify"
 
 /** A row from google_ads_daily_performance */
 export type GoogleAdsDailyRow = {
@@ -171,6 +172,7 @@ export function getClientPlatforms(client: Client): AdPlatform[] {
   const platforms: AdPlatform[] = []
   if (client.meta_account_id) platforms.push("meta")
   if (client.google_ads_customer_id) platforms.push("google_ads")
+  if (client.shopify_store_domain) platforms.push("shopify")
   return platforms
 }
 
@@ -215,4 +217,59 @@ export type MetaPlacementsRow = {
   landing_page_views: number
   purchases: number
   purchase_value: number
+}
+
+/** A row from shopify_daily_orders */
+export type ShopifyDailyOrdersRow = {
+  client_id: string
+  date: string
+  orders: number
+  gross_revenue: number
+  discounts: number
+  refunds: number
+  net_revenue: number
+  cogs: number
+  shipping_costs: number
+}
+
+/** A row from shopify_daily_attribution */
+export type ShopifyAttributionRow = {
+  client_id: string
+  date: string
+  source: string
+  medium: string
+  orders: number
+  revenue: number
+}
+
+/** Aggregated Shopify store metrics */
+export type ShopifyAggregatedMetrics = {
+  orders: number
+  grossRevenue: number
+  discounts: number
+  refunds: number
+  netRevenue: number
+  cogs: number
+  shippingCosts: number
+}
+
+/** Contribution Margin 3 breakdown */
+export type ContributionMargin3 = {
+  netRevenue: number
+  cogs: number
+  shippingCosts: number
+  grossProfit: number       // netRevenue - cogs - shippingCosts
+  totalAdSpend: number      // Meta + Google Ads spend combined
+  cm3: number               // grossProfit - totalAdSpend
+  cm3Pct: number            // (cm3 / netRevenue) * 100
+}
+
+/** Meta attribution comparison: platform-reported vs Shopify-attributed */
+export type MetaAttributionComparison = {
+  metaReportedRevenue: number
+  metaReportedPurchases: number
+  shopifyAttributedRevenue: number
+  shopifyAttributedOrders: number
+  revenueDiscrepancy: number      // metaReported - shopifyAttributed
+  revenueDiscrepancyPct: number   // ((metaReported - shopifyAttributed) / shopifyAttributed) * 100
 }

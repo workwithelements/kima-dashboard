@@ -13,6 +13,7 @@ import {
   fetchConsolidatedSpend,
   consolidateDailySpend,
 } from "@/lib/data/fetch-client-data"
+import { fetchShopifyData } from "@/lib/data/fetch-shopify-data"
 import { getPresetRange, getComparisonRange, daysAgo, monthStart, today } from "@/lib/utils/dates"
 import type { DatePreset } from "@/lib/utils/dates"
 import type { ComparisonType } from "@/lib/utils/types"
@@ -36,7 +37,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
   // Look up client by slug
   const { data: client } = await supabase
     .from("clients")
-    .select("id, name, slug, meta_account_id, currency_code, monthly_budget, active, google_ads_customer_id")
+    .select("id, name, slug, meta_account_id, currency_code, monthly_budget, active, google_ads_customer_id, shopify_store_domain")
     .eq("slug", slug)
     .single()
 
@@ -94,6 +95,8 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     annotationsRes,
     currentMonthSpend,
     historicalSpend,
+    shopifyData,
+    shopifyCompData,
   ] = await Promise.all([
     fetchClientData(client.id, range.from, range.to, compRange?.from, compRange?.to),
     fetchCreativeData(client.id, range.from, range.to),
@@ -115,6 +118,10 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
       .order("date"),
     fetchConsolidatedSpend(client.id, monthStart(), today()),
     fetchConsolidatedSpend(client.id, daysAgo(90), today()),
+    fetchShopifyData(client.id, range.from, range.to),
+    compRange
+      ? fetchShopifyData(client.id, compRange.from, compRange.to)
+      : Promise.resolve({ orders: [], attribution: [] }),
   ])
 
   const funnelSteps = (scorecardConfigRes.data?.funnel_steps as string[]) || null
@@ -162,6 +169,10 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
       annotations={annotations}
       namingConfig={perfData?.namingConfig}
       createdDates={perfData?.createdDates || {}}
+      shopifyOrders={shopifyData.orders}
+      shopifyAttribution={shopifyData.attribution}
+      shopifyCompOrders={shopifyCompData.orders}
+      shopifyCompAttribution={shopifyCompData.attribution}
       /* Creative tab */
       creativeRows={creativeData?.rows || []}
       thumbnails={creativeData?.thumbnails || {}}
