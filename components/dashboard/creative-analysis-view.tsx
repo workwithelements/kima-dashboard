@@ -335,6 +335,23 @@ export default function CreativeAnalysisView({
     return ids
   }, [createdDates])
 
+  // Active ad IDs — ads with spend on the last date in the range
+  const activeAdIds = useMemo(() => {
+    const ids = new Set<string>()
+    // Find the latest date in the data
+    let maxDate = ""
+    for (const r of rows) {
+      if (r.date && r.date > maxDate) maxDate = r.date
+    }
+    if (!maxDate) return ids
+    for (const r of rows) {
+      if (r.date === maxDate && r.ad_id && (r.spend || 0) > 0) {
+        ids.add(r.ad_id)
+      }
+    }
+    return ids
+  }, [rows])
+
   // Counts by type
   const counts = useMemo(
     () => countByClassification(enrichedAds),
@@ -882,6 +899,7 @@ export default function CreativeAnalysisView({
                     onAdClick={setDetailAd}
                     selectedMetrics={tableMetrics}
                     newAdIds={newAdIds}
+                    activeAdIds={activeAdIds}
                   />
                 )}
               </div>
@@ -922,6 +940,7 @@ export default function CreativeAnalysisView({
             onAdClick={setDetailAd}
             selectedMetrics={tableMetrics}
             newAdIds={newAdIds}
+            activeAdIds={activeAdIds}
           />
         )}
       </div>
@@ -993,6 +1012,7 @@ function CreativeTableInline({
   onAdClick,
   selectedMetrics = DEFAULT_TABLE_METRICS,
   newAdIds,
+  activeAdIds,
 }: {
   ads: ClassifiedAd[]
   tags: Tag[]
@@ -1012,6 +1032,7 @@ function CreativeTableInline({
   onAdClick?: (ad: ClassifiedAd) => void
   selectedMetrics?: CreativeMetricKey[]
   newAdIds?: Set<string>
+  activeAdIds?: Set<string>
 }) {
   // Fixed columns: 4 (Thumbnail, Name, Classification, Tags) + dynamic metrics
   const fixedColCount = 4 + selectedMetrics.length
@@ -1076,6 +1097,22 @@ function CreativeTableInline({
                   </td>
                   <td className="max-w-[200px] truncate py-2.5 pr-3" title={ad.adName}>
                     <div className="flex items-center gap-1.5">
+                      <span
+                        className={`inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full ${
+                          activeAdIds?.has(ad.adId)
+                            ? "bg-green-400"
+                            : ad.impressions > 0
+                              ? "bg-neutral-600"
+                              : "bg-red-400/60"
+                        }`}
+                        title={
+                          activeAdIds?.has(ad.adId)
+                            ? "Active — spend today"
+                            : ad.impressions > 0
+                              ? "Paused"
+                              : "No delivery"
+                        }
+                      />
                       <button
                         onClick={() => onAdClick?.(ad)}
                         className="text-neutral-200 hover:text-brand-lime transition truncate text-left"
