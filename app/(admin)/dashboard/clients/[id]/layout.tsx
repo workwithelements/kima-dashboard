@@ -32,9 +32,18 @@ export default async function ClientLayout({
 
   if (!client) notFound()
 
+  // Check if creative tests are enabled for this client
+  const { data: testConfig } = await supabase
+    .from("creative_test_config")
+    .select("enabled")
+    .eq("client_id", params.id)
+    .maybeSingle()
+
+  const creativeTestsEnabled = testConfig?.enabled ?? false
+
   return (
     <div className="space-y-6">
-      <ClientHeader clientId={client.id} clientName={client.name} slug={client.slug} />
+      <ClientHeader clientId={client.id} clientName={client.name} slug={client.slug} creativeTestsEnabled={creativeTestsEnabled} />
       {children}
     </div>
   )

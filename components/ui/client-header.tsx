@@ -9,12 +9,13 @@ type Props = {
   clientId: string
   clientName: string
   slug?: string
+  creativeTestsEnabled?: boolean
 }
 
 const TABS = [
   { label: "Performance", href: "" },
   { label: "Creative Analysis", href: "/creative" },
-  { label: "Creative Tests", href: "/tests" },
+  { label: "Creative Tests", href: "/tests", requiresTestConfig: true },
   { label: "Budget & Pacing", href: "/pacing" },
   { label: "Reach Analysis", href: "/reach" },
   { label: "Retention Lift Test", href: "/retention-lift-test", clientOnly: "TouchNote" },
@@ -22,7 +23,7 @@ const TABS = [
   { label: "Settings", href: "/settings" },
 ]
 
-export default function ClientHeader({ clientId, clientName, slug }: Props) {
+export default function ClientHeader({ clientId, clientName, slug, creativeTestsEnabled }: Props) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const basePath = `/dashboard/clients/${clientId}`
@@ -101,7 +102,11 @@ export default function ClientHeader({ clientId, clientName, slug }: Props) {
 
       {/* Tab bar — horizontally scrollable on mobile */}
       <div className="flex gap-1 overflow-x-auto border-b border-neutral-800 scrollbar-hide">
-        {TABS.filter((tab) => !tab.clientOnly || tab.clientOnly === clientName).map((tab) => {
+        {TABS.filter((tab) => {
+          if (tab.clientOnly && tab.clientOnly !== clientName) return false
+          if (tab.requiresTestConfig && !creativeTestsEnabled) return false
+          return true
+        }).map((tab) => {
           const href = basePath + tab.href + (tab.href === "/settings" ? "" : suffix)
           const tabPath = basePath + tab.href
           const isActive =
