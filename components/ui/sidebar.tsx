@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
@@ -41,6 +42,7 @@ export default function Sidebar({ user }: { user: User }) {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
+  const [open, setOpen] = useState(false)
 
   async function handleSignOut() {
     await supabase.auth.signOut()
@@ -49,45 +51,81 @@ export default function Sidebar({ user }: { user: User }) {
   }
 
   return (
-    <aside className="flex w-56 flex-col border-r border-neutral-800 bg-neutral-950 p-4">
-      <div className="mb-8">
-        <Link href="/dashboard">
-          <Logo className="text-white" />
-        </Link>
-      </div>
+    <>
+      {/* Mobile hamburger button */}
+      <button
+        onClick={() => setOpen(true)}
+        className="fixed left-3 top-3 z-40 rounded-lg bg-neutral-900 p-2 text-neutral-400 shadow-lg transition hover:text-white md:hidden"
+        aria-label="Open menu"
+      >
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+        </svg>
+      </button>
 
-      <nav className="flex flex-1 flex-col gap-1">
-        {navItems.map((item) => {
-          const active =
-            item.href === "/dashboard"
-              ? pathname === "/dashboard"
-              : pathname === item.href || pathname.startsWith(item.href + "/")
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${
-                active
-                  ? "bg-brand-lime/10 text-brand-lime"
-                  : "text-neutral-400 hover:bg-neutral-800 hover:text-white"
-              }`}
-            >
-              {icons[item.icon]}
-              {item.label}
-            </Link>
-          )
-        })}
-      </nav>
+      {/* Overlay */}
+      {open && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 md:hidden"
+          onClick={() => setOpen(false)}
+        />
+      )}
 
-      <div className="border-t border-neutral-800 pt-4">
-        <p className="truncate text-xs text-neutral-500">{user.email}</p>
-        <button
-          onClick={handleSignOut}
-          className="mt-2 text-xs text-neutral-500 transition hover:text-white"
-        >
-          Sign out
-        </button>
-      </div>
-    </aside>
+      {/* Sidebar */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex w-56 flex-col border-r border-neutral-800 bg-neutral-950 p-4 transition-transform duration-200 md:static md:translate-x-0 ${
+          open ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <div className="mb-8 flex items-center justify-between">
+          <Link href="/dashboard" onClick={() => setOpen(false)}>
+            <Logo className="text-white" />
+          </Link>
+          <button
+            onClick={() => setOpen(false)}
+            className="rounded p-1 text-neutral-500 hover:text-white md:hidden"
+            aria-label="Close menu"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <nav className="flex flex-1 flex-col gap-1">
+          {navItems.map((item) => {
+            const active =
+              item.href === "/dashboard"
+                ? pathname === "/dashboard"
+                : pathname === item.href || pathname.startsWith(item.href + "/")
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setOpen(false)}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${
+                  active
+                    ? "bg-brand-lime/10 text-brand-lime"
+                    : "text-neutral-400 hover:bg-neutral-800 hover:text-white"
+                }`}
+              >
+                {icons[item.icon]}
+                {item.label}
+              </Link>
+            )
+          })}
+        </nav>
+
+        <div className="border-t border-neutral-800 pt-4">
+          <p className="truncate text-xs text-neutral-500">{user.email}</p>
+          <button
+            onClick={handleSignOut}
+            className="mt-2 text-xs text-neutral-500 transition hover:text-white"
+          >
+            Sign out
+          </button>
+        </div>
+      </aside>
+    </>
   )
 }

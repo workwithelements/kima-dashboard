@@ -77,7 +77,7 @@ export default function DateRangePicker({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-xl border border-neutral-700 bg-neutral-900 p-3 shadow-xl">
+        <div className="absolute right-0 top-full z-50 mt-1 w-[calc(100vw-2rem)] max-w-64 rounded-xl border border-neutral-700 bg-neutral-900 p-3 shadow-xl md:w-64">
           <div className="space-y-1">
             {PRESETS.map((p) => (
               <button

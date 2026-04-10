@@ -25,7 +25,7 @@ export default function AdsSidebar({ title, metric, ads, currency, onClose }: Pr
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       {/* Panel */}
-      <div className="relative w-96 overflow-y-auto border-l border-neutral-800 bg-neutral-900">
+      <div className="relative w-full overflow-y-auto border-l border-neutral-800 bg-neutral-900 sm:w-96">
         {/* Header */}
         <div className="sticky top-0 z-10 border-b border-neutral-800 bg-neutral-900 px-5 py-4">
           <div className="flex items-start justify-between">

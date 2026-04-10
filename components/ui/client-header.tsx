@@ -63,7 +63,7 @@ export default function ClientHeader({ clientId, clientName, slug }: Props) {
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
         </Link>
-        <h1 className="text-2xl font-semibold">{clientName}</h1>
+        <h1 className="text-lg font-semibold md:text-2xl">{clientName}</h1>
 
         {/* Refresh data button */}
         <button
@@ -99,8 +99,8 @@ export default function ClientHeader({ clientId, clientName, slug }: Props) {
         )}
       </div>
 
-      {/* Tab bar */}
-      <div className="flex gap-1 border-b border-neutral-800">
+      {/* Tab bar — horizontally scrollable on mobile */}
+      <div className="flex gap-1 overflow-x-auto border-b border-neutral-800 scrollbar-hide">
         {TABS.filter((tab) => !tab.clientOnly || tab.clientOnly === clientName).map((tab) => {
           const href = basePath + tab.href + (tab.href === "/settings" ? "" : suffix)
           const tabPath = basePath + tab.href

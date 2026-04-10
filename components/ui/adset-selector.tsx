@@ -75,7 +75,7 @@ export default function AdSetSelector({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-80 rounded-xl border border-neutral-700 bg-neutral-900 p-3 shadow-xl">
+        <div className="absolute right-0 top-full z-50 mt-1 w-[calc(100vw-2rem)] max-w-80 rounded-xl border border-neutral-700 bg-neutral-900 p-3 shadow-xl md:w-80">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-[10px] font-medium uppercase tracking-wider text-neutral-500">{headerLabel}</span>
             <div className="flex gap-2">

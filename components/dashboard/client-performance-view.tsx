@@ -937,7 +937,7 @@ export default function ClientPerformanceView({
       {/* Google Ads summary metrics — 4 rows of 3 */}
       {isGoogleAds && (
         <div className="space-y-3">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
             <MetricCard
               label="Spend"
               value={fmtCurrency(metrics.spend, currency)}
@@ -955,7 +955,7 @@ export default function ClientPerformanceView({
               invertDelta
             />
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
             <MetricCard
               label="Clicks"
               value={fmtNumber(metrics.clicks)}
@@ -973,7 +973,7 @@ export default function ClientPerformanceView({
               delta={delta(derived.ctr, compDerived.ctr)}
             />
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
             <MetricCard
               label="Conversions"
               value={fmtNumber(metrics.purchases)}
@@ -991,7 +991,7 @@ export default function ClientPerformanceView({
               delta={delta(derived.conversionRate, compDerived.conversionRate)}
             />
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
             <MetricCard
               label="Revenue"
               value={fmtCurrency(metrics.revenue, currency)}
