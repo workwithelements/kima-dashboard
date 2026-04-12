@@ -73,6 +73,8 @@ export default function AlexiaClarkStructureView({ rows, currency = "GBP" }: Pro
     }
   }
 
+  if (summaries.length === 0) return null
+
   return (
     <div className="space-y-6">
       <div>
@@ -81,18 +83,6 @@ export default function AlexiaClarkStructureView({ rows, currency = "GBP" }: Pro
           Performance by campaign type, with landing page winners inside body-part campaigns.
         </p>
       </div>
-
-      {summaries.length === 0 && (
-        <Card>
-          <p className="text-sm text-neutral-500">
-            No campaigns detected in the selected date range.
-            {" "}
-            <span className="text-neutral-600">
-              ({rows.length} raw rows, {allAdsetRows.length} adsets)
-            </span>
-          </p>
-        </Card>
-      )}
 
       {/* ── Section 1: Campaign Type Summary ── */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -128,12 +118,16 @@ export default function AlexiaClarkStructureView({ rows, currency = "GBP" }: Pro
       </div>
 
       {/* ── Section 2: Landing Page Winners per Body Part ── */}
-      {bodyPartGroups.length > 0 && (
-        <Card>
-          <h3 className="mb-4 text-sm font-semibold">Landing Page Performance by Body Part</h3>
-          <div className="space-y-6">
-            {bodyPartGroups.map((group) => {
-              // Max CPA for bar scaling (only non-null)
+      {(() => {
+        // Only show groups that actually have multiple landing page variants
+        const multiLpGroups = bodyPartGroups.filter((g) => g.landingPages.length > 1)
+        if (multiLpGroups.length === 0) return null
+        return (
+          <Card>
+            <h3 className="mb-4 text-sm font-semibold">Landing Page Performance by Body Part</h3>
+            <div className="space-y-6">
+              {multiLpGroups.map((group) => {
+                // Max CPA for bar scaling (only non-null)
               const maxCpa = Math.max(
                 ...group.landingPages.map((lp) => lp.cpa || 0),
                 1
@@ -193,9 +187,10 @@ export default function AlexiaClarkStructureView({ rows, currency = "GBP" }: Pro
                 </div>
               )
             })}
-          </div>
-        </Card>
-      )}
+            </div>
+          </Card>
+        )
+      })()}
 
       {/* ── Section 3: Adset Breakdown Table ── */}
       <Card>
