@@ -1364,8 +1364,8 @@ export default function ClientPerformanceView({
         </Card>
       )}
 
-      {/* Alexia Clark — Campaign Structure Analysis (Meta only) */}
-      {isMeta && client.name === "Alexia" && (
+      {/* Alexia Clark — Campaign Structure Analysis */}
+      {client.name === "Alexia" && (
         <AlexiaClarkStructureView rows={filteredRows} currency={currency} />
       )}
 
