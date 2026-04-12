@@ -25,6 +25,7 @@ import DateRangePicker from "@/components/ui/date-range-picker"
 import AdSetSelector from "@/components/ui/adset-selector"
 import PlatformSelector, { type PlatformView } from "@/components/ui/platform-selector"
 import PerformanceTable from "@/components/tables/performance-table"
+import AlexiaClarkStructureView from "@/components/dashboard/alexia-clark-structure-view"
 import AdsSidebar, { type AdEntry } from "@/components/ui/ads-sidebar"
 import ScorecardConfigModal from "./scorecard-config-modal"
 import AnnotationsBar, { type Annotation } from "@/components/ui/annotations-bar"
@@ -1361,6 +1362,11 @@ export default function ClientPerformanceView({
           <h2 className="mb-4 text-sm font-medium text-neutral-400">Funnel Drop-Off</h2>
           <FunnelDropOffChart metrics={metrics} funnelSteps={funnelSteps} />
         </Card>
+      )}
+
+      {/* Alexia Clark — Campaign Structure Analysis (Meta only) */}
+      {isMeta && client.name === "Alexia Clark" && (
+        <AlexiaClarkStructureView rows={filteredRows} currency={currency} />
       )}
 
       {/* Performance table — collapsible */}
