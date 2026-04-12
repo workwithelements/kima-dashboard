@@ -1364,6 +1364,11 @@ export default function ClientPerformanceView({
         </Card>
       )}
 
+      {/* DEBUG: client name */}
+      <div className="rounded border border-yellow-500/30 bg-yellow-500/10 p-2 text-xs text-yellow-400">
+        DEBUG: client.name = "{client.name}" | matches Alexia: {String(client.name === "Alexia")}
+      </div>
+
       {/* Alexia Clark — Campaign Structure Analysis */}
       {client.name === "Alexia" && (
         <AlexiaClarkStructureView rows={filteredRows} currency={currency} />
