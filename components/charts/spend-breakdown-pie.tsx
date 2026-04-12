@@ -18,7 +18,7 @@ type Props = {
   googleAdsRows: Partial<GoogleAdsDailyRow>[]
   compMetaRows?: Partial<MetaDailyRow>[]
   compGoogleAdsRows?: Partial<GoogleAdsDailyRow>[]
-  platform: "meta" | "google_ads" | "all"
+  platform: "meta" | "google_ads" | "shopify" | "all"
   currency?: string
 }
 
