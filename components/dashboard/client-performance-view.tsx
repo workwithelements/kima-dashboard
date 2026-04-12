@@ -1365,7 +1365,7 @@ export default function ClientPerformanceView({
       )}
 
       {/* Alexia Clark — Campaign Structure Analysis (Meta only) */}
-      {isMeta && client.name === "Alexia Clark" && (
+      {isMeta && client.name === "Alexia" && (
         <AlexiaClarkStructureView rows={filteredRows} currency={currency} />
       )}
 
