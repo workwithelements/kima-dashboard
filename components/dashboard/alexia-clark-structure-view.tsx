@@ -73,10 +73,6 @@ export default function AlexiaClarkStructureView({ rows, currency = "GBP" }: Pro
     }
   }
 
-  if (summaries.length === 0) {
-    return null
-  }
-
   return (
     <div className="space-y-6">
       <div>
@@ -85,6 +81,18 @@ export default function AlexiaClarkStructureView({ rows, currency = "GBP" }: Pro
           Performance by campaign type, with landing page winners inside body-part campaigns.
         </p>
       </div>
+
+      {summaries.length === 0 && (
+        <Card>
+          <p className="text-sm text-neutral-500">
+            No campaigns detected in the selected date range.
+            {" "}
+            <span className="text-neutral-600">
+              ({rows.length} raw rows, {allAdsetRows.length} adsets)
+            </span>
+          </p>
+        </Card>
+      )}
 
       {/* ── Section 1: Campaign Type Summary ── */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
