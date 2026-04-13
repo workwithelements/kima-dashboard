@@ -20,15 +20,44 @@ type Props = {
 }
 
 export default async function ClientDetailPage({ params, searchParams }: Props) {
-  // Resolve date range from search params
+  // Resolve display date range from search params
   const preset = (searchParams.preset || "this_month") as DatePreset
-  const range = searchParams.from && searchParams.to
+  const displayRange = searchParams.from && searchParams.to
     ? { from: searchParams.from, to: searchParams.to }
     : getPresetRange(preset)
 
   // Resolve comparison range
   const compareType = (searchParams.compare || "previous_period") as ComparisonType
-  const compRange = getComparisonRange(range, compareType)
+  const compRange = getComparisonRange(displayRange, compareType)
+
+  // Widen the fetch window to the last 30 days (from today) whenever the
+  // display range fits inside that window. This way switching between short
+  // date presets becomes instant client-side - no server round trip.
+  const todayStr = new Date().toISOString().split("T")[0]
+  const thirtyDaysAgo = new Date()
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+  const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split("T")[0]
+
+  // Previous 30 days (for comparison windows within 30 days)
+  const sixtyDaysAgo = new Date()
+  sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60)
+  const sixtyDaysAgoStr = sixtyDaysAgo.toISOString().split("T")[0]
+
+  const displayInWindow =
+    displayRange.from >= thirtyDaysAgoStr && displayRange.to <= todayStr
+
+  const compInWindow =
+    compRange && compRange.from >= sixtyDaysAgoStr && compRange.to <= thirtyDaysAgoStr
+
+  // If both the display range and the comparison range fit in the wide
+  // window, fetch the wide data (cached & shared). Otherwise fetch the
+  // exact range the user asked for.
+  const fetchFrom = displayInWindow ? thirtyDaysAgoStr : displayRange.from
+  const fetchTo = displayInWindow ? todayStr : displayRange.to
+  const fetchCompFrom = compInWindow ? sixtyDaysAgoStr : compRange?.from
+  const fetchCompTo = compInWindow ? thirtyDaysAgoStr : compRange?.to
+
+  const range = { from: fetchFrom, to: fetchTo }
 
   // Fetch performance data + scorecard config + Google Ads data in parallel
   const supabase = createServiceClient()
@@ -39,8 +68,8 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       params.id,
       range.from,
       range.to,
-      compRange?.from,
-      compRange?.to
+      fetchCompFrom,
+      fetchCompTo
     ),
     supabase
       .from("client_scorecard_config")
@@ -48,8 +77,8 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       .eq("client_id", params.id)
       .single(),
     fetchGoogleAdsData(params.id, range.from, range.to),
-    compRange
-      ? fetchGoogleAdsData(params.id, compRange.from, compRange.to)
+    fetchCompFrom && fetchCompTo
+      ? fetchGoogleAdsData(params.id, fetchCompFrom, fetchCompTo)
       : Promise.resolve([]),
     fetchBreakdownsData(params.id, range.from, range.to),
     supabase
@@ -60,8 +89,8 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       .lte("date", range.to)
       .order("date"),
     fetchShopifyData(params.id, range.from, range.to),
-    compRange
-      ? fetchShopifyData(params.id, compRange.from, compRange.to)
+    fetchCompFrom && fetchCompTo
+      ? fetchShopifyData(params.id, fetchCompFrom, fetchCompTo)
       : Promise.resolve({ orders: [], attribution: [] }),
     minDelay,
   ])
@@ -88,8 +117,10 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       googleAdsRows={gaRows}
       googleAdsComparisonRows={gaCompRows}
       preset={preset}
-      from={range.from}
-      to={range.to}
+      from={displayRange.from}
+      to={displayRange.to}
+      fetchedFrom={range.from}
+      fetchedTo={range.to}
       compareType={compareType}
       baselineReach={data.baselineReach}
       funnelSteps={funnelSteps}

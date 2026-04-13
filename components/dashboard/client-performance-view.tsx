@@ -19,7 +19,7 @@ import {
 } from "@/lib/utils/aggregate"
 import { fmtCurrency, fmtNumber, fmtPercent, fmtDelta } from "@/lib/utils/format"
 import { calculateFunnelStep, calculateNetNewReach, FUNNEL_STEP_DEFS, type FunnelStepKey } from "@/lib/utils/funnel-steps"
-import type { DatePreset } from "@/lib/utils/dates"
+import { getComparisonRange, getPresetRange, type DatePreset } from "@/lib/utils/dates"
 import { Card, MetricCard } from "@/components/ui/card"
 import DateRangePicker from "@/components/ui/date-range-picker"
 import AdSetSelector from "@/components/ui/adset-selector"
@@ -95,6 +95,9 @@ type Props = {
   preset: DatePreset
   from: string
   to: string
+  /** Wider fetch window actually pulled from the server (for client-side date filtering) */
+  fetchedFrom?: string
+  fetchedTo?: string
   compareType: ComparisonType
   baselineReach?: number
   funnelSteps?: string[] | null
@@ -151,13 +154,15 @@ function mergeMetrics(a: AggregatedMetrics, b: AggregatedMetrics): AggregatedMet
 
 export default function ClientPerformanceView({
   client,
-  rows,
-  comparisonRows,
-  googleAdsRows = [],
-  googleAdsComparisonRows = [],
+  rows: rawRows,
+  comparisonRows: rawComparisonRows,
+  googleAdsRows: rawGoogleAdsRows = [],
+  googleAdsComparisonRows: rawGoogleAdsComparisonRows = [],
   preset,
   from,
   to,
+  fetchedFrom,
+  fetchedTo,
   compareType,
   baselineReach = 0,
   funnelSteps: initialSteps = null,
@@ -212,6 +217,35 @@ export default function ClientPerformanceView({
     }
     return ids
   }, [createdDates])
+
+  // Client-side date filtering: the server may have fetched a wider window
+  // than the user's current selection so that switching between short presets
+  // is instant. Here we narrow the raw rows down to the display range.
+  const rows = useMemo(
+    () => rawRows.filter((r) => r.date && r.date >= from && r.date <= to),
+    [rawRows, from, to]
+  )
+  const googleAdsRows = useMemo(
+    () => rawGoogleAdsRows.filter((r) => r.date && r.date >= from && r.date <= to),
+    [rawGoogleAdsRows, from, to]
+  )
+  // Comparison range is derived from the current display range + compareType
+  const clientCompRange = useMemo(
+    () => getComparisonRange({ from, to }, compareType),
+    [from, to, compareType]
+  )
+  const comparisonRows = useMemo(() => {
+    if (!clientCompRange) return [] as typeof rawComparisonRows
+    return rawComparisonRows.filter(
+      (r) => r.date && r.date >= clientCompRange.from && r.date <= clientCompRange.to
+    )
+  }, [rawComparisonRows, clientCompRange])
+  const googleAdsComparisonRows = useMemo(() => {
+    if (!clientCompRange) return [] as typeof rawGoogleAdsComparisonRows
+    return rawGoogleAdsComparisonRows.filter(
+      (r) => r.date && r.date >= clientCompRange.from && r.date <= clientCompRange.to
+    )
+  }, [rawGoogleAdsComparisonRows, clientCompRange])
 
   // Drill-down state for Meta performance table
   type DrillCrumb = { level: HierarchyLevel; id: string; name: string }
@@ -723,25 +757,67 @@ export default function ClientPerformanceView({
   const compMetaRevenueSharePct = shopifyCompMetrics.netRevenue > 0 ? (compShopifyMetaRevenue / shopifyCompMetrics.netRevenue) * 100 : 0
 
   // Navigation helpers
-  function updateSearchParams(updates: Record<string, string>) {
+  // Shallow route update: only change the URL without triggering a server
+  // re-fetch. Safe when the new date range fits inside the fetched window
+  // and the comparison range also fits (or compareType is "none").
+  function canShallowRoute(newFrom: string, newTo: string, newCompare: ComparisonType): boolean {
+    if (!fetchedFrom || !fetchedTo) return false
+    if (newFrom < fetchedFrom || newTo > fetchedTo) return false
+    if (newCompare === "none") return true
+    const cr = getComparisonRange({ from: newFrom, to: newTo }, newCompare)
+    if (!cr) return true
+    // Need to have the comparison rows cached too — the server only widens
+    // when comparison fits in 31-60 days ago. If the user has loaded the
+    // wide window path, rawComparisonRows covers 31-60 days ago.
+    const today = new Date().toISOString().split("T")[0]
+    const sixtyAgo = new Date()
+    sixtyAgo.setDate(sixtyAgo.getDate() - 60)
+    const sixtyAgoStr = sixtyAgo.toISOString().split("T")[0]
+    const thirtyAgo = new Date()
+    thirtyAgo.setDate(thirtyAgo.getDate() - 30)
+    const thirtyAgoStr = thirtyAgo.toISOString().split("T")[0]
+    return cr.from >= sixtyAgoStr && cr.to <= thirtyAgoStr && today !== ""
+  }
+
+  function updateSearchParams(updates: Record<string, string>, opts?: { allowShallow?: boolean }) {
     const params = new URLSearchParams()
     const merged = { preset, from, to, compare: compareType, ...updates }
     for (const [key, val] of Object.entries(merged)) {
       if (val) params.set(key, val)
     }
-    router.push(`/dashboard/clients/${client.id}?${params.toString()}`)
+    const newFrom = String(merged.from || from)
+    const newTo = String(merged.to || to)
+    const newCompare = (merged.compare || compareType) as ComparisonType
+    const url = `/dashboard/clients/${client.id}?${params.toString()}`
+    if (opts?.allowShallow && canShallowRoute(newFrom, newTo, newCompare)) {
+      // Update URL in place without re-running the server component
+      window.history.replaceState(null, "", url)
+      // Tell Next.js about the change so useSearchParams updates
+      router.replace(url, { scroll: false })
+    } else {
+      router.push(url)
+    }
   }
 
   function handlePresetChange(p: DatePreset) {
-    updateSearchParams({ preset: p, from: "", to: "" })
+    // Resolve the preset to a concrete range so we can decide whether to
+    // shallow-route (fits in fetched window) or trigger a full fetch.
+    const newRange = getPresetRange(p)
+    updateSearchParams(
+      { preset: p, from: newRange.from, to: newRange.to },
+      { allowShallow: true }
+    )
   }
 
   function handleCustomChange(newFrom: string, newTo: string) {
-    updateSearchParams({ preset: "custom", from: newFrom, to: newTo })
+    updateSearchParams(
+      { preset: "custom", from: newFrom, to: newTo },
+      { allowShallow: true }
+    )
   }
 
   function handleCompareChange(c: ComparisonType) {
-    updateSearchParams({ compare: c })
+    updateSearchParams({ compare: c }, { allowShallow: true })
   }
 
   // Show funnel only for Meta view
