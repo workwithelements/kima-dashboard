@@ -1,5 +1,8 @@
-import { createClient } from "@/lib/supabase/server"
+import { unstable_cache } from "next/cache"
+import { createServiceClient } from "@/lib/supabase/server"
 import type { NamingConfig } from "@/lib/utils/ad-name-parser"
+
+const CACHE_TTL_SECONDS = 300
 
 export type CreativeTest = {
   id: string
@@ -101,7 +104,17 @@ function getConversionColumn(keyAction: string): string {
 export async function fetchCreativeTests(
   clientId: string
 ): Promise<CreativeTestsData | null> {
-  const supabase = createClient()
+  return unstable_cache(
+    () => _fetchCreativeTestsInner(clientId),
+    ["fetchCreativeTests", clientId],
+    { revalidate: CACHE_TTL_SECONDS, tags: [`client:${clientId}`] }
+  )()
+}
+
+async function _fetchCreativeTestsInner(
+  clientId: string
+): Promise<CreativeTestsData | null> {
+  const supabase = createServiceClient()
 
   // Parallel fetches — client, tests, config, scorecard, naming config
   const [clientResp, testsResp, configResp, scorecardResp, namingResp] = await Promise.all([

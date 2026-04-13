@@ -3,9 +3,13 @@
  * Centralised here so both admin and client views can reuse it.
  */
 
+import { unstable_cache } from "next/cache"
 import { createServiceClient } from "@/lib/supabase/server"
 import type { MetaDailyRow, MetaDemographicsRow, MetaPlacementsRow, GoogleAdsDailyRow, Client, AdPlatform, DailySpendRow } from "@/lib/utils/types"
 import type { NamingConfig } from "@/lib/utils/ad-name-parser"
+
+/** Cache TTL for dashboard data fetches (5 minutes) */
+const CACHE_TTL_SECONDS = 300
 
 /**
  * Paginated Supabase fetch — works around the PostgREST 1000-row default cap.
@@ -45,8 +49,24 @@ export type ClientData = {
 /**
  * Fetch all Meta performance data for a client within a date range,
  * plus an optional comparison range.
+ *
+ * Cached for 5 minutes per (clientId, from, to, compFrom, compTo) tuple.
  */
 export async function fetchClientData(
+  clientId: string,
+  from: string,
+  to: string,
+  compFrom?: string,
+  compTo?: string
+): Promise<ClientData | null> {
+  return unstable_cache(
+    () => _fetchClientDataInner(clientId, from, to, compFrom, compTo),
+    ["fetchClientData", clientId, from, to, compFrom ?? "", compTo ?? ""],
+    { revalidate: CACHE_TTL_SECONDS, tags: [`client:${clientId}`] }
+  )()
+}
+
+async function _fetchClientDataInner(
   clientId: string,
   from: string,
   to: string,
@@ -292,6 +312,20 @@ export async function fetchReachData(
   compFrom?: string,
   compTo?: string
 ) {
+  return unstable_cache(
+    () => _fetchReachDataInner(clientId, from, to, compFrom, compTo),
+    ["fetchReachData", clientId, from, to, compFrom ?? "", compTo ?? ""],
+    { revalidate: CACHE_TTL_SECONDS, tags: [`client:${clientId}`] }
+  )()
+}
+
+async function _fetchReachDataInner(
+  clientId: string,
+  from: string,
+  to: string,
+  compFrom?: string,
+  compTo?: string
+) {
   const supabase = createServiceClient()
 
   // Fetch client name + currency
@@ -364,6 +398,18 @@ export async function fetchReachData(
  * plus thumbnail URLs and preview toggle state.
  */
 export async function fetchCreativeData(
+  clientId: string,
+  from: string,
+  to: string
+) {
+  return unstable_cache(
+    () => _fetchCreativeDataInner(clientId, from, to),
+    ["fetchCreativeData", clientId, from, to],
+    { revalidate: CACHE_TTL_SECONDS, tags: [`client:${clientId}`] }
+  )()
+}
+
+async function _fetchCreativeDataInner(
   clientId: string,
   from: string,
   to: string
