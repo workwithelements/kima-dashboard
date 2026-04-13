@@ -18,6 +18,7 @@ const TABS = [
   { label: "Creative Tests", href: "/tests", requiresTestConfig: true },
   { label: "Budget & Pacing", href: "/pacing" },
   { label: "Reach Analysis", href: "/reach" },
+  { label: "Meta Impact", href: "/meta-impact", clientOnly: "Mooncup" },
   { label: "Retention Lift Test", href: "/retention-lift-test", clientOnly: "TouchNote" },
   { label: "NAC Analysis", href: "/nac-analysis", clientOnly: "TouchNote" },
   { label: "Settings", href: "/settings" },
