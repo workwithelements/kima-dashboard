@@ -6,6 +6,7 @@ import {
   ComposedChart,
   Line,
   Bar,
+  Cell,
   XAxis,
   YAxis,
   Tooltip,
@@ -341,24 +342,47 @@ export default function MetaImpactView({ clientId }: Props) {
             <h3 className="mb-3 text-sm font-semibold">Lag Correlation Analysis</h3>
             <p className="mb-3 text-xs text-neutral-500">
               How strongly does Meta spend in week N correlate with Shopify revenue in
-              week N+lag? A peak at lag-1 suggests Meta drives purchases roughly a week
-              after exposure.
+              week N+lag? Pearson r ranges from -1 (perfect negative) to +1 (perfect positive).
+              A high positive bar indicates Meta is driving sales at that delay; bars near
+              zero indicate no relationship.
             </p>
-            <div className="h-56">
+            {(() => {
+              // Strongest positive r
+              const positives = lagSeries.filter((l) => l.r > 0)
+              const strongest = positives.length > 0
+                ? positives.reduce((a, b) => (b.r > a.r ? b : a))
+                : null
+              return strongest ? (
+                <div className="mb-3 rounded-lg border border-brand-lime/30 bg-brand-lime/5 px-3 py-2 text-xs">
+                  <span className="text-neutral-400">Strongest positive correlation: </span>
+                  <span className="font-semibold text-brand-lime">
+                    {strongest.lagWeeks === 0 ? "same week" : `${strongest.lagWeeks}-week lag`}
+                  </span>
+                  <span className="text-neutral-400"> (r = {strongest.r.toFixed(3)})</span>
+                </div>
+              ) : null
+            })()}
+            <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={lagSeries}>
+                <BarChart data={lagSeries} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
                   <XAxis
                     dataKey="lagWeeks"
                     stroke="#737373"
                     tick={{ fontSize: 11 }}
-                    tickFormatter={(v) => `${v}w`}
+                    tickFormatter={(v) => (v === 0 ? "Same week" : `${v}w lag`)}
                   />
                   <YAxis
                     stroke="#737373"
                     tick={{ fontSize: 11 }}
                     domain={[-1, 1]}
                     tickFormatter={(v) => v.toFixed(1)}
+                    label={{
+                      value: "Pearson r",
+                      angle: -90,
+                      position: "insideLeft",
+                      style: { fontSize: 10, fill: "#737373" },
+                    }}
                   />
                   <Tooltip
                     contentStyle={{
@@ -367,13 +391,39 @@ export default function MetaImpactView({ clientId }: Props) {
                       borderRadius: 8,
                       fontSize: 12,
                     }}
-                    formatter={(v: number) => v.toFixed(3)}
-                    labelFormatter={(l) => `Lag ${l} weeks`}
+                    formatter={(v: number) => [v.toFixed(3), "r"]}
+                    labelFormatter={(l) => (l === 0 ? "Same week" : `Lag ${l} weeks`)}
                   />
-                  <Bar dataKey="r" name="Pearson r" fill="#CDFF00" />
+                  <Bar
+                    dataKey="r"
+                    name="Pearson r"
+                    label={{
+                      position: "top",
+                      fontSize: 11,
+                      fill: "#a3a3a3",
+                      formatter: (v: number) => v.toFixed(2),
+                    }}
+                  >
+                    {lagSeries.map((entry, idx) => (
+                      <Cell
+                        key={idx}
+                        fill={
+                          entry.r >= 0.3 ? "#CDFF00" :
+                          entry.r > 0 ? "#86efac" :
+                          entry.r > -0.3 ? "#525252" :
+                          "#ef4444"
+                        }
+                      />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
+            <p className="mt-2 text-[10px] text-neutral-600">
+              Bright lime = strong positive (Meta likely driving sales at this delay).
+              Pale green = weak positive. Grey = effectively no correlation. Red = negative
+              (often noise from short windows).
+            </p>
           </Card>
 
           {/* ── Section 5: Regression summary ── */}
