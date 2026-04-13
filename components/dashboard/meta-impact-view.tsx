@@ -22,20 +22,23 @@ import {
   buildWeeklyPoints,
   lagCorrelationSeries,
   laggedRegression,
+  dailyToMonthlyMetaSpend,
   DEFAULT_META_SPEND,
   MANAGEMENT_FEE_MONTHLY,
+  type DailyMetaSpend,
   type DailyRevenueRow,
   type MonthlySummary,
 } from "@/lib/utils/meta-impact"
 
 type Props = {
   clientId: string
+  dailyMetaSpend?: DailyMetaSpend[]
 }
 
 const STORAGE_TOTAL = "meta-impact:total-csv"
 const STORAGE_PAID = "meta-impact:paid-csv"
 
-export default function MetaImpactView({ clientId }: Props) {
+export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props) {
   const [totalCsv, setTotalCsv] = useState<string>("")
   const [paidCsv, setPaidCsv] = useState<string>("")
 
@@ -73,14 +76,23 @@ export default function MetaImpactView({ clientId }: Props) {
     [paidCsv]
   )
 
+  // Use real daily Meta spend from Supabase if available, else fall back to hardcoded monthly
+  const monthlyMetaSpend = useMemo(
+    () =>
+      dailyMetaSpend.length > 0
+        ? dailyToMonthlyMetaSpend(dailyMetaSpend)
+        : DEFAULT_META_SPEND,
+    [dailyMetaSpend]
+  )
+
   const monthlySummaries: MonthlySummary[] = useMemo(
-    () => buildMonthlySummaries(totalRows, paidRows, DEFAULT_META_SPEND),
-    [totalRows, paidRows]
+    () => buildMonthlySummaries(totalRows, paidRows, monthlyMetaSpend),
+    [totalRows, paidRows, monthlyMetaSpend]
   )
 
   const weeklyPoints = useMemo(
-    () => buildWeeklyPoints(totalRows, paidRows, DEFAULT_META_SPEND),
-    [totalRows, paidRows]
+    () => buildWeeklyPoints(totalRows, paidRows, monthlyMetaSpend, dailyMetaSpend),
+    [totalRows, paidRows, monthlyMetaSpend, dailyMetaSpend]
   )
 
   const lagSeries = useMemo(() => lagCorrelationSeries(weeklyPoints, 3), [weeklyPoints])
@@ -171,8 +183,10 @@ export default function MetaImpactView({ clientId }: Props) {
           </div>
         </div>
         <p className="mt-3 text-[11px] text-neutral-600">
-          Meta spend is hard-coded for Jan-Mar 2026 (replace with Windsor.ai integration later).
-          Files are cached in your browser, no upload to the server.
+          {dailyMetaSpend.length > 0
+            ? `Meta spend pulled from Supabase: ${dailyMetaSpend.length} daily rows. `
+            : "Meta spend hard-coded for Jan-Mar 2026 (no Supabase data found). "}
+          CSVs cached in your browser - no upload to the server.
         </p>
       </Card>
 

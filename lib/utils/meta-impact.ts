@@ -20,6 +20,13 @@ export type DailyRevenueRow = {
   netSales: number
 }
 
+/** A daily Meta spend point — one entry per day */
+export type DailyMetaSpend = {
+  date: string // YYYY-MM-DD
+  spend: number
+  purchases: number
+}
+
 export type MonthlyMetaSpend = {
   month: string // YYYY-MM
   spend: number
@@ -233,6 +240,21 @@ export function aggregateWeekly(rows: DailyRevenueRow[]): Map<string, { revenue:
   return map
 }
 
+/** Aggregate daily Meta spend into monthly totals */
+export function dailyToMonthlyMetaSpend(daily: DailyMetaSpend[]): MonthlyMetaSpend[] {
+  const map = new Map<string, { spend: number; purchases: number }>()
+  for (const d of daily) {
+    const key = monthKey(d.date)
+    const cur = map.get(key) || { spend: 0, purchases: 0 }
+    cur.spend += d.spend
+    cur.purchases += d.purchases
+    map.set(key, cur)
+  }
+  return Array.from(map.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, v]) => ({ month, spend: v.spend, purchases: v.purchases }))
+}
+
 // ── Combined monthly summary ──
 
 export function buildMonthlySummaries(
@@ -288,22 +310,30 @@ export function buildMonthlySummaries(
 
 /**
  * Build weekly points combining Shopify revenue with weekly Meta spend.
- * Meta spend is monthly, so we distribute it evenly across the days of the month
- * then re-aggregate by week.
+ * Accepts either daily Meta spend (preferred — real granularity) or monthly
+ * spend (which gets spread evenly across the days of each month as a fallback).
  */
 export function buildWeeklyPoints(
   totalRows: DailyRevenueRow[],
   paidRows: DailyRevenueRow[],
-  metaSpend: MonthlyMetaSpend[]
+  metaSpend: MonthlyMetaSpend[],
+  dailyMetaSpend?: DailyMetaSpend[]
 ): WeeklyPoint[] {
-  // Daily Meta spend by spreading monthly evenly
+  // Build a date → spend map. Prefer real daily data if provided; otherwise
+  // fall back to spreading monthly totals evenly across the month.
   const dailyMeta = new Map<string, number>()
-  for (const m of metaSpend) {
-    const daily = m.spend / daysInMonth(m.month)
-    const days = daysInMonth(m.month)
-    for (let d = 1; d <= days; d++) {
-      const dateStr = `${m.month}-${String(d).padStart(2, "0")}`
-      dailyMeta.set(dateStr, daily)
+  if (dailyMetaSpend && dailyMetaSpend.length > 0) {
+    for (const d of dailyMetaSpend) {
+      dailyMeta.set(d.date, (dailyMeta.get(d.date) || 0) + d.spend)
+    }
+  } else {
+    for (const m of metaSpend) {
+      const days = daysInMonth(m.month)
+      const daily = m.spend / days
+      for (let d = 1; d <= days; d++) {
+        const dateStr = `${m.month}-${String(d).padStart(2, "0")}`
+        dailyMeta.set(dateStr, daily)
+      }
     }
   }
 
