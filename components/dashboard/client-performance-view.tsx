@@ -235,11 +235,41 @@ export default function ClientPerformanceView({
     return d.toISOString().split("T")[0]
   }, [to])
 
+  // Extract unique campaigns from Meta rows with active status
+  const campaigns = useMemo(() => {
+    const map = new Map<string, { name: string; active: boolean }>()
+    for (const r of rows) {
+      if (!r.campaign_id || !r.campaign_name) continue
+      const prev = map.get(r.campaign_id)
+      const isRecent = (r.date || "") >= activeCutoff && (r.spend || 0) > 0
+      map.set(r.campaign_id, {
+        name: r.campaign_name,
+        active: prev?.active || isRecent,
+      })
+    }
+    return Array.from(map, ([id, v]) => ({ id, name: v.name, active: v.active })).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    )
+  }, [rows, activeCutoff])
+
+  const [selectedCampaigns, setSelectedCampaigns] = useState<string[]>(() =>
+    campaigns.map((c) => c.id)
+  )
+
   // Extract unique ad sets from Meta rows with active status
   const adsets = useMemo(() => {
     const map = new Map<string, { name: string; active: boolean }>()
     for (const r of rows) {
       if (!r.adset_id || !r.adset_name) continue
+      // If campaign filter is active, only include adsets from selected campaigns
+      if (
+        selectedCampaigns.length > 0 &&
+        selectedCampaigns.length < campaigns.length &&
+        r.campaign_id &&
+        !selectedCampaigns.includes(r.campaign_id)
+      ) {
+        continue
+      }
       const prev = map.get(r.adset_id)
       const isRecent = (r.date || "") >= activeCutoff && (r.spend || 0) > 0
       map.set(r.adset_id, {
@@ -250,10 +280,31 @@ export default function ClientPerformanceView({
     return Array.from(map, ([id, v]) => ({ id, name: v.name, active: v.active })).sort((a, b) =>
       a.name.localeCompare(b.name)
     )
-  }, [rows, activeCutoff])
+  }, [rows, activeCutoff, selectedCampaigns, campaigns.length])
 
   const [selectedAdSets, setSelectedAdSets] = useState<string[]>(() =>
     adsets.map((a) => a.id)
+  )
+
+  // Extract unique Google Ads campaigns
+  const gaCampaigns = useMemo(() => {
+    const map = new Map<string, { name: string; active: boolean }>()
+    for (const r of googleAdsRows) {
+      if (!r.campaign_id || !r.campaign_name) continue
+      const prev = map.get(r.campaign_id)
+      const isRecent = (r.date || "") >= activeCutoff && (r.spend || 0) > 0
+      map.set(r.campaign_id, {
+        name: r.campaign_name,
+        active: prev?.active || isRecent,
+      })
+    }
+    return Array.from(map, ([id, v]) => ({ id, name: v.name, active: v.active })).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    )
+  }, [googleAdsRows, activeCutoff])
+
+  const [selectedGaCampaigns, setSelectedGaCampaigns] = useState<string[]>(() =>
+    gaCampaigns.map((c) => c.id)
   )
 
   // Extract unique ad groups from Google Ads rows with active status
@@ -261,6 +312,14 @@ export default function ClientPerformanceView({
     const map = new Map<string, { name: string; active: boolean }>()
     for (const r of googleAdsRows) {
       if (!r.ad_group_id || !r.ad_group_name) continue
+      if (
+        selectedGaCampaigns.length > 0 &&
+        selectedGaCampaigns.length < gaCampaigns.length &&
+        r.campaign_id &&
+        !selectedGaCampaigns.includes(r.campaign_id)
+      ) {
+        continue
+      }
       const prev = map.get(r.ad_group_id)
       const isRecent = (r.date || "") >= activeCutoff && (r.spend || 0) > 0
       map.set(r.ad_group_id, {
@@ -271,33 +330,57 @@ export default function ClientPerformanceView({
     return Array.from(map, ([id, v]) => ({ id, name: v.name, active: v.active })).sort((a, b) =>
       a.name.localeCompare(b.name)
     )
-  }, [googleAdsRows, activeCutoff])
+  }, [googleAdsRows, activeCutoff, selectedGaCampaigns, gaCampaigns.length])
 
   const [selectedAdGroups, setSelectedAdGroups] = useState<string[]>(() =>
     adGroups.map((a) => a.id)
   )
 
-  // Filter Meta rows by selected ad sets
+  // Filter Meta rows by selected campaigns + ad sets
   const filteredRows = useMemo(() => {
-    if (selectedAdSets.length === 0 || selectedAdSets.length === adsets.length) return rows
-    return rows.filter((r) => r.adset_id && selectedAdSets.includes(r.adset_id))
-  }, [rows, selectedAdSets, adsets.length])
+    let result = rows
+    if (selectedCampaigns.length > 0 && selectedCampaigns.length < campaigns.length) {
+      result = result.filter((r) => r.campaign_id && selectedCampaigns.includes(r.campaign_id))
+    }
+    if (selectedAdSets.length > 0 && selectedAdSets.length < adsets.length) {
+      result = result.filter((r) => r.adset_id && selectedAdSets.includes(r.adset_id))
+    }
+    return result
+  }, [rows, selectedCampaigns, campaigns.length, selectedAdSets, adsets.length])
 
   const filteredCompRows = useMemo(() => {
-    if (selectedAdSets.length === 0 || selectedAdSets.length === adsets.length) return comparisonRows
-    return comparisonRows.filter((r) => r.adset_id && selectedAdSets.includes(r.adset_id))
-  }, [comparisonRows, selectedAdSets, adsets.length])
+    let result = comparisonRows
+    if (selectedCampaigns.length > 0 && selectedCampaigns.length < campaigns.length) {
+      result = result.filter((r) => r.campaign_id && selectedCampaigns.includes(r.campaign_id))
+    }
+    if (selectedAdSets.length > 0 && selectedAdSets.length < adsets.length) {
+      result = result.filter((r) => r.adset_id && selectedAdSets.includes(r.adset_id))
+    }
+    return result
+  }, [comparisonRows, selectedCampaigns, campaigns.length, selectedAdSets, adsets.length])
 
-  // Filter Google Ads rows by selected ad groups
+  // Filter Google Ads rows by selected campaigns + ad groups
   const filteredGaRows = useMemo(() => {
-    if (selectedAdGroups.length === 0 || selectedAdGroups.length === adGroups.length) return googleAdsRows
-    return googleAdsRows.filter((r) => r.ad_group_id && selectedAdGroups.includes(r.ad_group_id))
-  }, [googleAdsRows, selectedAdGroups, adGroups.length])
+    let result = googleAdsRows
+    if (selectedGaCampaigns.length > 0 && selectedGaCampaigns.length < gaCampaigns.length) {
+      result = result.filter((r) => r.campaign_id && selectedGaCampaigns.includes(r.campaign_id))
+    }
+    if (selectedAdGroups.length > 0 && selectedAdGroups.length < adGroups.length) {
+      result = result.filter((r) => r.ad_group_id && selectedAdGroups.includes(r.ad_group_id))
+    }
+    return result
+  }, [googleAdsRows, selectedGaCampaigns, gaCampaigns.length, selectedAdGroups, adGroups.length])
 
   const filteredGaCompRows = useMemo(() => {
-    if (selectedAdGroups.length === 0 || selectedAdGroups.length === adGroups.length) return googleAdsComparisonRows
-    return googleAdsComparisonRows.filter((r) => r.ad_group_id && selectedAdGroups.includes(r.ad_group_id))
-  }, [googleAdsComparisonRows, selectedAdGroups, adGroups.length])
+    let result = googleAdsComparisonRows
+    if (selectedGaCampaigns.length > 0 && selectedGaCampaigns.length < gaCampaigns.length) {
+      result = result.filter((r) => r.campaign_id && selectedGaCampaigns.includes(r.campaign_id))
+    }
+    if (selectedAdGroups.length > 0 && selectedAdGroups.length < adGroups.length) {
+      result = result.filter((r) => r.ad_group_id && selectedAdGroups.includes(r.ad_group_id))
+    }
+    return result
+  }, [googleAdsComparisonRows, selectedGaCampaigns, gaCampaigns.length, selectedAdGroups, adGroups.length])
 
   // Aggregated metrics based on selected platform
   const metrics = useMemo(() => {
@@ -788,21 +871,37 @@ export default function ClientPerformanceView({
         />
 
         {isMeta && (
-          <AdSetSelector
-            items={adsets}
-            selected={selectedAdSets}
-            onChange={setSelectedAdSets}
-            label="ad sets"
-          />
+          <>
+            <AdSetSelector
+              items={campaigns}
+              selected={selectedCampaigns}
+              onChange={setSelectedCampaigns}
+              label="campaigns"
+            />
+            <AdSetSelector
+              items={adsets}
+              selected={selectedAdSets}
+              onChange={setSelectedAdSets}
+              label="ad sets"
+            />
+          </>
         )}
 
         {isGoogleAds && (
-          <AdSetSelector
-            items={adGroups}
-            selected={selectedAdGroups}
-            onChange={setSelectedAdGroups}
-            label="ad groups"
-          />
+          <>
+            <AdSetSelector
+              items={gaCampaigns}
+              selected={selectedGaCampaigns}
+              onChange={setSelectedGaCampaigns}
+              label="campaigns"
+            />
+            <AdSetSelector
+              items={adGroups}
+              selected={selectedAdGroups}
+              onChange={setSelectedAdGroups}
+              label="ad groups"
+            />
+          </>
         )}
 
         <select
