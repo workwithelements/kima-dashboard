@@ -347,11 +347,13 @@ export function buildWeeklyPoints(
     metaWk.set(wk, (metaWk.get(wk) || 0) + spend)
   })
 
-  // Union of all weeks
+  // Only include weeks where we have Shopify revenue data. Including
+  // weeks where Meta spent but Shopify has no data (because the CSV
+  // doesn't cover that period) would inject artificial zero-revenue
+  // points that poison the regression.
   const allWeeks = new Set<string>()
   totalWk.forEach((_, k) => allWeeks.add(k))
   paidWk.forEach((_, k) => allWeeks.add(k))
-  metaWk.forEach((_, k) => allWeeks.add(k))
 
   const points: WeeklyPoint[] = []
   Array.from(allWeeks)
