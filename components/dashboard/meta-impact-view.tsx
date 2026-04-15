@@ -98,6 +98,24 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
   const lagSeries = useMemo(() => lagCorrelationSeries(weeklyPoints, 3), [weeklyPoints])
   const reg0 = useMemo(() => laggedRegression(weeklyPoints, 0), [weeklyPoints])
   const reg1 = useMemo(() => laggedRegression(weeklyPoints, 1), [weeklyPoints])
+  const reg2 = useMemo(() => laggedRegression(weeklyPoints, 2), [weeklyPoints])
+  const reg3 = useMemo(() => laggedRegression(weeklyPoints, 3), [weeklyPoints])
+
+  // Pick the regression with the highest positive R across lags 0-3.
+  // This reflects the strongest signal in the actual data rather than
+  // hardcoding lag-1 which was the prior hypothesis.
+  const bestReg = useMemo(() => {
+    const candidates = [
+      { lag: 0, reg: reg0 },
+      { lag: 1, reg: reg1 },
+      { lag: 2, reg: reg2 },
+      { lag: 3, reg: reg3 },
+    ]
+    // Only consider positive correlations
+    const positives = candidates.filter((c) => c.reg.r > 0)
+    if (positives.length === 0) return candidates[0] // fall back to same-week
+    return positives.reduce((a, b) => (b.reg.r > a.reg.r ? b : a))
+  }, [reg0, reg1, reg2, reg3])
 
   // Aggregate totals across all months for headline ROAS cards
   const totals = useMemo(() => {
@@ -116,8 +134,9 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
   const trueRoas = totals.totalCost > 0 ? totals.totalRevenue / totals.totalCost : 0
   const lastClickRoas = totals.metaSpend > 0 ? totals.paidRevenue / totals.metaSpend : 0
 
-  // Estimated incremental revenue from the lag-1 regression intercept
-  const baselineWeekly = Math.max(0, reg1.intercept)
+  // Estimated incremental revenue from the best-lag regression intercept.
+  // Use whichever lag has the strongest positive correlation in the data.
+  const baselineWeekly = Math.max(0, bestReg.reg.intercept)
   const baselineTotal = baselineWeekly * weeklyPoints.length
   const incremental = totals.totalRevenue - baselineTotal
   // Contextual metrics for the incremental figure
@@ -461,7 +480,7 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
                 value={fmtCurrency(Math.max(0, incremental))}
                 positive={incremental > 0}
                 tooltip={
-                  `Regression-based counterfactual. We fit a line between weekly Meta spend and Shopify revenue one week later. The y-intercept is what the model predicts you'd earn with zero Meta spend (${fmtCurrency(baselineWeekly)}/wk baseline). Multiply by ${weeklyPoints.length} weeks, then subtract from actual total revenue to get the incremental estimate. Directional only - use with caution given the small sample and low R². A holdout test would be needed for causal proof.`
+                  `Regression-based counterfactual using the strongest lag in the data (${bestReg.lag === 0 ? "same week" : `${bestReg.lag}-week lag`}, R² = ${bestReg.reg.rSquared.toFixed(3)}). We fit a line between weekly Meta spend and Shopify revenue at that lag. The y-intercept is what the model predicts you'd earn with zero Meta spend (${fmtCurrency(baselineWeekly)}/wk baseline). Multiply by ${weeklyPoints.length} weeks, then subtract from actual total revenue to get the incremental estimate. Directional only - use with caution given the small sample and low R². A holdout test would be needed for causal proof.`
                 }
               />
             </div>
@@ -496,20 +515,22 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
                     Confidence
                   </p>
                   <p className={`mt-0.5 font-semibold ${
-                    reg1.rSquared >= 0.3
+                    bestReg.reg.rSquared >= 0.3
                       ? "text-green-400"
-                      : reg1.rSquared >= 0.1
+                      : bestReg.reg.rSquared >= 0.1
                         ? "text-amber-400"
                         : "text-red-400"
                   }`}>
-                    {reg1.rSquared >= 0.3
+                    {bestReg.reg.rSquared >= 0.3
                       ? "Moderate"
-                      : reg1.rSquared >= 0.1
+                      : bestReg.reg.rSquared >= 0.1
                         ? "Weak"
                         : "Very low"}
                   </p>
                   <p className="mt-0.5 text-[10px] text-neutral-600">
-                    R² = {reg1.rSquared.toFixed(3)} on {reg1.n} weeks
+                    R² = {bestReg.reg.rSquared.toFixed(3)} on {bestReg.reg.n} weeks
+                    {" · "}
+                    {bestReg.lag === 0 ? "same week" : `${bestReg.lag}-week lag`}
                   </p>
                 </div>
               </div>
