@@ -352,30 +352,6 @@ export default function CreativeAnalysisView({
     return ids
   }, [rows])
 
-  // Ads that have had spend / impressions in the last 7 days of the range
-  const last7DayActiveAdIds = useMemo(() => {
-    const ids = new Set<string>()
-    let maxDate = ""
-    for (const r of rows) {
-      if (r.date && r.date > maxDate) maxDate = r.date
-    }
-    if (!maxDate) return ids
-    const cutoffDate = new Date(maxDate + "T00:00:00")
-    cutoffDate.setDate(cutoffDate.getDate() - 6) // last 7 days inclusive
-    const cutoff = cutoffDate.toISOString().split("T")[0]
-    for (const r of rows) {
-      if (
-        r.date &&
-        r.date >= cutoff &&
-        r.ad_id &&
-        ((r.spend || 0) > 0 || (r.impressions || 0) > 0)
-      ) {
-        ids.add(r.ad_id)
-      }
-    }
-    return ids
-  }, [rows])
-
   // Counts by type
   const counts = useMemo(
     () => countByClassification(enrichedAds),
@@ -760,10 +736,7 @@ export default function CreativeAnalysisView({
       {/* Coverage Analysis — gap identification for stages & jobs */}
       {enrichedAds.length > 0 && enrichedAds.some((a) => a.parsed?.stage || a.parsed?.job) && (
         <ChartErrorBoundary>
-          <CoverageAnalysis
-            ads={enrichedAds.filter((a) => last7DayActiveAdIds.has(a.adId))}
-            currency={currency}
-          />
+          <CoverageAnalysis ads={enrichedAds} currency={currency} />
         </ChartErrorBoundary>
       )}
 
