@@ -524,7 +524,7 @@ export default function PerformanceTable({
                   onClick={() => handleSort(col.key)}
                   className={`cursor-pointer whitespace-nowrap px-3 py-2 text-[11px] font-medium uppercase tracking-wider text-neutral-500 transition hover:text-neutral-300 ${
                     col.align === "left" ? "text-left" : "text-right"
-                  }`}
+                  } ${col.key === "name" ? "sticky left-0 z-10 bg-neutral-900" : ""}`}
                 >
                   <span className="inline-flex items-center gap-1">
                     {col.label}
@@ -568,7 +568,7 @@ export default function PerformanceTable({
                     key={col.key}
                     className={`px-3 py-2.5 text-xs tabular-nums ${
                       col.align === "left" ? "text-left" : "text-right whitespace-nowrap"
-                    } ${isName ? "max-w-[320px] truncate font-medium text-white" : "text-neutral-300"}`}
+                    } ${isName ? "sticky left-0 z-10 bg-neutral-900 max-w-[320px] truncate font-medium text-white" : "text-neutral-300"}`}
                     title={isName ? row.name : undefined}
                   >
                     {isName ? (
