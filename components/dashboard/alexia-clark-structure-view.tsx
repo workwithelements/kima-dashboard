@@ -2,7 +2,7 @@
 
 import { useMemo } from "react"
 import { Card } from "@/components/ui/card"
-import { fmtCurrency, fmtNumber } from "@/lib/utils/format"
+import { fmtCurrency, fmtNumber, fmtPercent } from "@/lib/utils/format"
 import {
   summariseByCampaignType,
   groupBodyPartLandingPages,
@@ -102,28 +102,44 @@ export default function AlexiaClarkStructureView({ rows, currency = "GBP" }: Pro
                         else barColor = "bg-red-500/50"
                       }
                       return (
-                        <div key={lp.landingPage} className="flex items-center gap-3 text-xs">
-                          <div className="w-14 shrink-0 font-medium text-neutral-300">
-                            {lp.landingPage}
-                          </div>
-                          <div className="flex-1 overflow-hidden rounded bg-neutral-800">
-                            <div
-                              className={`h-5 rounded ${barColor} transition-all`}
-                              style={{ width: `${barWidth}%` }}
-                            />
-                          </div>
-                          <div className="flex w-36 shrink-0 items-center justify-end gap-2 tabular-nums">
-                            <span className={lp.isWinner ? "font-semibold text-green-400" : "text-neutral-300"}>
-                              {lp.cpa !== null ? fmtCurrency(lp.cpa, currency) : "—"}
-                            </span>
-                            {lp.isWinner && (
-                              <span className="rounded border border-green-500/30 bg-green-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-green-400">
-                                WINNER
+                        <div key={lp.landingPage} className="space-y-0.5">
+                          <div className="flex items-center gap-3 text-xs">
+                            <div className="w-14 shrink-0 font-medium text-neutral-300">
+                              {lp.landingPage}
+                            </div>
+                            <div className="flex-1 overflow-hidden rounded bg-neutral-800">
+                              <div
+                                className={`h-5 rounded ${barColor} transition-all`}
+                                style={{ width: `${barWidth}%` }}
+                              />
+                            </div>
+                            <div className="flex w-36 shrink-0 items-center justify-end gap-2 tabular-nums">
+                              <span className={lp.isWinner ? "font-semibold text-green-400" : "text-neutral-300"}>
+                                {lp.cpa !== null ? fmtCurrency(lp.cpa, currency) : "—"}
                               </span>
-                            )}
+                              {lp.isWinner && (
+                                <span className="rounded border border-green-500/30 bg-green-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-green-400">
+                                  WINNER
+                                </span>
+                              )}
+                            </div>
+                            <div className="hidden w-32 shrink-0 text-right text-[10px] text-neutral-500 sm:block">
+                              {fmtCurrency(lp.spend, currency)} &middot; {fmtNumber(lp.purchases)} purch
+                            </div>
                           </div>
-                          <div className="hidden w-32 shrink-0 text-right text-[10px] text-neutral-500 sm:block">
-                            {fmtCurrency(lp.spend, currency)} &middot; {fmtNumber(lp.purchases)} purch
+                          {/* Funnel rates */}
+                          <div className="flex items-center gap-3 pl-[calc(3.5rem+0.75rem)] text-[10px] text-neutral-500">
+                            <span>
+                              Landing {fmtPercent(lp.landingRate * 100)}
+                            </span>
+                            <span className="text-neutral-700">/</span>
+                            <span>
+                              Reg {fmtPercent(lp.regRate * 100)}
+                            </span>
+                            <span className="text-neutral-700">/</span>
+                            <span>
+                              Purch {fmtPercent(lp.purchaseRate * 100)}
+                            </span>
                           </div>
                         </div>
                       )

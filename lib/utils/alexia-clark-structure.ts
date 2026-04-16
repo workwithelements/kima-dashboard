@@ -89,9 +89,18 @@ export type CampaignTypeSummary = {
 export type LandingPageBreakdown = {
   landingPage: string
   spend: number
+  impressions: number
+  landingPageViews: number
+  registrations: number
   purchases: number
   cpa: number | null
   cvr: number
+  /** Impression → Landing Page View rate */
+  landingRate: number
+  /** Landing Page View → Registration rate */
+  regRate: number
+  /** Registration → Purchase rate */
+  purchaseRate: number
   isWinner: boolean
 }
 
@@ -194,12 +203,21 @@ export function groupBodyPartLandingPages(
       const agg = aggregateMetrics(lpRows)
       const cpa = agg.purchases > 0 ? agg.spend / agg.purchases : null
       const cvr = agg.impressions > 0 ? agg.purchases / agg.impressions : 0
+      const landingRate = agg.impressions > 0 ? agg.landingPageViews / agg.impressions : 0
+      const regRate = agg.landingPageViews > 0 ? agg.registrationsCompleted / agg.landingPageViews : 0
+      const purchaseRate = agg.registrationsCompleted > 0 ? agg.purchases / agg.registrationsCompleted : 0
       landingPages.push({
         landingPage: lp,
         spend: agg.spend,
+        impressions: agg.impressions,
+        landingPageViews: agg.landingPageViews,
+        registrations: agg.registrationsCompleted,
         purchases: agg.purchases,
         cpa,
         cvr,
+        landingRate,
+        regRate,
+        purchaseRate,
         isWinner: false,
       })
       totalSpend += agg.spend
