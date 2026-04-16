@@ -72,7 +72,6 @@ export default function CreativeTestsView({
   const [expandedTestId, setExpandedTestId] = useState<string | null>(null)
   const [linkingId, setLinkingId] = useState<string | null>(null)
   const [notionUrl, setNotionUrl] = useState("")
-  const [showConformingOnly, setShowConformingOnly] = useState(true)
   const [analyzingId, setAnalyzingId] = useState<string | null>(null)
 
   const thresholds = {
@@ -88,9 +87,8 @@ export default function CreativeTestsView({
     keyAction === "landing_page_views" ? "LPVs" :
     "Purchases"
 
-  // Apply naming convention filter
+  // Always filter to conforming tests (correct naming conventions only)
   const conformingTests = useMemo(() => {
-    if (!showConformingOnly) return tests
     return tests.filter((test) =>
       test.variant_ad_ids.length > 0 &&
       test.variant_ad_ids.every((adId) => {
@@ -98,9 +96,7 @@ export default function CreativeTestsView({
         return name && isConformingAdName(name, namingConfig)
       })
     )
-  }, [tests, showConformingOnly, adNames, namingConfig])
-
-  const hiddenCount = tests.length - conformingTests.length
+  }, [tests, adNames, namingConfig])
 
   // Split into current (active, not yet analysed) and completed (analysed)
   const currentTests = useMemo(() =>
@@ -205,34 +201,16 @@ export default function CreativeTestsView({
             )}
           </button>
         </div>
-
-        <label className="flex items-center gap-2 text-sm text-neutral-400 cursor-pointer select-none">
-          <span>Naming conventions only</span>
-          <button
-            role="switch"
-            aria-checked={showConformingOnly}
-            onClick={() => setShowConformingOnly((v) => !v)}
-            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition ${
-              showConformingOnly
-                ? "border-brand-lime/40 bg-brand-lime/20"
-                : "border-neutral-700 bg-neutral-800"
-            }`}
-          >
-            <span
-              className={`inline-block h-3.5 w-3.5 rounded-full transition-transform ${
-                showConformingOnly
-                  ? "translate-x-[18px] bg-brand-lime"
-                  : "translate-x-[3px] bg-neutral-500"
-              }`}
-            />
-          </button>
-          {hiddenCount > 0 && (
-            <span className="text-xs text-neutral-600">
-              ({hiddenCount} hidden)
-            </span>
-          )}
-        </label>
       </div>
+
+      {/* Key action requirement check — warn if no test_key_action is set on the config */}
+      {config && !config.test_key_action && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-400">
+          No test optimisation event set. Go to Settings &gt; Creative Tests and choose
+          the conversion event tests should be measured against (e.g. Purchases, Add to Carts,
+          Registrations).
+        </div>
+      )}
 
       {/* ── CURRENT TESTS TAB ── */}
       {tab === "current" && (
@@ -308,8 +286,22 @@ export default function CreativeTestsView({
                       </div>
                     </div>
 
-                    {/* Status badges */}
-                    <div className="flex items-center gap-1 shrink-0">
+                    {/* Status badges + Notion link */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {(() => {
+                        const notionTest = group.tests.find((t) => t.notion_page_url)
+                        return notionTest?.notion_page_url ? (
+                          <a
+                            href={notionTest.notion_page_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-blue-400 hover:underline"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            Notion &rarr;
+                          </a>
+                        ) : null
+                      })()}
                       {group.tests.some((t) => t.status === "ready") && (
                         <span className="rounded-full border px-2.5 py-0.5 text-xs font-medium bg-amber-500/15 text-amber-400 border-amber-500/30">
                           Ready
@@ -337,8 +329,21 @@ export default function CreativeTestsView({
                         <div key={test.id} className="border-b border-neutral-800 last:border-b-0">
                           <div className="flex items-center gap-4 px-4 py-3 bg-neutral-800/30">
                             <div className="min-w-0 flex-1">
-                              <div className="text-sm font-medium text-neutral-300">
-                                {test.adset_name || test.adset_id}
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium text-neutral-300">
+                                  {test.adset_name || test.adset_id}
+                                </span>
+                                {test.notion_page_url && (
+                                  <a
+                                    href={test.notion_page_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-[10px] text-blue-400 hover:underline"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    Notion
+                                  </a>
+                                )}
                               </div>
                               <div className="text-xs text-neutral-500">
                                 {test.variant_count} variants &middot; {test.days_live} days &middot; {fmtCurrency(test.total_spend, currency)} spend

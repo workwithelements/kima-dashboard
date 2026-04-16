@@ -65,6 +65,7 @@ export type CreativeTestConfig = {
   high_spend_alert: number
   notion_board_id: string | null
   slack_channel_id: string | null
+  test_key_action: string | null
 }
 
 /** Rank of a single ad within its ad set (by CPA, lower = better) */
@@ -149,7 +150,8 @@ async function _fetchCreativeTestsInner(
 
   const tests: CreativeTest[] = testsResp.data ?? []
   const config: CreativeTestConfig | null = configResp.data ?? null
-  const keyAction = scorecardResp.data?.key_action ?? "purchases"
+  // Use the test-specific key action if set, otherwise fall back to scorecard
+  const keyAction = config?.test_key_action || scorecardResp.data?.key_action || "purchases"
 
   // Build naming config
   let namingConfig: NamingConfig | undefined

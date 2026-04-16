@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS creative_test_config (
   high_spend_alert  NUMERIC NOT NULL DEFAULT 150,
   notion_board_id   TEXT,
   slack_channel_id  TEXT,
+  test_key_action   TEXT,
   created_at        TIMESTAMPTZ DEFAULT now(),
   updated_at        TIMESTAMPTZ DEFAULT now()
 );

@@ -159,6 +159,24 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
   const lagSeries = useMemo(() => lagCorrelationSeries(weeklyPoints, 3), [weeklyPoints])
   const reg0 = useMemo(() => laggedRegression(weeklyPoints, 0), [weeklyPoints])
   const reg1 = useMemo(() => laggedRegression(weeklyPoints, 1), [weeklyPoints])
+  const reg2 = useMemo(() => laggedRegression(weeklyPoints, 2), [weeklyPoints])
+  const reg3 = useMemo(() => laggedRegression(weeklyPoints, 3), [weeklyPoints])
+
+  // Pick the regression with the highest positive R across lags 0-3.
+  // This reflects the strongest signal in the actual data rather than
+  // hardcoding lag-1 which was the prior hypothesis.
+  const bestReg = useMemo(() => {
+    const candidates = [
+      { lag: 0, reg: reg0 },
+      { lag: 1, reg: reg1 },
+      { lag: 2, reg: reg2 },
+      { lag: 3, reg: reg3 },
+    ]
+    // Only consider positive correlations
+    const positives = candidates.filter((c) => c.reg.r > 0)
+    if (positives.length === 0) return candidates[0] // fall back to same-week
+    return positives.reduce((a, b) => (b.reg.r > a.reg.r ? b : a))
+  }, [reg0, reg1, reg2, reg3])
 
   // Aggregate totals across all months for headline ROAS cards
   const totals = useMemo(() => {
@@ -177,10 +195,18 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
   const trueRoas = totals.totalCost > 0 ? totals.totalRevenue / totals.totalCost : 0
   const lastClickRoas = totals.metaSpend > 0 ? totals.paidRevenue / totals.metaSpend : 0
 
-  // Estimated incremental revenue from the lag-1 regression intercept
-  const baselineWeekly = reg1.intercept
+  // Estimated incremental revenue from the best-lag regression intercept.
+  // Use whichever lag has the strongest positive correlation in the data.
+  const baselineWeekly = Math.max(0, bestReg.reg.intercept)
   const baselineTotal = baselineWeekly * weeklyPoints.length
   const incremental = totals.totalRevenue - baselineTotal
+  // Contextual metrics for the incremental figure
+  const actualWeeklyAvg =
+    weeklyPoints.length > 0 ? totals.totalRevenue / weeklyPoints.length : 0
+  const baselineUpliftPct =
+    baselineWeekly > 0 ? ((actualWeeklyAvg - baselineWeekly) / baselineWeekly) * 100 : 0
+  const incrementalSharePct =
+    totals.totalRevenue > 0 ? (Math.max(0, incremental) / totals.totalRevenue) * 100 : 0
 
   // Attribution comparison data for stacked bars
   const attributionData = useMemo(
@@ -393,22 +419,51 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
 
           {/* ── Regression summary ── */}
           <Card>
-            <h3 className="mb-3 text-sm font-semibold">Regression Summary</h3>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Regression Summary</h3>
+            </div>
             <div className="grid grid-cols-2 gap-4 text-xs md:grid-cols-4">
               <MetricCard label="R² (same week)" value={reg0.rSquared.toFixed(3)} />
               <MetricCard label="R² (1-week lag)" value={reg1.rSquared.toFixed(3)} />
-              <MetricCard label="Baseline weekly revenue" value={fmtCurrency(Math.max(0, baselineWeekly))} />
+              <MetricCard label="Baseline weekly revenue" value={fmtCurrency(baselineWeekly)} />
               <MetricCard
                 label="Estimated incremental from Meta"
                 value={fmtCurrency(Math.max(0, incremental))}
                 positive={incremental > 0}
+                tooltip={
+                  `Regression-based counterfactual using the strongest lag in the data (${bestReg.lag === 0 ? "same week" : `${bestReg.lag}-week lag`}, R² = ${bestReg.reg.rSquared.toFixed(3)}). We fit a line between weekly Meta spend and Shopify revenue at that lag. The y-intercept is what the model predicts you'd earn with zero Meta spend (${fmtCurrency(baselineWeekly)}/wk baseline). Multiply by ${weeklyPoints.length} weeks, then subtract from actual total revenue to get the incremental estimate. Directional only - use with caution given the small sample and low R². A holdout test would be needed for causal proof.`
+                }
               />
             </div>
+
+            {incremental > 0 && (
+              <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg border border-neutral-800 bg-neutral-800/30 p-3 text-xs md:grid-cols-3">
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-neutral-500">Share of total revenue</p>
+                  <p className="mt-0.5 font-semibold text-neutral-200">{incrementalSharePct.toFixed(1)}%</p>
+                  <p className="mt-0.5 text-[10px] text-neutral-600">{fmtCurrency(Math.max(0, incremental))} of {fmtCurrency(totals.totalRevenue)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-neutral-500">Uplift on baseline weekly</p>
+                  <p className="mt-0.5 font-semibold text-neutral-200">+{baselineUpliftPct.toFixed(0)}%</p>
+                  <p className="mt-0.5 text-[10px] text-neutral-600">Actual {fmtCurrency(actualWeeklyAvg)}/wk vs baseline {fmtCurrency(baselineWeekly)}/wk</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-neutral-500">Confidence</p>
+                  <p className={`mt-0.5 font-semibold ${bestReg.reg.rSquared >= 0.3 ? "text-green-400" : bestReg.reg.rSquared >= 0.1 ? "text-amber-400" : "text-red-400"}`}>
+                    {bestReg.reg.rSquared >= 0.3 ? "Moderate" : bestReg.reg.rSquared >= 0.1 ? "Weak" : "Very low"}
+                  </p>
+                  <p className="mt-0.5 text-[10px] text-neutral-600">
+                    R² = {bestReg.reg.rSquared.toFixed(3)} on {bestReg.reg.n} weeks{" · "}{bestReg.lag === 0 ? "same week" : `${bestReg.lag}-week lag`}
+                  </p>
+                </div>
+              </div>
+            )}
+
             <p className="mt-3 text-[11px] text-neutral-600">
               Baseline weekly revenue is the regression intercept (the level expected with
               zero Meta spend). Incremental is total revenue minus baseline scaled across
-              the period. This is directional only - a holdout test would be needed for
-              causal proof.
+              the period. Directional only - a holdout test would be needed for causal proof.
             </p>
           </Card>
         </>
@@ -741,10 +796,30 @@ function RoasCell({ value }: { value: number }) {
   return <span className={color}>{value.toFixed(2)}x</span>
 }
 
-function MetricCard({ label, value, positive }: { label: string; value: string; positive?: boolean }) {
+function MetricCard({
+  label,
+  value,
+  positive,
+  tooltip,
+}: {
+  label: string
+  value: string
+  positive?: boolean
+  tooltip?: string
+}) {
   return (
     <div>
-      <p className="text-[11px] uppercase tracking-wider text-neutral-500">{label}</p>
+      <p className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-neutral-500">
+        <span>{label}</span>
+        {tooltip && (
+          <span
+            className="inline-flex h-3.5 w-3.5 shrink-0 cursor-help items-center justify-center rounded-full border border-neutral-600 text-[9px] text-neutral-500 normal-case tracking-normal hover:border-neutral-400 hover:text-neutral-300"
+            title={tooltip}
+          >
+            ?
+          </span>
+        )}
+      </p>
       <p className={`mt-1 text-lg font-semibold tabular-nums ${positive ? "text-green-400" : "text-neutral-200"}`}>
         {value}
       </p>

@@ -50,6 +50,7 @@ export async function PUT(
   if (body.high_spend_alert !== undefined) payload.high_spend_alert = body.high_spend_alert
   if (body.notion_board_id !== undefined) payload.notion_board_id = body.notion_board_id
   if (body.slack_channel_id !== undefined) payload.slack_channel_id = body.slack_channel_id
+  if (body.test_key_action !== undefined) payload.test_key_action = body.test_key_action || null
 
   const db = createServiceClient()
   const { data, error } = await db

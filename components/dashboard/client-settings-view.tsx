@@ -73,6 +73,7 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
     high_spend_alert: 150,
     notion_board_id: "",
     slack_channel_id: "",
+    test_key_action: "",
   })
   const [testConfigLoading, setTestConfigLoading] = useState(true)
   const [testConfigSaving, setTestConfigSaving] = useState(false)
@@ -124,6 +125,7 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
               high_spend_alert: data.high_spend_alert ?? 150,
               notion_board_id: data.notion_board_id ?? "",
               slack_channel_id: data.slack_channel_id ?? "",
+              test_key_action: data.test_key_action ?? "",
             })
           }
         }
@@ -909,6 +911,28 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
                   }`}
                 />
               </button>
+            </div>
+
+            {/* Test optimisation event */}
+            <div>
+              <label className="mb-1 block text-[11px] text-neutral-500">Test optimisation event</label>
+              <select
+                value={testConfig.test_key_action}
+                onChange={(e) => setTestConfig((c) => ({ ...c, test_key_action: e.target.value }))}
+                className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-brand-lime"
+              >
+                <option value="">Not set (required)</option>
+                <option value="unique_link_clicks">Link Clicks</option>
+                <option value="landing_page_views">Landing Page Views</option>
+                <option value="adds_to_cart">Add to Carts</option>
+                <option value="checkouts_initiated">Checkouts Initiated</option>
+                <option value="registrations_completed">Registrations</option>
+                <option value="app_installs">App Installs</option>
+                <option value="purchases">Purchases</option>
+              </select>
+              <p className="mt-1 text-[10px] text-neutral-600">
+                The conversion event tests are measured against. Required for the Creative Tests tab.
+              </p>
             </div>
 
             {/* Thresholds */}

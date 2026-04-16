@@ -403,6 +403,17 @@ function CoverageMatrix({
 }) {
   const [expanded, setExpanded] = useState(jobs.length <= 8)
 
+  // Total spend across all matrix cells, used to compute % share per cell
+  const totalMatrixSpend = useMemo(() => {
+    let total = 0
+    matrix.forEach((row) => {
+      row.forEach((cell) => {
+        total += cell.spend
+      })
+    })
+    return total
+  }, [matrix])
+
   return (
     <div>
       <button
@@ -455,14 +466,18 @@ function CoverageMatrix({
                         )
                       }
                       const cellStyle = STATUS_STYLES[cell.status]
+                      const pct = totalMatrixSpend > 0
+                        ? (cell.spend / totalMatrixSpend) * 100
+                        : 0
                       return (
                         <td key={stage} className="py-2 px-2 text-center">
                           <span
                             className={`inline-block rounded border ${cellStyle.border} ${cellStyle.bg} px-2 py-1`}
+                            title={fmtCurrency(cell.spend, currency)}
                           >
                             <span className="text-neutral-300">{cell.adCount} ads</span>
                             <span className="text-neutral-500 ml-1">
-                              {fmtCurrency(cell.spend, currency)}
+                              {pct.toFixed(1)}%
                             </span>
                           </span>
                         </td>
