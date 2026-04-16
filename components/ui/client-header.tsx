@@ -10,6 +10,7 @@ type Props = {
   clientName: string
   slug?: string
   creativeTestsEnabled?: boolean
+  marketingImpactEnabled?: boolean
 }
 
 const TABS = [
@@ -18,13 +19,13 @@ const TABS = [
   { label: "Creative Tests", href: "/tests", requiresTestConfig: true },
   { label: "Budget & Pacing", href: "/pacing" },
   { label: "Reach Analysis", href: "/reach" },
-  { label: "Meta Impact", href: "/meta-impact", clientOnly: "Mooncup" },
+  { label: "Marketing Impact", href: "/meta-impact", requiresMarketingImpact: true },
   { label: "Retention Lift Test", href: "/retention-lift-test", clientOnly: "TouchNote" },
   { label: "NAC Analysis", href: "/nac-analysis", clientOnly: "TouchNote" },
   { label: "Settings", href: "/settings" },
 ]
 
-export default function ClientHeader({ clientId, clientName, slug, creativeTestsEnabled }: Props) {
+export default function ClientHeader({ clientId, clientName, slug, creativeTestsEnabled, marketingImpactEnabled }: Props) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const basePath = `/dashboard/clients/${clientId}`
@@ -106,6 +107,7 @@ export default function ClientHeader({ clientId, clientName, slug, creativeTests
         {TABS.filter((tab) => {
           if (tab.clientOnly && tab.clientOnly !== clientName) return false
           if (tab.requiresTestConfig && !creativeTestsEnabled) return false
+          if (tab.requiresMarketingImpact && !marketingImpactEnabled) return false
           return true
         }).map((tab) => {
           const href = basePath + tab.href + (tab.href === "/settings" ? "" : suffix)

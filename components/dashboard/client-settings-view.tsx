@@ -86,15 +86,22 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
   const [shopifySaving, setShopifySaving] = useState(false)
   const [shopifySaved, setShopifySaved] = useState(false)
 
+  /* ── Marketing Impact config state ── */
+  const [marketingImpactEnabled, setMarketingImpactEnabled] = useState(false)
+  const [marketingImpactLoading, setMarketingImpactLoading] = useState(true)
+  const [marketingImpactSaving, setMarketingImpactSaving] = useState(false)
+  const [marketingImpactSaved, setMarketingImpactSaved] = useState(false)
+
   /* ── Load existing config ── */
   useEffect(() => {
     async function load() {
       try {
-        const [namingRes, alertsRes, testConfigRes, shopifyRes] = await Promise.all([
+        const [namingRes, alertsRes, testConfigRes, shopifyRes, marketingImpactRes] = await Promise.all([
           fetch(`/api/naming-config/${clientId}`),
           fetch(`/api/alert-config/${clientId}`),
           fetch(`/api/creative-test-config/${clientId}`),
           fetch(`/api/clients/${clientId}/shopify`),
+          fetch(`/api/clients/${clientId}/marketing-impact`),
         ])
         if (namingRes.ok) {
           const data = await namingRes.json()
@@ -129,6 +136,12 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
             setShopifyDomain(data.store_domain ?? "")
           }
         }
+        if (marketingImpactRes.ok) {
+          const data = await marketingImpactRes.json()
+          if (data) {
+            setMarketingImpactEnabled(data.enabled ?? false)
+          }
+        }
       } catch {
         /* ignore */
       }
@@ -136,6 +149,7 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
       setAlertsLoading(false)
       setTestConfigLoading(false)
       setShopifyLoading(false)
+      setMarketingImpactLoading(false)
     }
     load()
   }, [clientId])
@@ -354,6 +368,23 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
       }
     } catch { /* ignore */ }
     setShopifySaving(false)
+  }
+
+  /* ── Save Marketing Impact config ── */
+  async function handleSaveMarketingImpact() {
+    setMarketingImpactSaving(true)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/marketing-impact`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: marketingImpactEnabled }),
+      })
+      if (res.ok) {
+        setMarketingImpactSaved(true)
+        setTimeout(() => setMarketingImpactSaved(false), 3000)
+      }
+    } catch { /* ignore */ }
+    setMarketingImpactSaving(false)
   }
 
   /* ── Render ── */
@@ -992,6 +1023,61 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
                 className="rounded-lg bg-brand-lime px-5 py-2 text-xs font-semibold text-black transition hover:bg-brand-lime/90 disabled:opacity-50"
               >
                 {testConfigSaving ? "Saving..." : "Save Config"}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ── Marketing Impact Section ── */}
+      <section className="rounded-xl border border-neutral-800 bg-neutral-900/50">
+        <div className="border-b border-neutral-800 px-5 py-4">
+          <h2 className="text-sm font-semibold text-neutral-100">
+            Marketing Impact
+          </h2>
+          <p className="mt-1 text-[11px] text-neutral-500">
+            Enable the Marketing Impact tab to analyse the relationship between Meta spend
+            and business outcomes across channels (Shopify, organic search, sessions, Amazon).
+          </p>
+        </div>
+
+        {marketingImpactLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-lime border-t-transparent" />
+          </div>
+        ) : (
+          <div className="space-y-4 p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-neutral-300">Enable Marketing Impact tab</p>
+                <p className="text-[11px] text-neutral-500">Shows multi-channel impact analysis with correlation, adstock, and decomposition</p>
+              </div>
+              <button
+                onClick={() => setMarketingImpactEnabled((v) => !v)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
+                  marketingImpactEnabled ? "bg-brand-lime" : "bg-neutral-700"
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                    marketingImpactEnabled ? "translate-x-[18px]" : "translate-x-[3px]"
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t border-neutral-800 pt-4">
+              {marketingImpactSaved && (
+                <span className="text-xs font-medium text-green-400">
+                  Saved
+                </span>
+              )}
+              <button
+                onClick={handleSaveMarketingImpact}
+                disabled={marketingImpactSaving}
+                className="rounded-lg bg-brand-lime px-5 py-2 text-xs font-semibold text-black transition hover:bg-brand-lime/90 disabled:opacity-50"
+              >
+                {marketingImpactSaving ? "Saving..." : "Save"}
               </button>
             </div>
           </div>

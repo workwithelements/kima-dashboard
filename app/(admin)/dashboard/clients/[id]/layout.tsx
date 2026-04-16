@@ -11,11 +11,11 @@ export default async function ClientLayout({
 }) {
   const supabase = createServiceClient()
 
-  // Try with slug first, fall back without it if the column doesn't exist yet
-  let client: { id: string; name: string; slug?: string } | null = null
+  // Try with slug + marketing_impact_enabled first, fall back if columns don't exist yet
+  let client: { id: string; name: string; slug?: string; marketing_impact_enabled?: boolean } | null = null
   const { data: full, error } = await supabase
     .from("clients")
-    .select("id, name, slug")
+    .select("id, name, slug, marketing_impact_enabled")
     .eq("id", params.id)
     .single()
 
@@ -25,7 +25,7 @@ export default async function ClientLayout({
       .select("id, name")
       .eq("id", params.id)
       .single()
-    client = fallback ? { ...fallback, slug: undefined } : null
+    client = fallback ? { ...fallback, slug: undefined, marketing_impact_enabled: undefined } : null
   } else {
     client = full
   }
@@ -43,7 +43,7 @@ export default async function ClientLayout({
 
   return (
     <div className="space-y-6">
-      <ClientHeader clientId={client.id} clientName={client.name} slug={client.slug} creativeTestsEnabled={creativeTestsEnabled} />
+      <ClientHeader clientId={client.id} clientName={client.name} slug={client.slug} creativeTestsEnabled={creativeTestsEnabled} marketingImpactEnabled={client.marketing_impact_enabled ?? false} />
       {children}
     </div>
   )

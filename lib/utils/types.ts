@@ -61,6 +61,7 @@ export type Client = {
   shopify_store_domain?: string | null
   monthly_budget?: number | null
   currency_code?: string | null
+  marketing_impact_enabled?: boolean | null
 }
 
 /** Date range for filters */
