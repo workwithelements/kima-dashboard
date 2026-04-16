@@ -6,7 +6,6 @@ import {
   ComposedChart,
   Line,
   Bar,
-  Cell,
   XAxis,
   YAxis,
   Tooltip,
@@ -24,10 +23,8 @@ import {
   buildMonthlySummaries,
   buildWeeklyPoints,
   buildExtendedWeeklyPoints,
-  lagCorrelationSeries,
   laggedRegression,
   lagCorrelationMulti,
-  correlationMatrix,
   correlationStrength,
   dailyToMonthlyMetaSpend,
   DEFAULT_META_SPEND,
@@ -39,20 +36,13 @@ import {
   type DailySessionsRow,
   type MonthlySummary,
   type ExtendedWeeklyPoint,
+  type LagCorrelation,
 } from "@/lib/utils/meta-impact"
 
 type Props = {
   clientId: string
   dailyMetaSpend?: DailyMetaSpend[]
 }
-
-type SubTab = "overview" | "trends" | "correlation"
-
-const SUB_TABS: { key: SubTab; label: string }[] = [
-  { key: "overview", label: "Overview" },
-  { key: "trends", label: "Channel Trends" },
-  { key: "correlation", label: "Correlation & Lag" },
-]
 
 const STORAGE_TOTAL = "meta-impact:total-csv"
 const STORAGE_PAID = "meta-impact:paid-csv"
@@ -67,9 +57,7 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
   const [searchCsv, setSearchCsv] = useState<string>("")
   const [sessionsCsv, setSessionsCsv] = useState<string>("")
   const [amazonCsv, setAmazonCsv] = useState<string>("")
-  const [activeTab, setActiveTab] = useState<SubTab>("overview")
   const [adstockDecay, setAdstockDecay] = useState(0.6)
-  const [lagTarget, setLagTarget] = useState<string>("revenue")
 
   // Load any cached CSVs from localStorage
   useEffect(() => {
@@ -156,7 +144,6 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
     [totalRows, paidRows, monthlyMetaSpend, dailyMetaSpend]
   )
 
-  const lagSeries = useMemo(() => lagCorrelationSeries(weeklyPoints, 3), [weeklyPoints])
   const reg0 = useMemo(() => laggedRegression(weeklyPoints, 0), [weeklyPoints])
   const reg1 = useMemo(() => laggedRegression(weeklyPoints, 1), [weeklyPoints])
   const reg2 = useMemo(() => laggedRegression(weeklyPoints, 2), [weeklyPoints])
@@ -235,46 +222,31 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
   const hasSessions = sessionsRows.length > 0
   const hasAmazon = amazonRows.length > 0
 
-  // Correlation matrix across all available series
-  const corrMatrix = useMemo(() => {
-    if (extendedWeekly.length < 3) return []
-    const series: Record<string, number[]> = {
-      "Meta Spend (adstocked)": extendedWeekly.map((p) => p.adstockedSpend),
-      "Shopify Revenue": extendedWeekly.map((p) => p.revenue),
-    }
-    if (hasSearch) series["GSC Clicks"] = extendedWeekly.map((p) => p.searchClicks)
-    if (hasSearch) series["GSC Impressions"] = extendedWeekly.map((p) => p.searchImpressions)
-    if (hasSessions) series["Store Sessions"] = extendedWeekly.map((p) => p.shopifySessions)
-    if (hasAmazon) series["Amazon Sales"] = extendedWeekly.map((p) => p.amazonSales)
-    return correlationMatrix(series)
-  }, [extendedWeekly, hasSearch, hasSessions, hasAmazon])
-
-  // Per-channel lag analysis (target selectable)
-  const lagTargetOptions = useMemo(() => {
-    const opts = [{ value: "revenue", label: "Shopify Revenue" }]
-    if (hasSearch) opts.push({ value: "searchClicks", label: "GSC Clicks" })
-    if (hasSessions) opts.push({ value: "shopifySessions", label: "Store Sessions" })
-    if (hasAmazon) opts.push({ value: "amazonSales", label: "Amazon Sales" })
-    return opts
-  }, [hasSearch, hasSessions, hasAmazon])
-
-  const multiLagSeries = useMemo(() => {
-    if (extendedWeekly.length < 3) return []
-    const x = extendedWeekly.map((p) => p.adstockedSpend)
-    const y = extendedWeekly.map((p) => {
-      const val = (p as unknown as Record<string, number>)[lagTarget]
-      return typeof val === "number" ? val : p.revenue
-    })
-    return lagCorrelationMulti(x, y, 4)
-  }, [extendedWeekly, lagTarget])
-
-  // Auto-generated insight
-  const strongestCorr = useMemo(() => {
-    if (corrMatrix.length === 0) return null
-    const metaCorrs = corrMatrix.filter((e: { xLabel: string }) => e.xLabel.includes("Meta"))
-    if (metaCorrs.length === 0) return null
-    return metaCorrs.reduce((best: typeof corrMatrix[0], c: typeof corrMatrix[0]) => (Math.abs(c.r) > Math.abs(best.r) ? c : best))
-  }, [corrMatrix])
+  // Per-section lag analyses for the funnel narrative
+  const lagMetaToImpressions = useMemo(
+    () => extendedWeekly.length >= 3 && hasSearch
+      ? lagCorrelationMulti(extendedWeekly.map(p => p.adstockedSpend), extendedWeekly.map(p => p.searchImpressions), 4)
+      : [],
+    [extendedWeekly, hasSearch]
+  )
+  const lagClicksToRevenue = useMemo(
+    () => extendedWeekly.length >= 3 && hasSearch
+      ? lagCorrelationMulti(extendedWeekly.map(p => p.searchClicks), extendedWeekly.map(p => p.revenue), 4)
+      : [],
+    [extendedWeekly, hasSearch]
+  )
+  const lagMetaToRevenue = useMemo(
+    () => extendedWeekly.length >= 3
+      ? lagCorrelationMulti(extendedWeekly.map(p => p.adstockedSpend), extendedWeekly.map(p => p.revenue), 4)
+      : [],
+    [extendedWeekly]
+  )
+  const lagMetaToAmazon = useMemo(
+    () => extendedWeekly.length >= 3 && hasAmazon
+      ? lagCorrelationMulti(extendedWeekly.map(p => p.adstockedSpend), extendedWeekly.map(p => p.amazonSales), 4)
+      : [],
+    [extendedWeekly, hasAmazon]
+  )
 
   const noData = totalRows.length === 0 && paidRows.length === 0
 
@@ -286,23 +258,6 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
           Analyses the relationship between Meta Ads spend and business outcomes across
           channels to estimate the incremental impact of advertising.
         </p>
-      </div>
-
-      {/* Sub-tab navigation */}
-      <div className="flex gap-1">
-        {SUB_TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`rounded-full px-4 py-1.5 text-xs font-medium transition ${
-              activeTab === tab.key
-                ? "bg-brand-lime text-black"
-                : "bg-neutral-800 text-neutral-400 hover:text-white"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
       </div>
 
       {/* CSV upload */}
@@ -331,18 +286,213 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
         </Card>
       )}
 
-      {!noData && activeTab === "overview" && (
+      {!noData && (
         <>
-          {/* ── ROAS gauge cards ── */}
+          {/* ── 1. ROAS gauge cards ── */}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <RoasCard label="Headline ROAS" sub="Shopify total / Meta spend" value={headlineRoas} />
             <RoasCard label="True ROAS" sub="Shopify total / total marketing cost" value={trueRoas} />
             <RoasCard label="Last-Click ROAS" sub="Shopify paid / Meta spend" value={lastClickRoas} />
           </div>
 
-          {/* ── Monthly Revenue vs Cost Table ── */}
+          {/* ── 3. Meta Spend vs Search (if GSC data) ── */}
+          {hasSearch && extendedWeekly.length > 0 && (
+            <Card>
+              <h3 className="mb-3 text-sm font-semibold">Meta Spend vs Search Impressions</h3>
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={extendedWeekly}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
+                    <XAxis dataKey="weekLabel" stroke="#737373" tick={{ fontSize: 10 }} />
+                    <YAxis yAxisId="left" stroke="#FF69B4" tick={{ fontSize: 11 }} tickFormatter={(v) => `£${(v / 1000).toFixed(0)}k`} />
+                    <YAxis yAxisId="right" orientation="right" stroke="#3b82f6" tick={{ fontSize: 11 }} tickFormatter={(v) => fmtNumber(v)} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line yAxisId="left" type="monotone" dataKey="adstockedSpend" name="Meta Spend" stroke="#FF69B4" strokeWidth={2} dot={false} />
+                    <Line yAxisId="right" type="monotone" dataKey="searchImpressions" name="Search Impressions" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-3">
+                <FindingCard lagSeries={lagMetaToImpressions} xName="Meta spend" yName="search impressions" />
+              </div>
+            </Card>
+          )}
+
+          {/* ── 4. Search vs Revenue (if GSC data) ── */}
+          {hasSearch && extendedWeekly.length > 0 && (
+            <Card>
+              <h3 className="mb-3 text-sm font-semibold">Search Clicks vs Shopify Revenue</h3>
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={extendedWeekly}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
+                    <XAxis dataKey="weekLabel" stroke="#737373" tick={{ fontSize: 10 }} />
+                    <YAxis yAxisId="left" stroke="#3b82f6" tick={{ fontSize: 11 }} tickFormatter={(v) => fmtNumber(v)} />
+                    <YAxis yAxisId="right" orientation="right" stroke="#CDFF00" tick={{ fontSize: 11 }} tickFormatter={(v) => `£${(v / 1000).toFixed(0)}k`} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line yAxisId="left" type="monotone" dataKey="searchClicks" name="Search Clicks" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                    <Line yAxisId="right" type="monotone" dataKey="revenue" name="Shopify Revenue" stroke="#CDFF00" strokeWidth={2} dot={false} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-3">
+                <FindingCard lagSeries={lagClicksToRevenue} xName="Search clicks" yName="Shopify revenue" />
+              </div>
+            </Card>
+          )}
+
+          {/* ── 5. Meta Spend vs Revenue (always) ── */}
+          {extendedWeekly.length > 0 && (
+            <Card>
+              <h3 className="mb-3 text-sm font-semibold">Meta Spend vs Shopify Revenue</h3>
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={extendedWeekly}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
+                    <XAxis dataKey="weekLabel" stroke="#737373" tick={{ fontSize: 10 }} />
+                    <YAxis yAxisId="left" stroke="#FF69B4" tick={{ fontSize: 11 }} tickFormatter={(v) => `£${(v / 1000).toFixed(0)}k`} />
+                    <YAxis yAxisId="right" orientation="right" stroke="#CDFF00" tick={{ fontSize: 11 }} tickFormatter={(v) => `£${(v / 1000).toFixed(0)}k`} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line yAxisId="left" type="monotone" dataKey="adstockedSpend" name="Meta Spend" stroke="#FF69B4" strokeWidth={2} dot={false} />
+                    <Line yAxisId="right" type="monotone" dataKey="revenue" name="Shopify Revenue" stroke="#CDFF00" strokeWidth={2} dot={false} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-3">
+                <FindingCard lagSeries={lagMetaToRevenue} xName="Meta spend" yName="Shopify revenue" />
+              </div>
+            </Card>
+          )}
+
+          {/* ── 6. Amazon Impact ── */}
+          {hasAmazon && extendedWeekly.length > 0 ? (
+            <Card>
+              <h3 className="mb-3 text-sm font-semibold">Meta Spend vs Amazon Sales</h3>
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={extendedWeekly}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
+                    <XAxis dataKey="weekLabel" stroke="#737373" tick={{ fontSize: 10 }} />
+                    <YAxis yAxisId="left" stroke="#FF69B4" tick={{ fontSize: 11 }} tickFormatter={(v) => `£${(v / 1000).toFixed(0)}k`} />
+                    <YAxis yAxisId="right" orientation="right" stroke="#f97316" tick={{ fontSize: 11 }} tickFormatter={(v) => `£${(v / 1000).toFixed(0)}k`} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line yAxisId="left" type="monotone" dataKey="adstockedSpend" name="Meta Spend" stroke="#FF69B4" strokeWidth={2} dot={false} />
+                    <Line yAxisId="right" type="monotone" dataKey="amazonSales" name="Amazon Sales" stroke="#f97316" strokeWidth={2} dot={false} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-3">
+                <FindingCard lagSeries={lagMetaToAmazon} xName="Meta spend" yName="Amazon sales" />
+              </div>
+            </Card>
+          ) : (
+            <Card>
+              <h3 className="mb-2 text-sm font-semibold">Amazon Impact</h3>
+              <p className="text-xs text-neutral-500">
+                Amazon sales data not yet available. Upload a CSV above to analyse whether
+                Meta advertising is driving demand to Amazon.
+              </p>
+            </Card>
+          )}
+
+          {/* ── 7. Weekly Trends (all channels, carry-over slider inline) ── */}
+          {extendedWeekly.length > 0 && (
+            <Card>
+              <h3 className="mb-3 text-sm font-semibold">All Channels — Weekly View</h3>
+              <p className="mb-3 text-xs text-neutral-500">
+                Revenue and sales on the left axis, traffic and spend on the right.
+              </p>
+              <div className="mb-4 flex items-center gap-3">
+                <label className="text-xs text-neutral-400">
+                  Carry-over effect
+                  <span
+                    className="ml-1 inline-flex h-3.5 w-3.5 shrink-0 cursor-help items-center justify-center rounded-full border border-neutral-600 text-[9px] text-neutral-500 hover:border-neutral-400 hover:text-neutral-300"
+                    title="Meta advertising has a carry-over effect — someone who sees an ad this week may not buy until next week. This slider controls how much of last week's impact carries forward. 0 = no carry-over; 0.9 = very long memory. Default 0.6 suits considered-purchase products."
+                  >
+                    ?
+                  </span>
+                </label>
+                <input
+                  type="range"
+                  min={0}
+                  max={0.95}
+                  step={0.05}
+                  value={adstockDecay}
+                  onChange={(e) => handleAdstockChange(parseFloat(e.target.value))}
+                  className="h-1.5 w-40 cursor-pointer appearance-none rounded-lg bg-neutral-700 accent-brand-lime"
+                />
+                <span className="w-10 text-right text-xs font-semibold tabular-nums text-brand-lime">
+                  {adstockDecay.toFixed(2)}
+                </span>
+              </div>
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={extendedWeekly}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
+                    <XAxis dataKey="weekLabel" stroke="#737373" tick={{ fontSize: 10 }} />
+                    <YAxis
+                      yAxisId="left"
+                      stroke="#CDFF00"
+                      tick={{ fontSize: 11 }}
+                      tickFormatter={(v) => `£${(v / 1000).toFixed(0)}k`}
+                    />
+                    <YAxis
+                      yAxisId="right"
+                      orientation="right"
+                      stroke="#FF69B4"
+                      tick={{ fontSize: 11 }}
+                      tickFormatter={(v) => fmtNumber(v)}
+                    />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line yAxisId="left" type="monotone" dataKey="revenue" name="Shopify Revenue" stroke="#CDFF00" strokeWidth={2} dot={false} />
+                    <Line yAxisId="right" type="monotone" dataKey="adstockedSpend" name="Meta Spend" stroke="#FF69B4" strokeWidth={2} dot={false} />
+                    {hasAmazon && (
+                      <Line yAxisId="left" type="monotone" dataKey="amazonSales" name="Amazon Sales" stroke="#f97316" strokeWidth={2} dot={false} />
+                    )}
+                    {hasSearch && (
+                      <Line yAxisId="right" type="monotone" dataKey="searchClicks" name="GSC Clicks" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                    )}
+                    {hasSessions && (
+                      <Line yAxisId="right" type="monotone" dataKey="shopifySessions" name="Store Sessions" stroke="#737373" strokeWidth={1.5} dot={false} strokeDasharray="4 2" />
+                    )}
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </Card>
+          )}
+
+          {/* ── 8. Conversion Tracking Comparison ── */}
           <Card>
-            <h3 className="mb-3 text-sm font-semibold">Monthly Revenue vs Cost</h3>
+            <h3 className="mb-3 text-sm font-semibold">How Does Meta Show Up in Conversion Tracking?</h3>
+            <p className="mb-3 text-xs text-neutral-500">
+              Last-click attribution dramatically undervalues Meta. The gap between Shopify
+              total orders and last-click paid orders shows how much demand Meta is creating
+              indirectly.
+            </p>
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={attributionData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
+                  <XAxis dataKey="month" stroke="#737373" tick={{ fontSize: 11 }} />
+                  <YAxis stroke="#737373" tick={{ fontSize: 11 }} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Bar dataKey="Shopify Total Orders" fill="#CDFF00" />
+                  <Bar dataKey="Meta Pixel Purchases" fill="#FF69B4" />
+                  <Bar dataKey="Last-Click Paid Orders" fill="#3b82f6" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+
+          {/* ── 9. Monthly Detail Table ── */}
+          <Card>
+            <h3 className="mb-3 text-sm font-semibold">Monthly Detail</h3>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
@@ -393,34 +543,10 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
             </div>
           </Card>
 
-          {/* ── Three-Way Attribution ── */}
-          <Card>
-            <h3 className="mb-3 text-sm font-semibold">Three-Way Attribution Comparison</h3>
-            <p className="mb-3 text-xs text-neutral-500">
-              Last-click attribution dramatically undervalues Meta. The gap between Shopify
-              total orders and last-click paid orders shows how much demand Meta is creating
-              indirectly.
-            </p>
-            <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={attributionData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
-                  <XAxis dataKey="month" stroke="#737373" tick={{ fontSize: 11 }} />
-                  <YAxis stroke="#737373" tick={{ fontSize: 11 }} />
-                  <Tooltip contentStyle={TOOLTIP_STYLE} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="Shopify Total Orders" fill="#CDFF00" />
-                  <Bar dataKey="Meta Pixel Purchases" fill="#FF69B4" />
-                  <Bar dataKey="Last-Click Paid Orders" fill="#3b82f6" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
-
-          {/* ── Regression summary ── */}
+          {/* ── 10. Regression / Incremental Estimate ── */}
           <Card>
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-sm font-semibold">Regression Summary</h3>
+              <h3 className="text-sm font-semibold">Incremental Revenue Estimate</h3>
             </div>
             <div className="grid grid-cols-2 gap-4 text-xs md:grid-cols-4">
               <MetricCard label="R² (same week)" value={reg0.rSquared.toFixed(3)} />
@@ -431,7 +557,7 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
                 value={fmtCurrency(Math.max(0, incremental))}
                 positive={incremental > 0}
                 tooltip={
-                  `Regression-based counterfactual using the strongest lag in the data (${bestReg.lag === 0 ? "same week" : `${bestReg.lag}-week lag`}, R² = ${bestReg.reg.rSquared.toFixed(3)}). We fit a line between weekly Meta spend and Shopify revenue at that lag. The y-intercept is what the model predicts you'd earn with zero Meta spend (${fmtCurrency(baselineWeekly)}/wk baseline). Multiply by ${weeklyPoints.length} weeks, then subtract from actual total revenue to get the incremental estimate. Directional only - use with caution given the small sample and low R². A holdout test would be needed for causal proof.`
+                  `Regression-based counterfactual using the strongest lag in the data (${bestReg.lag === 0 ? "same week" : `${bestReg.lag}-week lag`}, R² = ${bestReg.reg.rSquared.toFixed(3)}). The y-intercept predicts revenue with zero Meta spend (${fmtCurrency(baselineWeekly)}/wk). Subtract that baseline from actual revenue to get the incremental estimate. Directional only — a holdout test would confirm causation.`
                 }
               />
             </div>
@@ -463,275 +589,17 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
             <p className="mt-3 text-[11px] text-neutral-600">
               Baseline weekly revenue is the regression intercept (the level expected with
               zero Meta spend). Incremental is total revenue minus baseline scaled across
-              the period. Directional only - a holdout test would be needed for causal proof.
+              the period. Directional only — a holdout test would confirm causation.
             </p>
           </Card>
+
+          {/* Directional caveat */}
+          <p className="text-[10px] text-neutral-600">
+            All findings are directional. With ~{extendedWeekly.length} weeks of data, correlations
+            indicate patterns but do not prove causation. A controlled holdout test would be needed
+            for causal attribution.
+          </p>
         </>
-      )}
-
-      {/* ═══════════════ CHANNEL TRENDS TAB ═══════════════ */}
-      {!noData && activeTab === "trends" && (
-        <>
-          {/* Adstock slider */}
-          <Card>
-            <h3 className="mb-2 text-sm font-semibold">Adstock Decay</h3>
-            <p className="mb-3 text-xs text-neutral-500">
-              Meta advertising has a carry-over effect — someone who sees an ad this week may
-              not buy until next week. The decay rate controls how much of last week&apos;s
-              advertising impact carries forward.
-            </p>
-            <div className="flex items-center gap-4">
-              <input
-                type="range"
-                min={0}
-                max={0.95}
-                step={0.05}
-                value={adstockDecay}
-                onChange={(e) => handleAdstockChange(parseFloat(e.target.value))}
-                className="h-1.5 flex-1 cursor-pointer appearance-none rounded-lg bg-neutral-700 accent-brand-lime"
-              />
-              <span className="w-12 text-right text-sm font-semibold tabular-nums text-brand-lime">
-                {adstockDecay.toFixed(2)}
-              </span>
-            </div>
-            <p className="mt-2 text-[10px] text-neutral-600">
-              0 = no carry-over (only this week&apos;s spend matters). 0.9 = very long memory.
-              Default 0.6 suits considered-purchase products.
-            </p>
-          </Card>
-
-          {/* Multi-channel weekly trend */}
-          {extendedWeekly.length > 0 && (
-            <Card>
-              <h3 className="mb-3 text-sm font-semibold">Multi-Channel Weekly Trends</h3>
-              <p className="mb-3 text-xs text-neutral-500">
-                All channels plotted weekly. Revenue/sales on the left axis, traffic/spend on the right.
-              </p>
-              <div className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={extendedWeekly}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
-                    <XAxis dataKey="weekLabel" stroke="#737373" tick={{ fontSize: 10 }} />
-                    <YAxis
-                      yAxisId="left"
-                      stroke="#CDFF00"
-                      tick={{ fontSize: 11 }}
-                      tickFormatter={(v) => `£${(v / 1000).toFixed(0)}k`}
-                    />
-                    <YAxis
-                      yAxisId="right"
-                      orientation="right"
-                      stroke="#FF69B4"
-                      tick={{ fontSize: 11 }}
-                      tickFormatter={(v) => fmtNumber(v)}
-                    />
-                    <Tooltip contentStyle={TOOLTIP_STYLE} />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                    <Line yAxisId="left" type="monotone" dataKey="revenue" name="Shopify Revenue" stroke="#CDFF00" strokeWidth={2} dot={false} />
-                    <Line yAxisId="right" type="monotone" dataKey="adstockedSpend" name="Meta Spend (adstocked)" stroke="#FF69B4" strokeWidth={2} dot={false} />
-                    {hasAmazon && (
-                      <Line yAxisId="left" type="monotone" dataKey="amazonSales" name="Amazon Sales" stroke="#f97316" strokeWidth={2} dot={false} />
-                    )}
-                    {hasSearch && (
-                      <Line yAxisId="right" type="monotone" dataKey="searchClicks" name="GSC Clicks" stroke="#3b82f6" strokeWidth={2} dot={false} />
-                    )}
-                    {hasSessions && (
-                      <Line yAxisId="right" type="monotone" dataKey="shopifySessions" name="Store Sessions" stroke="#737373" strokeWidth={1.5} dot={false} strokeDasharray="4 2" />
-                    )}
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            </Card>
-          )}
-
-          {/* Original weekly Revenue vs Spend (raw, no adstock) */}
-          {weeklyPoints.length > 0 && (
-            <Card>
-              <h3 className="mb-3 text-sm font-semibold">Weekly Revenue vs Meta Spend (raw)</h3>
-              <p className="mb-3 text-xs text-neutral-500">
-                Shopify revenue against raw Meta spend (no adstock) at the same-week level.
-              </p>
-              <div className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={weeklyPoints}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
-                    <XAxis dataKey="weekLabel" stroke="#737373" tick={{ fontSize: 10 }} />
-                    <YAxis yAxisId="left" stroke="#CDFF00" tick={{ fontSize: 11 }} tickFormatter={(v) => `£${(v / 1000).toFixed(0)}k`} />
-                    <YAxis yAxisId="right" orientation="right" stroke="#FF69B4" tick={{ fontSize: 11 }} tickFormatter={(v) => `£${(v / 1000).toFixed(1)}k`} />
-                    <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => fmtCurrency(v)} />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                    <Line yAxisId="left" type="monotone" dataKey="revenue" name="Shopify Revenue" stroke="#CDFF00" strokeWidth={2} dot={false} />
-                    <Line yAxisId="right" type="monotone" dataKey="metaSpend" name="Meta Spend" stroke="#FF69B4" strokeWidth={2} dot={false} />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            </Card>
-          )}
-        </>
-      )}
-
-      {/* ═══════════════ CORRELATION & LAG TAB ═══════════════ */}
-      {!noData && activeTab === "correlation" && (
-        <>
-          {/* Auto-generated insight */}
-          {strongestCorr && (
-            <Card>
-              <div className="flex items-start gap-3">
-                <div className={`mt-0.5 h-2.5 w-2.5 rounded-full ${
-                  correlationStrength(strongestCorr.r) === "strong" ? "bg-green-400" :
-                  correlationStrength(strongestCorr.r) === "moderate" ? "bg-amber-400" : "bg-neutral-500"
-                }`} />
-                <div>
-                  <p className="text-xs font-medium text-neutral-200">
-                    {correlationStrength(strongestCorr.r) === "strong"
-                      ? `Strong: Meta spend closely tracks ${strongestCorr.yLabel}`
-                      : correlationStrength(strongestCorr.r) === "moderate"
-                      ? `Moderate: some evidence of Meta driving ${strongestCorr.yLabel}`
-                      : `Weak: no meaningful relationship detected with ${strongestCorr.yLabel}`}
-                  </p>
-                  <p className="mt-1 text-[11px] text-neutral-500">
-                    r = {strongestCorr.r.toFixed(3)} across {strongestCorr.n} weekly observations.
-                    {" "}This is directional — a holdout test would be needed for causal proof.
-                  </p>
-                </div>
-              </div>
-            </Card>
-          )}
-
-          {/* Correlation matrix */}
-          {corrMatrix.length > 0 && (
-            <Card>
-              <h3 className="mb-3 text-sm font-semibold">Correlation Matrix</h3>
-              <p className="mb-3 text-xs text-neutral-500">
-                Pairwise Pearson r between all channel metrics at weekly level.
-                Green = positive correlation, red = negative.
-              </p>
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-neutral-800">
-                      <th className="py-2 pr-3 text-left font-medium text-neutral-500">Pair</th>
-                      <th className="py-2 pr-3 text-right font-medium text-neutral-500">r</th>
-                      <th className="py-2 pr-3 text-right font-medium text-neutral-500">Strength</th>
-                      <th className="py-2 text-right font-medium text-neutral-500">n</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {corrMatrix
-                      .sort((a, b) => Math.abs(b.r) - Math.abs(a.r))
-                      .map((entry, i) => {
-                        const strength = correlationStrength(entry.r)
-                        const color = entry.r >= 0.3 ? "text-green-400" : entry.r <= -0.3 ? "text-red-400" : "text-neutral-400"
-                        return (
-                          <tr key={i} className="border-b border-neutral-800/50">
-                            <td className="py-2 pr-3 text-neutral-200">
-                              {entry.xLabel} / {entry.yLabel}
-                            </td>
-                            <td className={`py-2 pr-3 text-right tabular-nums font-semibold ${color}`}>
-                              {entry.r.toFixed(3)}
-                            </td>
-                            <td className="py-2 pr-3 text-right capitalize text-neutral-400">
-                              {strength}
-                            </td>
-                            <td className="py-2 text-right tabular-nums text-neutral-500">
-                              {entry.n}
-                            </td>
-                          </tr>
-                        )
-                      })}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          )}
-
-          {/* Per-channel lag analysis */}
-          <Card>
-            <h3 className="mb-3 text-sm font-semibold">Lag Correlation Analysis</h3>
-            <p className="mb-3 text-xs text-neutral-500">
-              How strongly does adstocked Meta spend in week N correlate with the selected
-              outcome in week N+lag?
-            </p>
-            <div className="mb-4 flex items-center gap-3">
-              <label className="text-xs text-neutral-400">Target:</label>
-              <select
-                value={lagTarget}
-                onChange={(e) => setLagTarget(e.target.value)}
-                className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 focus:border-brand-lime focus:outline-none"
-              >
-                {lagTargetOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </div>
-            {(() => {
-              const positives = multiLagSeries.filter((l) => l.r > 0)
-              const strongest = positives.length > 0
-                ? positives.reduce((a, b) => (b.r > a.r ? b : a))
-                : null
-              return strongest ? (
-                <div className="mb-3 rounded-lg border border-brand-lime/30 bg-brand-lime/5 px-3 py-2 text-xs">
-                  <span className="text-neutral-400">Strongest positive correlation: </span>
-                  <span className="font-semibold text-brand-lime">
-                    {strongest.lagWeeks === 0 ? "same week" : `${strongest.lagWeeks}-week lag`}
-                  </span>
-                  <span className="text-neutral-400"> (r = {strongest.r.toFixed(3)})</span>
-                </div>
-              ) : null
-            })()}
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={multiLagSeries} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
-                  <XAxis dataKey="lagWeeks" stroke="#737373" tick={{ fontSize: 11 }} tickFormatter={(v) => (v === 0 ? "Same week" : `${v}w lag`)} />
-                  <YAxis stroke="#737373" tick={{ fontSize: 11 }} domain={[-1, 1]} tickFormatter={(v) => v.toFixed(1)} />
-                  <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => [v.toFixed(3), "r"]} labelFormatter={(l) => (l === 0 ? "Same week" : `Lag ${l} weeks`)} />
-                  <Bar dataKey="r" name="Pearson r" label={{ position: "top", fontSize: 11, fill: "#a3a3a3", formatter: (v: number) => v.toFixed(2) }}>
-                    {multiLagSeries.map((entry, idx) => (
-                      <Cell key={idx} fill={entry.r >= 0.3 ? "#CDFF00" : entry.r > 0 ? "#86efac" : entry.r > -0.3 ? "#525252" : "#ef4444"} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <p className="mt-2 text-[10px] text-neutral-600">
-              Lime = strong positive (r {"\u2265"} 0.3). Pale green = weak positive.
-              Grey = no correlation. Red = negative. Uses adstocked Meta spend.
-            </p>
-          </Card>
-
-          {/* Original Shopify-only lag for backward compat */}
-          <Card>
-            <h3 className="mb-3 text-sm font-semibold">Shopify Revenue Lag (raw spend)</h3>
-            <p className="mb-3 text-xs text-neutral-500">
-              Original lag analysis using raw (non-adstocked) Meta spend vs Shopify revenue.
-            </p>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={lagSeries} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
-                  <XAxis dataKey="lagWeeks" stroke="#737373" tick={{ fontSize: 11 }} tickFormatter={(v) => (v === 0 ? "Same week" : `${v}w lag`)} />
-                  <YAxis stroke="#737373" tick={{ fontSize: 11 }} domain={[-1, 1]} tickFormatter={(v) => v.toFixed(1)} />
-                  <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => [v.toFixed(3), "r"]} labelFormatter={(l) => (l === 0 ? "Same week" : `Lag ${l} weeks`)} />
-                  <Bar dataKey="r" name="Pearson r" label={{ position: "top", fontSize: 11, fill: "#a3a3a3", formatter: (v: number) => v.toFixed(2) }}>
-                    {lagSeries.map((entry, idx) => (
-                      <Cell key={idx} fill={entry.r >= 0.3 ? "#CDFF00" : entry.r > 0 ? "#86efac" : entry.r > -0.3 ? "#525252" : "#ef4444"} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
-        </>
-      )}
-
-      {/* Directional caveat — shown on all tabs */}
-      {!noData && (
-        <p className="text-[10px] text-neutral-600">
-          All findings are directional. With ~{extendedWeekly.length} weeks of data, correlations
-          indicate patterns but do not prove causation. A controlled holdout test would be needed
-          for causal attribution.
-        </p>
       )}
     </div>
   )
@@ -823,6 +691,41 @@ function MetricCard({
       <p className={`mt-1 text-lg font-semibold tabular-nums ${positive ? "text-green-400" : "text-neutral-200"}`}>
         {value}
       </p>
+    </div>
+  )
+}
+
+function FindingCard({
+  lagSeries,
+  xName,
+  yName,
+}: {
+  lagSeries: LagCorrelation[]
+  xName: string
+  yName: string
+}) {
+  if (lagSeries.length === 0) return null
+  const positives = lagSeries.filter((l) => l.r > 0)
+  const best = positives.length > 0
+    ? positives.reduce((a, b) => (b.r > a.r ? b : a))
+    : lagSeries.reduce((a, b) => (b.r > a.r ? b : a))
+  const strength = correlationStrength(best.r)
+  const dotColor =
+    strength === "strong" ? "bg-green-400" :
+    strength === "moderate" ? "bg-amber-400" : "bg-neutral-500"
+  const lagLabel = best.lagWeeks === 0 ? "in the same week" : `at a ${best.lagWeeks}-week delay`
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-neutral-800 bg-neutral-800/30 px-4 py-3">
+      <div className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${dotColor}`} />
+      <div>
+        <p className="text-xs font-medium text-neutral-200">
+          {xName} shows a {strength} relationship with {yName} {lagLabel}.
+        </p>
+        <p className="mt-1 text-[11px] text-neutral-500">
+          r&nbsp;=&nbsp;{best.r.toFixed(3)} across {best.n} weekly observations.
+          {" "}Directional only — a holdout test would confirm causation.
+        </p>
+      </div>
     </div>
   )
 }
