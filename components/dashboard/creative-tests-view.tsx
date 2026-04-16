@@ -203,12 +203,12 @@ export default function CreativeTestsView({
         </div>
       </div>
 
-      {/* Key action requirement check */}
-      {keyAction === "purchases" && (
+      {/* Key action requirement check — warn if no test_key_action is set on the config */}
+      {config && !config.test_key_action && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-400">
-          No test optimisation event configured. Go to Settings and set the key action
-          to match your conversion event (e.g. registrations, add to carts) so tests
-          report on the correct metric.
+          No test optimisation event set. Go to Settings &gt; Creative Tests and choose
+          the conversion event tests should be measured against (e.g. Purchases, Add to Carts,
+          Registrations).
         </div>
       )}
 
