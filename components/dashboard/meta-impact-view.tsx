@@ -306,7 +306,7 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
                     <XAxis dataKey="weekLabel" stroke="#737373" tick={{ fontSize: 10 }} />
                     <YAxis yAxisId="left" stroke="#FF69B4" tick={{ fontSize: 11 }} tickFormatter={(v) => `£${(v / 1000).toFixed(0)}k`} />
                     <YAxis yAxisId="right" orientation="right" stroke="#3b82f6" tick={{ fontSize: 11 }} tickFormatter={(v) => fmtNumber(v)} />
-                    <Tooltip contentStyle={TOOLTIP_STYLE} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} formatter={formatTooltipValue} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
                     <Line yAxisId="left" type="monotone" dataKey="adstockedSpend" name="Meta Spend" stroke="#FF69B4" strokeWidth={2} dot={false} />
                     <Line yAxisId="right" type="monotone" dataKey="searchImpressions" name="Search Impressions" stroke="#3b82f6" strokeWidth={2} dot={false} />
@@ -330,7 +330,7 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
                     <XAxis dataKey="weekLabel" stroke="#737373" tick={{ fontSize: 10 }} />
                     <YAxis yAxisId="left" stroke="#3b82f6" tick={{ fontSize: 11 }} tickFormatter={(v) => fmtNumber(v)} />
                     <YAxis yAxisId="right" orientation="right" stroke="#CDFF00" tick={{ fontSize: 11 }} tickFormatter={(v) => `£${(v / 1000).toFixed(0)}k`} />
-                    <Tooltip contentStyle={TOOLTIP_STYLE} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} formatter={formatTooltipValue} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
                     <Line yAxisId="left" type="monotone" dataKey="searchClicks" name="Search Clicks" stroke="#3b82f6" strokeWidth={2} dot={false} />
                     <Line yAxisId="right" type="monotone" dataKey="revenue" name="Shopify Revenue" stroke="#CDFF00" strokeWidth={2} dot={false} />
@@ -354,7 +354,7 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
                     <XAxis dataKey="weekLabel" stroke="#737373" tick={{ fontSize: 10 }} />
                     <YAxis yAxisId="left" stroke="#FF69B4" tick={{ fontSize: 11 }} tickFormatter={(v) => `£${(v / 1000).toFixed(0)}k`} />
                     <YAxis yAxisId="right" orientation="right" stroke="#CDFF00" tick={{ fontSize: 11 }} tickFormatter={(v) => `£${(v / 1000).toFixed(0)}k`} />
-                    <Tooltip contentStyle={TOOLTIP_STYLE} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} formatter={formatTooltipValue} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
                     <Line yAxisId="left" type="monotone" dataKey="adstockedSpend" name="Meta Spend" stroke="#FF69B4" strokeWidth={2} dot={false} />
                     <Line yAxisId="right" type="monotone" dataKey="revenue" name="Shopify Revenue" stroke="#CDFF00" strokeWidth={2} dot={false} />
@@ -378,7 +378,7 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
                     <XAxis dataKey="weekLabel" stroke="#737373" tick={{ fontSize: 10 }} />
                     <YAxis yAxisId="left" stroke="#FF69B4" tick={{ fontSize: 11 }} tickFormatter={(v) => `£${(v / 1000).toFixed(0)}k`} />
                     <YAxis yAxisId="right" orientation="right" stroke="#f97316" tick={{ fontSize: 11 }} tickFormatter={(v) => `£${(v / 1000).toFixed(0)}k`} />
-                    <Tooltip contentStyle={TOOLTIP_STYLE} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} formatter={formatTooltipValue} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
                     <Line yAxisId="left" type="monotone" dataKey="adstockedSpend" name="Meta Spend" stroke="#FF69B4" strokeWidth={2} dot={false} />
                     <Line yAxisId="right" type="monotone" dataKey="amazonSales" name="Amazon Sales" stroke="#f97316" strokeWidth={2} dot={false} />
@@ -447,7 +447,7 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
                       tick={{ fontSize: 11 }}
                       tickFormatter={(v) => fmtNumber(v)}
                     />
-                    <Tooltip contentStyle={TOOLTIP_STYLE} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} formatter={formatTooltipValue} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
                     <Line yAxisId="left" type="monotone" dataKey="revenue" name="Shopify Revenue" stroke="#CDFF00" strokeWidth={2} dot={false} />
                     <Line yAxisId="right" type="monotone" dataKey="adstockedSpend" name="Meta Spend" stroke="#FF69B4" strokeWidth={2} dot={false} />
@@ -480,7 +480,7 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
                   <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
                   <XAxis dataKey="month" stroke="#737373" tick={{ fontSize: 11 }} />
                   <YAxis stroke="#737373" tick={{ fontSize: 11 }} />
-                  <Tooltip contentStyle={TOOLTIP_STYLE} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} formatter={formatTooltipValue} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Bar dataKey="Shopify Total Orders" fill="#CDFF00" />
                   <Bar dataKey="Meta Pixel Purchases" fill="#FF69B4" />
@@ -613,6 +613,14 @@ const TOOLTIP_STYLE = {
   fontSize: 12,
 }
 
+/* Formats tooltip values — currency for money-named series, count otherwise. */
+function formatTooltipValue(v: number | string, name: string): [string, string] {
+  const num = typeof v === "number" ? v : parseFloat(String(v))
+  if (!isFinite(num)) return [String(v), name]
+  const isCount = /click|impression|session|unit|order/i.test(name)
+  return [isCount ? fmtNumber(num) : fmtCurrency(num), name]
+}
+
 /* ── Sub-components ── */
 
 function CsvUpload({
@@ -710,27 +718,63 @@ function FindingCard({
   xName: string
   yName: string
 }) {
-  if (lagSeries.length === 0) return null
   const positives = lagSeries.filter((l) => l.r > 0)
   const best = positives.length > 0
     ? positives.reduce((a, b) => (b.r > a.r ? b : a))
-    : lagSeries.reduce((a, b) => (b.r > a.r ? b : a))
-  const strength = correlationStrength(best.r)
+    : lagSeries.length > 0
+      ? lagSeries.reduce((a, b) => (b.r > a.r ? b : a))
+      : null
+  const [selectedLag, setSelectedLag] = useState<number | null>(best?.lagWeeks ?? null)
+
+  // Reset selection when the underlying series changes (e.g. carry-over slider)
+  useEffect(() => {
+    setSelectedLag(best?.lagWeeks ?? null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lagSeries])
+
+  if (lagSeries.length === 0 || !best) return null
+  const current = lagSeries.find((l) => l.lagWeeks === selectedLag) ?? best
+  const strength = correlationStrength(current.r)
   const dotColor =
     strength === "strong" ? "bg-green-400" :
     strength === "moderate" ? "bg-amber-400" : "bg-neutral-500"
-  const lagLabel = best.lagWeeks === 0 ? "in the same week" : `at a ${best.lagWeeks}-week delay`
+  const lagLabel = current.lagWeeks === 0 ? "in the same week" : `at a ${current.lagWeeks}-week delay`
   return (
-    <div className="flex items-start gap-3 rounded-lg border border-neutral-800 bg-neutral-800/30 px-4 py-3">
-      <div className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${dotColor}`} />
-      <div>
-        <p className="text-xs font-medium text-neutral-200">
-          {xName} shows a {strength} relationship with {yName} {lagLabel}.
-        </p>
-        <p className="mt-1 text-[11px] text-neutral-500">
-          r&nbsp;=&nbsp;{best.r.toFixed(3)} across {best.n} weekly observations.
-          {" "}Directional only — a holdout test would confirm causation.
-        </p>
+    <div className="rounded-lg border border-neutral-800 bg-neutral-800/30 px-4 py-3">
+      <div className="flex items-start gap-3">
+        <div className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${dotColor}`} />
+        <div className="flex-1">
+          <p className="text-xs font-medium text-neutral-200">
+            {xName} shows a {strength} relationship with {yName} {lagLabel}.
+          </p>
+          <p className="mt-1 text-[11px] text-neutral-500">
+            r&nbsp;=&nbsp;{current.r.toFixed(3)} across {current.n} weekly observations.
+            {" "}Directional only — a holdout test would confirm causation.
+          </p>
+        </div>
+      </div>
+      <div className="mt-3 flex items-center gap-1.5 pl-6">
+        <span className="text-[10px] uppercase tracking-wider text-neutral-500">Lag</span>
+        {lagSeries.map((l) => {
+          const isSelected = l.lagWeeks === current.lagWeeks
+          const isBest = l.lagWeeks === best.lagWeeks
+          return (
+            <button
+              key={l.lagWeeks}
+              onClick={() => setSelectedLag(l.lagWeeks)}
+              title={`r = ${l.r.toFixed(3)}`}
+              className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition ${
+                isSelected
+                  ? "bg-brand-lime text-black"
+                  : isBest
+                    ? "border border-brand-lime/40 text-brand-lime hover:bg-brand-lime/10"
+                    : "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
+              }`}
+            >
+              {l.lagWeeks === 0 ? "Same week" : `${l.lagWeeks}w`}
+            </button>
+          )
+        })}
       </div>
     </div>
   )
