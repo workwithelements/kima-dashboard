@@ -241,11 +241,11 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
       : [],
     [extendedWeekly, hasSearch]
   )
-  const lagClicksToRevenue = useMemo(
-    () => extendedWeekly.length >= 3 && hasSearch
-      ? lagCorrelationMulti(extendedWeekly.map(p => p.searchClicks), extendedWeekly.map(p => p.revenue), 4)
+  const lagMetaToSessions = useMemo(
+    () => extendedWeekly.length >= 3 && hasSessions
+      ? lagCorrelationMulti(extendedWeekly.map(p => p.adstockedSpend), extendedWeekly.map(p => p.shopifySessions), 4)
       : [],
-    [extendedWeekly, hasSearch]
+    [extendedWeekly, hasSessions]
   )
   const lagMetaToRevenue = useMemo(
     () => extendedWeekly.length >= 3
@@ -338,8 +338,9 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
             lagMetaToRevenue={lagMetaToRevenue}
             lagMetaToAmazon={lagMetaToAmazon}
             lagMetaToImpressions={lagMetaToImpressions}
-            lagClicksToRevenue={lagClicksToRevenue}
+            lagMetaToSessions={lagMetaToSessions}
             hasSearch={hasSearch}
+            hasSessions={hasSessions}
             hasAmazon={hasAmazon}
             weeksOfData={extendedWeekly.length}
             trueRoas={trueRoas}
@@ -372,26 +373,26 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
             </Card>
           )}
 
-          {/* ── 4. Search vs Revenue (if GSC data) ── */}
-          {hasSearch && extendedWeekly.length > 0 && (
+          {/* ── 4. Meta Spend vs Shopify Sessions (if sessions data) ── */}
+          {hasSessions && extendedWeekly.length > 0 && (
             <Card>
-              <h3 className="mb-3 text-sm font-semibold">Search Clicks vs Shopify Revenue</h3>
+              <h3 className="mb-3 text-sm font-semibold">Meta Spend vs Shopify Sessions</h3>
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={extendedWeekly}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
                     <XAxis dataKey="weekLabel" stroke="#737373" tick={{ fontSize: 10 }} />
-                    <YAxis yAxisId="left" stroke="#3b82f6" tick={{ fontSize: 11 }} tickFormatter={(v) => fmtNumber(v)} />
-                    <YAxis yAxisId="right" orientation="right" stroke="#CDFF00" tick={{ fontSize: 11 }} tickFormatter={(v) => `£${(v / 1000).toFixed(0)}k`} />
+                    <YAxis yAxisId="left" stroke="#FF69B4" tick={{ fontSize: 11 }} tickFormatter={(v) => `£${(v / 1000).toFixed(0)}k`} />
+                    <YAxis yAxisId="right" orientation="right" stroke="#3b82f6" tick={{ fontSize: 11 }} tickFormatter={(v) => fmtNumber(v)} />
                     <Tooltip contentStyle={TOOLTIP_STYLE} formatter={formatTooltipValue} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
-                    <Line yAxisId="left" type="monotone" dataKey="searchClicks" name="Search Clicks" stroke="#3b82f6" strokeWidth={2} dot={false} />
-                    <Line yAxisId="right" type="monotone" dataKey="revenue" name="Shopify Revenue" stroke="#CDFF00" strokeWidth={2} dot={false} />
+                    <Line yAxisId="left" type="monotone" dataKey="adstockedSpend" name="Meta Spend" stroke="#FF69B4" strokeWidth={2} dot={false} />
+                    <Line yAxisId="right" type="monotone" dataKey="shopifySessions" name="Shopify Sessions" stroke="#3b82f6" strokeWidth={2} dot={false} />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
               <div className="mt-3">
-                <FindingCard lagSeries={lagClicksToRevenue} xName="Search clicks" yName="Shopify revenue" />
+                <FindingCard lagSeries={lagMetaToSessions} xName="Meta spend" yName="Shopify sessions" />
               </div>
             </Card>
           )}
@@ -510,11 +511,8 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
                     {hasAmazon && (
                       <Line yAxisId="left" type="monotone" dataKey="amazonSales" name="Amazon Sales" stroke="#f97316" strokeWidth={2} dot={false} />
                     )}
-                    {hasSearch && (
-                      <Line yAxisId="right" type="monotone" dataKey="searchClicks" name="GSC Clicks" stroke="#3b82f6" strokeWidth={2} dot={false} />
-                    )}
                     {hasSessions && (
-                      <Line yAxisId="right" type="monotone" dataKey="shopifySessions" name="Store Sessions" stroke="#737373" strokeWidth={1.5} dot={false} strokeDasharray="4 2" />
+                      <Line yAxisId="right" type="monotone" dataKey="shopifySessions" name="Shopify Sessions" stroke="#3b82f6" strokeWidth={2} dot={false} />
                     )}
                   </ComposedChart>
                 </ResponsiveContainer>
@@ -891,11 +889,10 @@ function FindingCard({
   xName: string
   yName: string
 }) {
-  // Pick the lag with the highest absolute r — speaks to where the signal is
-  // strongest, whether positive or negative.
-  const best = lagSeries.length > 0
-    ? lagSeries.reduce((a, b) => (Math.abs(b.r) > Math.abs(a.r) ? b : a))
-    : null
+  // Prefer strongest positive lag so the funnel story leads with where the
+  // ad-effect hypothesis would show up. Fall back to the least-negative lag
+  // only when no positives exist.
+  const best = bestLag(lagSeries)
   const [selectedLag, setSelectedLag] = useState<number | null>(best?.lagWeeks ?? null)
 
   // Reset selection when the underlying series changes (e.g. carry-over slider)
@@ -957,18 +954,25 @@ function FindingCard({
   )
 }
 
-/** Lag with the highest absolute r — where the signal is strongest, positive or negative. */
+/**
+ * Best lag for the funnel story: prefers the strongest positive correlation
+ * (even if weak), since that's where the ad-effect hypothesis would show up.
+ * Only falls back to the least-negative lag when no positives exist at all.
+ */
 function bestLag(series: LagCorrelation[]): LagCorrelation | null {
   if (series.length === 0) return null
-  return series.reduce((a, b) => (Math.abs(b.r) > Math.abs(a.r) ? b : a))
+  const positives = series.filter((l) => l.r > 0)
+  const pool = positives.length > 0 ? positives : series
+  return pool.reduce((a, b) => (b.r > a.r ? b : a))
 }
 
 function SummaryCard({
   lagMetaToRevenue,
   lagMetaToAmazon,
   lagMetaToImpressions,
-  lagClicksToRevenue,
+  lagMetaToSessions,
   hasSearch,
+  hasSessions,
   hasAmazon,
   weeksOfData,
   trueRoas,
@@ -979,8 +983,9 @@ function SummaryCard({
   lagMetaToRevenue: LagCorrelation[]
   lagMetaToAmazon: LagCorrelation[]
   lagMetaToImpressions: LagCorrelation[]
-  lagClicksToRevenue: LagCorrelation[]
+  lagMetaToSessions: LagCorrelation[]
   hasSearch: boolean
+  hasSessions: boolean
   hasAmazon: boolean
   weeksOfData: number
   trueRoas: number
@@ -991,7 +996,7 @@ function SummaryCard({
   const bestRev = bestLag(lagMetaToRevenue)
   const bestAmz = bestLag(lagMetaToAmazon)
   const bestImp = bestLag(lagMetaToImpressions)
-  const bestClkRev = bestLag(lagClicksToRevenue)
+  const bestSess = bestLag(lagMetaToSessions)
 
   // Build findings list — each row uses describeFinding so it speaks to where
   // the signal is strongest and includes a hypothesis for weak/negative cases.
@@ -1003,16 +1008,15 @@ function SummaryCard({
   }
   addFinding(bestRev, "Meta spend", "Shopify revenue")
   if (hasAmazon) addFinding(bestAmz, "Meta spend", "Amazon sales")
-  if (hasSearch) {
-    addFinding(bestImp, "Meta spend", "search impressions")
-    addFinding(bestClkRev, "Search clicks", "Shopify revenue")
-  }
+  if (hasSearch) addFinding(bestImp, "Meta spend", "search impressions")
+  if (hasSessions) addFinding(bestSess, "Meta spend", "Shopify sessions")
 
-  // Headline — based on the strongest absolute signal across series
-  const strongestOverall = [bestRev, bestAmz, bestImp, bestClkRev]
+  // Headline — based on the strongest positive signal across series. Each
+  // series already prefers its best positive lag so this finds the best of them.
+  const strongestOverall = [bestRev, bestAmz, bestImp, bestSess]
     .filter((l): l is LagCorrelation => l !== null)
     .reduce<LagCorrelation | null>(
-      (a, b) => (a === null || Math.abs(b.r) > Math.abs(a.r) ? b : a),
+      (a, b) => (a === null || b.r > a.r ? b : a),
       null
     )
   const headline = !strongestOverall

@@ -322,8 +322,9 @@ export function parseSessionsDaily(csvText: string): DailySessionsRow[] {
   if (rows.length < 2) return []
 
   const header = rows[0].map((h) => h.toLowerCase())
+  // Accept "Day", "Date", "Week" (exact), "Week start", or "Week ending"
   const dayIdx = header.findIndex(
-    (h) => h.includes("day") || h.includes("date") || h.includes("week start")
+    (h) => h.includes("day") || h.includes("date") || h === "week" || h.includes("week start") || h.includes("week ending")
   )
   // Accept "sessions", "visits", or common Shopify variants
   const sessionsIdx = header.findIndex(
