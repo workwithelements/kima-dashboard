@@ -295,6 +295,21 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
             <RoasCard label="Last-Click ROAS" sub="Shopify paid / Meta spend" value={lastClickRoas} />
           </div>
 
+          {/* ── 2. Summary & interpretation ── */}
+          <SummaryCard
+            lagMetaToRevenue={lagMetaToRevenue}
+            lagMetaToAmazon={lagMetaToAmazon}
+            lagMetaToImpressions={lagMetaToImpressions}
+            lagClicksToRevenue={lagClicksToRevenue}
+            hasSearch={hasSearch}
+            hasAmazon={hasAmazon}
+            weeksOfData={extendedWeekly.length}
+            trueRoas={trueRoas}
+            incrementalSharePct={incrementalSharePct}
+            bestRegRsq={bestReg.reg.rSquared}
+            bestRegLag={bestReg.lag}
+          />
+
           {/* ── 3. Meta Spend vs Search (if GSC data) ── */}
           {hasSearch && extendedWeekly.length > 0 && (
             <Card>
@@ -777,5 +792,186 @@ function FindingCard({
         })}
       </div>
     </div>
+  )
+}
+
+/** Best lag by positive r (falls back to highest r overall if no positives). */
+function bestLag(series: LagCorrelation[]): LagCorrelation | null {
+  if (series.length === 0) return null
+  const positives = series.filter((l) => l.r > 0)
+  const pool = positives.length > 0 ? positives : series
+  return pool.reduce((a, b) => (b.r > a.r ? b : a))
+}
+
+function SummaryCard({
+  lagMetaToRevenue,
+  lagMetaToAmazon,
+  lagMetaToImpressions,
+  lagClicksToRevenue,
+  hasSearch,
+  hasAmazon,
+  weeksOfData,
+  trueRoas,
+  incrementalSharePct,
+  bestRegRsq,
+  bestRegLag,
+}: {
+  lagMetaToRevenue: LagCorrelation[]
+  lagMetaToAmazon: LagCorrelation[]
+  lagMetaToImpressions: LagCorrelation[]
+  lagClicksToRevenue: LagCorrelation[]
+  hasSearch: boolean
+  hasAmazon: boolean
+  weeksOfData: number
+  trueRoas: number
+  incrementalSharePct: number
+  bestRegRsq: number
+  bestRegLag: number
+}) {
+  const bestRev = bestLag(lagMetaToRevenue)
+  const bestAmz = bestLag(lagMetaToAmazon)
+  const bestImp = bestLag(lagMetaToImpressions)
+  const bestClkRev = bestLag(lagClicksToRevenue)
+
+  // Build findings list
+  const findings: { dot: "green" | "amber" | "grey"; text: string }[] = []
+  const addFinding = (lag: LagCorrelation | null, xName: string, yName: string) => {
+    if (!lag) return
+    const strength = correlationStrength(lag.r)
+    const dot = strength === "strong" ? "green" : strength === "moderate" ? "amber" : "grey"
+    const when = lag.lagWeeks === 0 ? "in the same week" : `at a ${lag.lagWeeks}-week delay`
+    const verb =
+      strength === "strong" ? "closely tracks" :
+      strength === "moderate" ? "moderately tracks" : "shows little relationship with"
+    findings.push({
+      dot,
+      text: `${xName} ${verb} ${yName} ${when} (r = ${lag.r.toFixed(2)}).`,
+    })
+  }
+  addFinding(bestRev, "Meta spend", "Shopify revenue")
+  if (hasAmazon) addFinding(bestAmz, "Meta spend", "Amazon sales")
+  if (hasSearch) {
+    addFinding(bestImp, "Meta spend", "search impressions")
+    addFinding(bestClkRev, "Search clicks", "Shopify revenue")
+  }
+
+  // Headline
+  const strongestOverall = [bestRev, bestAmz, bestImp, bestClkRev]
+    .filter((l): l is LagCorrelation => l !== null)
+    .reduce<LagCorrelation | null>((a, b) => (a === null || b.r > a.r ? b : a), null)
+  const headline = !strongestOverall
+    ? "Not enough data yet to form a view."
+    : strongestOverall.r >= 0.6
+      ? "The data shows a strong relationship between Meta spend and downstream activity — but with the caveats below."
+      : strongestOverall.r >= 0.3
+        ? "The data suggests Meta spend has a moderate relationship with downstream activity."
+        : "The data shows only weak relationships between Meta spend and outcomes. Scaling up may not move the needle meaningfully, or the signal is buried in noise."
+
+  // Alternative explanation flags
+  const alternatives: { key: string; title: string; body: string }[] = []
+
+  // Carry-over effect — best lag > 0 and r >= 0.3 for any series
+  const hasLaggedSignal =
+    (bestRev && bestRev.lagWeeks >= 1 && bestRev.r >= 0.3) ||
+    (bestAmz && bestAmz.lagWeeks >= 1 && bestAmz.r >= 0.3) ||
+    (bestImp && bestImp.lagWeeks >= 1 && bestImp.r >= 0.3)
+  if (hasLaggedSignal) {
+    alternatives.push({
+      key: "carry-over",
+      title: "Carry-over effect (plausible)",
+      body:
+        "Lagged correlation is what you'd expect if Meta is building awareness that converts weeks later. Consistent with the story, but a lag can also reflect coincidence over a short window.",
+    })
+  }
+
+  // Seasonality — always flag when sample is short, or when the strongest lag
+  // overlaps with known seasonal windows (Jan / Nov-Dec)
+  const shortSample = weeksOfData > 0 && weeksOfData < 26
+  if (shortSample || alternatives.length > 0) {
+    alternatives.push({
+      key: "seasonality",
+      title: "Seasonal demand (possible confound)",
+      body: shortSample
+        ? `With only ~${weeksOfData} weeks of data, we can't separate ad-induced demand from seasonal demand. If spend was scaled up into a period where customers were going to buy anyway (New Year, Black Friday, back-to-school, etc.), the correlation reflects timing overlap rather than ad causation. Year-on-year comparison or a geo holdout would remove seasonality.`
+        : "Some of the observed correlation may reflect external demand drivers (seasonal, PR, promotions) that happen to coincide with spend changes rather than being caused by them.",
+    })
+  }
+
+  // Reverse causation — same-week r dominates (bestLag === 0)
+  const sameWeekDominates =
+    (bestRev && bestRev.lagWeeks === 0 && bestRev.r >= 0.3) ||
+    (bestAmz && bestAmz.lagWeeks === 0 && bestAmz.r >= 0.3)
+  if (sameWeekDominates) {
+    alternatives.push({
+      key: "reverse",
+      title: "Reverse causation (worth ruling out)",
+      body:
+        "The strongest correlation sits at the same-week mark, with no visible delay. That's consistent with ads driving immediate purchases, but also with the opposite: spend being ramped up in weeks where revenue was already rising. A planned test where spend is set independently of recent revenue would separate the two.",
+    })
+  }
+
+  const dotClass = (d: "green" | "amber" | "grey") =>
+    d === "green" ? "bg-green-400" : d === "amber" ? "bg-amber-400" : "bg-neutral-500"
+
+  return (
+    <Card>
+      <h3 className="mb-2 text-sm font-semibold">Summary</h3>
+      <p className="mb-4 text-xs text-neutral-300">{headline}</p>
+
+      {findings.length > 0 && (
+        <>
+          <p className="mb-2 text-[10px] uppercase tracking-wider text-neutral-500">Key findings</p>
+          <ul className="mb-5 space-y-2">
+            {findings.map((f, i) => (
+              <li key={i} className="flex items-start gap-2.5 text-xs text-neutral-200">
+                <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${dotClass(f.dot)}`} />
+                <span>{f.text}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {/* Context strip */}
+      <div className="mb-5 grid grid-cols-2 gap-3 rounded-lg border border-neutral-800 bg-neutral-800/30 p-3 text-[11px] md:grid-cols-3">
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-neutral-500">True ROAS</p>
+          <p className={`mt-0.5 font-semibold tabular-nums ${trueRoas >= 2 ? "text-green-400" : trueRoas >= 1 ? "text-amber-400" : "text-red-400"}`}>
+            {trueRoas > 0 ? `${trueRoas.toFixed(2)}x` : "—"}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-neutral-500">Est. incremental share</p>
+          <p className="mt-0.5 font-semibold tabular-nums text-neutral-200">
+            {incrementalSharePct > 0 ? `${incrementalSharePct.toFixed(0)}%` : "—"}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-neutral-500">Model fit</p>
+          <p className={`mt-0.5 font-semibold tabular-nums ${bestRegRsq >= 0.3 ? "text-green-400" : bestRegRsq >= 0.1 ? "text-amber-400" : "text-red-400"}`}>
+            R² = {bestRegRsq.toFixed(2)}{" · "}
+            <span className="font-normal text-neutral-500">
+              {bestRegLag === 0 ? "same week" : `${bestRegLag}w lag`}
+            </span>
+          </p>
+        </div>
+      </div>
+
+      {alternatives.length > 0 && (
+        <>
+          <p className="mb-2 text-[10px] uppercase tracking-wider text-neutral-500">
+            Alternative explanations to consider
+          </p>
+          <div className="space-y-2.5">
+            {alternatives.map((a) => (
+              <div key={a.key} className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2">
+                <p className="text-xs font-medium text-amber-300">{a.title}</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-neutral-400">{a.body}</p>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </Card>
   )
 }
