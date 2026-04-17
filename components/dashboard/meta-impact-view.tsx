@@ -264,11 +264,11 @@ export default function MetaImpactView({ clientId, dailyMetaSpend = [] }: Props)
       <Card>
         <h3 className="mb-3 text-sm font-semibold">Data Sources</h3>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <CsvUpload label="Shopify Total Revenue (Weekly_orders_less_B2B.csv)" onUpload={handleUpload("total")} rowCount={totalRows.length} />
-          <CsvUpload label="Shopify Paid Orders - last click (Paid_orders.csv)" onUpload={handleUpload("paid")} rowCount={paidRows.length} />
-          <CsvUpload label="GSC Search Data (impressions + clicks)" onUpload={handleUpload("search")} rowCount={searchRows.length} />
-          <CsvUpload label="Shopify Store Sessions" onUpload={handleUpload("sessions")} rowCount={sessionsRows.length} />
-          <CsvUpload label="Amazon Sales (optional)" onUpload={handleUpload("amazon")} rowCount={amazonRows.length} placeholder={!amazonCsv} />
+          <CsvUpload label="Shopify Total Revenue (Weekly_orders_less_B2B.csv)" onUpload={handleUpload("total")} rowCount={totalRows.length} hasContent={!!totalCsv} />
+          <CsvUpload label="Shopify Paid Orders - last click (Paid_orders.csv)" onUpload={handleUpload("paid")} rowCount={paidRows.length} hasContent={!!paidCsv} />
+          <CsvUpload label="GSC Search Data (impressions + clicks)" onUpload={handleUpload("search")} rowCount={searchRows.length} hasContent={!!searchCsv} />
+          <CsvUpload label="Shopify Store Sessions" onUpload={handleUpload("sessions")} rowCount={sessionsRows.length} hasContent={!!sessionsCsv} />
+          <CsvUpload label="Amazon Sales (optional)" onUpload={handleUpload("amazon")} rowCount={amazonRows.length} hasContent={!!amazonCsv} placeholder={!amazonCsv} />
         </div>
         <p className="mt-3 text-[11px] text-neutral-600">
           {dailyMetaSpend.length > 0
@@ -619,11 +619,13 @@ function CsvUpload({
   label,
   onUpload,
   rowCount,
+  hasContent,
   placeholder,
 }: {
   label: string
   onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void
   rowCount: number
+  hasContent?: boolean
   placeholder?: boolean
 }) {
   return (
@@ -636,7 +638,11 @@ function CsvUpload({
         className="block w-full text-xs text-neutral-400 file:mr-3 file:rounded file:border-0 file:bg-brand-lime/20 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-brand-lime hover:file:bg-brand-lime/30"
       />
       {rowCount > 0 ? (
-        <p className="mt-1 text-[11px] text-green-400">Loaded {rowCount} daily rows</p>
+        <p className="mt-1 text-[11px] text-green-400">Loaded {rowCount} rows</p>
+      ) : hasContent ? (
+        <p className="mt-1 text-[11px] text-red-400">
+          Couldn&apos;t parse this CSV — column names didn&apos;t match. Expected a date column (e.g. Day, Date, Week start) and a value column.
+        </p>
       ) : placeholder ? (
         <p className="mt-1 text-[11px] text-neutral-600">No data yet</p>
       ) : null}

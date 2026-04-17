@@ -237,18 +237,30 @@ export function parseShopifyDaily(csvText: string): DailyRevenueRow[] {
 
 /**
  * Parse an Amazon sales CSV.
- * Expected columns: Day/Date, Sales/Ordered Product Sales/Revenue, Units/Units Ordered
+ * Handles both daily reports (Day/Date column) and weekly ASIN reports
+ * (Week start column). Prefers "Ordered" over "Dispatched" revenue/units
+ * so the signal reflects demand at the point of purchase.
  */
 export function parseAmazonDaily(csvText: string): DailyAmazonRow[] {
   const rows = parseCsv(csvText)
   if (rows.length < 2) return []
 
   const header = rows[0].map((h) => h.toLowerCase())
-  const dayIdx = header.findIndex((h) => h.includes("day") || h.includes("date"))
-  const salesIdx = header.findIndex(
-    (h) => h.includes("sales") || h.includes("revenue") || h.includes("ordered product")
+  const dayIdx = header.findIndex(
+    (h) => h.includes("day") || h.includes("date") || h.includes("week start")
   )
-  const unitsIdx = header.findIndex((h) => h.includes("unit"))
+  // Prefer "ordered" columns over "dispatched" — ordered reflects demand
+  // at the moment of purchase, which is what ad spend influences.
+  let salesIdx = header.findIndex(
+    (h) => h.includes("ordered revenue") || h.includes("ordered product") || h.includes("ordered sales")
+  )
+  if (salesIdx === -1) {
+    salesIdx = header.findIndex((h) => h.includes("sales") || h.includes("revenue"))
+  }
+  let unitsIdx = header.findIndex((h) => h.includes("ordered unit"))
+  if (unitsIdx === -1) {
+    unitsIdx = header.findIndex((h) => h.includes("unit"))
+  }
 
   if (dayIdx === -1 || salesIdx === -1) {
     console.warn("[parseAmazonDaily] missing required columns", { dayIdx, salesIdx, header })
