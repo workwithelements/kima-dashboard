@@ -827,11 +827,16 @@ function MetricCard({
  * Frames a correlation finding around where the signal is strongest, not just
  * whether it's above some threshold. Returns headline + optional hypothesis
  * for weak or negative cases so a client can't read "weak" as nothing to say.
+ *
+ * When `isBest` is true the caller is describing the strongest lag, so we can
+ * use "strongest link" language. When false (user clicked a non-best pill) we
+ * describe the selected lag neutrally without claiming it's the strongest.
  */
 function describeFinding(
   lag: LagCorrelation,
   xName: string,
-  yName: string
+  yName: string,
+  isBest: boolean = true
 ): { dotColor: string; headline: string; hypothesis: string | null } {
   const when = lag.lagWeeks === 0 ? "in the same week" : `at a ${lag.lagWeeks}-week delay`
   const r = lag.r
@@ -854,14 +859,18 @@ function describeFinding(
   if (r >= 0.1) {
     return {
       dotColor: "bg-neutral-500",
-      headline: `${xName}'s strongest link to ${yName} is ${when} — but only a weak positive signal.`,
-      hypothesis: `Could be noise from the small sample, or a real effect that longer data would sharpen. Strongest effects often need a controlled test to surface.`,
+      headline: isBest
+        ? `${xName}'s strongest link to ${yName} is ${when} — but only a weak positive signal.`
+        : `${xName} and ${yName} show a weak positive signal ${when} (r = ${r.toFixed(2)}).`,
+      hypothesis: `Could be noise from the small sample, or a real effect that longer data would sharpen. Controlled tests surface the real effect size.`,
     }
   }
   if (absR < 0.1) {
     return {
       dotColor: "bg-neutral-500",
-      headline: `No clear relationship between ${xName} and ${yName} at any lag tested (best: ${when}).`,
+      headline: isBest
+        ? `No clear relationship between ${xName} and ${yName} at any lag tested (best: ${when}).`
+        : `${xName} and ${yName} show no meaningful relationship ${when} (r = ${r.toFixed(2)}).`,
       hypothesis: `Either genuinely independent over this window, or a real effect buried in weekly noise. A longer time series or a geo holdout would help separate the two.`,
     }
   }
@@ -903,7 +912,8 @@ function FindingCard({
 
   if (lagSeries.length === 0 || !best) return null
   const current = lagSeries.find((l) => l.lagWeeks === selectedLag) ?? best
-  const { dotColor, headline, hypothesis } = describeFinding(current, xName, yName)
+  const isBest = current.lagWeeks === best.lagWeeks
+  const { dotColor, headline, hypothesis } = describeFinding(current, xName, yName, isBest)
 
   return (
     <div className="rounded-lg border border-neutral-800 bg-neutral-800/30 px-4 py-3">
@@ -956,14 +966,20 @@ function FindingCard({
 
 /**
  * Best lag for the funnel story: prefers the strongest positive correlation
- * (even if weak), since that's where the ad-effect hypothesis would show up.
+ * (even if weak). Tie-breaks in favour of the shorter lag — a 1-week r of
+ * 0.23 and a same-week r of 0.21 are statistically indistinguishable at n~13,
+ * and claiming a delayed effect over a same-week one requires real separation.
  * Only falls back to the least-negative lag when no positives exist at all.
  */
 function bestLag(series: LagCorrelation[]): LagCorrelation | null {
   if (series.length === 0) return null
   const positives = series.filter((l) => l.r > 0)
   const pool = positives.length > 0 ? positives : series
-  return pool.reduce((a, b) => (b.r > a.r ? b : a))
+  const maxR = Math.max(...pool.map((l) => l.r))
+  // Among lags within 0.05 r of the maximum, pick the shortest — we only
+  // declare a delayed effect when it clearly beats the same-week alternative.
+  const nearMax = pool.filter((l) => maxR - l.r < 0.05)
+  return nearMax.reduce((a, b) => (b.lagWeeks < a.lagWeeks ? b : a))
 }
 
 function SummaryCard({
