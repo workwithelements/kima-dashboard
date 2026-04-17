@@ -322,8 +322,13 @@ export function parseSessionsDaily(csvText: string): DailySessionsRow[] {
   if (rows.length < 2) return []
 
   const header = rows[0].map((h) => h.toLowerCase())
-  const dayIdx = header.findIndex((h) => h.includes("day") || h.includes("date"))
-  const sessionsIdx = header.findIndex((h) => h.includes("session"))
+  const dayIdx = header.findIndex(
+    (h) => h.includes("day") || h.includes("date") || h.includes("week start")
+  )
+  // Accept "sessions", "visits", or common Shopify variants
+  const sessionsIdx = header.findIndex(
+    (h) => h.includes("session") || h.includes("visit")
+  )
 
   if (dayIdx === -1 || sessionsIdx === -1) {
     console.warn("[parseSessionsDaily] missing required columns", { dayIdx, sessionsIdx, header })
