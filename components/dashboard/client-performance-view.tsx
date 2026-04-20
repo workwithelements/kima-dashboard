@@ -29,6 +29,7 @@ import AlexiaClarkStructureView from "@/components/dashboard/alexia-clark-struct
 import AdsSidebar, { type AdEntry } from "@/components/ui/ads-sidebar"
 import ScorecardConfigModal from "./scorecard-config-modal"
 import AnnotationsBar, { type Annotation } from "@/components/ui/annotations-bar"
+import { calculatePacing } from "@/lib/utils/pacing"
 import {
   type NamingConfig,
   parseAdName,
@@ -425,6 +426,31 @@ export default function ClientPerformanceView({
   }, [filteredRows, filteredGaRows, platform])
 
   const derived = useMemo(() => deriveMetrics(metrics), [metrics])
+
+  // Month-to-date pacing projection — only compute when the display range
+  // aligns with "this_month" and the client has a monthly budget set.
+  const pacing = useMemo(() => {
+    if (!client.monthly_budget || client.monthly_budget <= 0) return null
+    if (preset !== "this_month") return null
+    // Build daily spend series for the current month from filteredRows
+    const dailyMap = new Map<string, number>()
+    for (const r of filteredRows) {
+      if (!r.date) continue
+      dailyMap.set(r.date, (dailyMap.get(r.date) || 0) + (r.spend || 0))
+    }
+    // Also include Google Ads spend if on All Platforms view
+    if (isAll) {
+      for (const r of filteredGaRows) {
+        if (!r.date) continue
+        dailyMap.set(r.date, (dailyMap.get(r.date) || 0) + (r.spend || 0))
+      }
+    }
+    const dailySpend = Array.from(dailyMap.entries())
+      .map(([date, spend]) => ({ date, spend }))
+      .sort((a, b) => a.date.localeCompare(b.date))
+    const now = new Date()
+    return calculatePacing(dailySpend, client.monthly_budget, now.getFullYear(), now.getMonth() + 1)
+  }, [client.monthly_budget, preset, filteredRows, filteredGaRows, isAll])
 
   const compMetrics = useMemo(() => {
     if (isMeta) return aggregateMetrics(filteredCompRows)
@@ -1007,6 +1033,7 @@ export default function ClientPerformanceView({
           label="Spend"
           value={fmtCurrency(metrics.spend, currency)}
           delta={delta(metrics.spend, compMetrics.spend)}
+          subValue={pacing && pacing.pacingPct !== null ? `Pacing ${pacing.pacingPct.toFixed(0)}%` : undefined}
         />
         <MetricCard
           label="Impressions"
