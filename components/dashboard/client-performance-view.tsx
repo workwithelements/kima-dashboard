@@ -19,6 +19,12 @@ import {
 } from "@/lib/utils/aggregate"
 import { fmtCurrency, fmtNumber, fmtPercent, fmtDelta } from "@/lib/utils/format"
 import { calculateFunnelStep, calculateNetNewReach, FUNNEL_STEP_DEFS, type FunnelStepKey } from "@/lib/utils/funnel-steps"
+import {
+  SYNTHESISED_DEFAULT_ID,
+  pickActiveView,
+  synthesiseDefaultView,
+  type FunnelView,
+} from "@/lib/utils/funnel-views"
 import { getComparisonRange, getPresetRange, type DatePreset } from "@/lib/utils/dates"
 import { Card, MetricCard } from "@/components/ui/card"
 import DateRangePicker from "@/components/ui/date-range-picker"
@@ -118,6 +124,10 @@ type Props = {
   funnelSteps?: string[] | null
   /** Key action step for CPA chart denominator */
   keyAction?: string | null
+  /** Named funnel views (each with own steps, key action, linked campaigns) */
+  funnelViews?: FunnelView[]
+  /** Active view id from the URL (?view=...) */
+  activeFunnelViewId?: string | null
   /** Demographics breakdown rows (Meta only) */
   demographics?: MetaDemographicsRow[]
   /** Placements breakdown rows (Meta only) */
@@ -182,6 +192,8 @@ export default function ClientPerformanceView({
   baselineReach = 0,
   funnelSteps: initialSteps = null,
   keyAction: initialKeyAction = null,
+  funnelViews: initialViews,
+  activeFunnelViewId,
   annotations: initialAnnotations = [],
   demographics = [],
   placements = [],
@@ -198,8 +210,27 @@ export default function ClientPerformanceView({
   const router = useRouter()
   const [gaLevel, setGaLevel] = useState<"campaign" | "ad_group">("campaign")
   const [showConfig, setShowConfig] = useState(false)
-  const [funnelSteps, setFunnelSteps] = useState<string[]>(initialSteps || [])
-  const [keyAction, setKeyAction] = useState<string | null>(initialKeyAction)
+
+  // Funnel views state. If the server didn't pass any, fall back to a
+  // synthesised default derived from the legacy config fields.
+  const [views, setViews] = useState<FunnelView[]>(() => {
+    if (initialViews && initialViews.length > 0) return initialViews
+    return [synthesiseDefaultView(initialSteps, initialKeyAction)]
+  })
+  const [activeViewId, setActiveViewId] = useState<string>(() => {
+    const seed = initialViews && initialViews.length > 0
+      ? initialViews
+      : [synthesiseDefaultView(initialSteps, initialKeyAction)]
+    const picked = pickActiveView(seed, activeFunnelViewId)
+    return picked?.id || seed[0]?.id || ""
+  })
+  const activeView = useMemo(
+    () => pickActiveView(views, activeViewId) || views[0] || null,
+    [views, activeViewId]
+  )
+  const funnelSteps = activeView?.funnel_steps || []
+  const keyAction = activeView?.key_action || null
+
   const [cmPct, setCmPct] = useState<number | null>(contributionMarginPct)
   // Active CPA step: which funnel step drives the CPA chart (defaults to keyAction or last step)
   const [activeCpaStep, setActiveCpaStep] = useState<string | null>(null)
@@ -362,6 +393,39 @@ export default function ClientPerformanceView({
   const [selectedCampaigns, setSelectedCampaigns] = useState<string[]>(() =>
     campaigns.map((c) => c.id)
   )
+
+  // Sync the Meta campaign selector with the active funnel view. Fires once
+  // on mount (once campaigns are populated) and whenever the user switches
+  // views. Guard against the StrictMode double-invoke + date-range updates
+  // by tracking the last applied view id.
+  const lastAppliedViewIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!activeView) return
+    if (campaigns.length === 0) return
+    if (lastAppliedViewIdRef.current === activeView.id) return
+    lastAppliedViewIdRef.current = activeView.id
+    const linked = activeView.linked_campaign_ids
+    if (linked.length > 0) {
+      const valid = linked.filter((id) => campaigns.some((c) => c.id === id))
+      setSelectedCampaigns(valid.length > 0 ? valid : campaigns.map((c) => c.id))
+    } else {
+      setSelectedCampaigns(campaigns.map((c) => c.id))
+    }
+  }, [activeView, campaigns])
+
+  function handleViewChange(viewId: string) {
+    setActiveViewId(viewId)
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    if (viewId && viewId !== SYNTHESISED_DEFAULT_ID) {
+      params.set("view", viewId)
+    } else {
+      params.delete("view")
+    }
+    const qs = params.toString()
+    const url = qs ? `${window.location.pathname}?${qs}` : window.location.pathname
+    router.replace(url, { scroll: false })
+  }
 
   // Extract unique ad sets from Meta rows with active status
   const adsets = useMemo(() => {
@@ -1215,8 +1279,30 @@ export default function ClientPerformanceView({
       {/* Funnel steps — per-client configurable (Meta only) */}
       {showFunnel && (
         <div>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-medium text-neutral-400">Funnel Metrics</h2>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-medium text-neutral-400">Funnel Metrics</h2>
+              {views.length > 1 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {views.map((v) => {
+                    const isActive = v.id === activeView?.id
+                    return (
+                      <button
+                        key={v.id}
+                        onClick={() => handleViewChange(v.id)}
+                        className={`rounded-full border px-2.5 py-1 text-[11px] transition ${
+                          isActive
+                            ? "border-brand-lime/40 bg-brand-lime/10 text-brand-lime"
+                            : "border-neutral-700 text-neutral-400 hover:border-neutral-600 hover:text-white"
+                        }`}
+                      >
+                        {v.name}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
             {!readOnly && (
               <button
                 onClick={() => setShowConfig(true)}
@@ -2004,14 +2090,20 @@ export default function ClientPerformanceView({
       {showConfig && (
         <ScorecardConfigModal
           clientId={client.id}
-          selectedSteps={funnelSteps}
-          keyAction={keyAction}
+          views={views}
+          initialActiveViewId={activeViewId}
           contributionMarginPct={cmPct}
+          campaigns={campaigns}
           onClose={() => setShowConfig(false)}
-          onSaved={(steps, newKeyAction, newCmPct) => {
-            setFunnelSteps(steps)
-            setKeyAction(newKeyAction)
+          onSaved={(newViews, newCmPct) => {
+            setViews(newViews)
             setCmPct(newCmPct)
+            // Keep current view selected if still present, else fall back.
+            const stillPresent = newViews.some((v) => v.id === activeViewId)
+            if (!stillPresent) {
+              const next = pickActiveView(newViews, null)
+              if (next) setActiveViewId(next.id)
+            }
             setShowConfig(false)
           }}
         />

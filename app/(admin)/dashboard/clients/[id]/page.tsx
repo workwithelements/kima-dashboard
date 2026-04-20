@@ -8,6 +8,7 @@ import { getPresetRange, getComparisonRange } from "@/lib/utils/dates"
 import type { DatePreset } from "@/lib/utils/dates"
 import type { ComparisonType } from "@/lib/utils/types"
 import ClientPerformanceView from "@/components/dashboard/client-performance-view"
+import { synthesiseDefaultView, type FunnelView } from "@/lib/utils/funnel-views"
 
 type Props = {
   params: { id: string }
@@ -16,6 +17,7 @@ type Props = {
     from?: string
     to?: string
     compare?: string
+    view?: string
   }
 }
 
@@ -63,7 +65,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
   const supabase = createServiceClient()
 
   const minDelay = new Promise((r) => setTimeout(r, 1000))
-  const [data, configRes, gaRows, gaCompRows, breakdownsData, annotationsRes, shopifyData, shopifyCompData] = await Promise.all([
+  const [data, configRes, funnelViewsRes, gaRows, gaCompRows, breakdownsData, annotationsRes, shopifyData, shopifyCompData] = await Promise.all([
     fetchClientData(
       params.id,
       range.from,
@@ -76,6 +78,11 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       .select("funnel_steps, key_action, contribution_margin_pct")
       .eq("client_id", params.id)
       .single(),
+    supabase
+      .from("client_funnel_views")
+      .select("id, name, sort_order, funnel_steps, key_action, linked_campaign_ids, is_default")
+      .eq("client_id", params.id)
+      .order("sort_order", { ascending: true }),
     fetchGoogleAdsData(params.id, range.from, range.to),
     fetchCompFrom && fetchCompTo
       ? fetchGoogleAdsData(params.id, fetchCompFrom, fetchCompTo)
@@ -102,6 +109,11 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
   const contributionMarginPct = configRes.data?.contribution_margin_pct != null
     ? Number(configRes.data.contribution_margin_pct)
     : null
+  const persistedViews = (funnelViewsRes.data || []) as FunnelView[]
+  const funnelViews: FunnelView[] =
+    persistedViews.length > 0
+      ? persistedViews
+      : [synthesiseDefaultView(funnelSteps, keyAction)]
   const annotations = (annotationsRes.data || []).map((a: { id: string; date: string; text: string; created_at: string }) => ({
     id: a.id,
     date: a.date,
@@ -125,6 +137,8 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       baselineReach={data.baselineReach}
       funnelSteps={funnelSteps}
       keyAction={keyAction}
+      funnelViews={funnelViews}
+      activeFunnelViewId={searchParams.view || null}
       contributionMarginPct={contributionMarginPct}
       demographics={breakdownsData?.demographics ?? []}
       placements={breakdownsData?.placements ?? []}

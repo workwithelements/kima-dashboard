@@ -16,6 +16,7 @@ import type { ComparisonType, Client } from "@/lib/utils/types"
 import type { Annotation } from "@/components/ui/annotations-bar"
 import type { NamingConfig } from "@/lib/utils/ad-name-parser"
 import type { MetaDemographicsRow, MetaPlacementsRow, MetaDailyRow, GoogleAdsDailyRow, ShopifyDailyOrdersRow, ShopifyAttributionRow } from "@/lib/utils/types"
+import type { FunnelView } from "@/lib/utils/funnel-views"
 
 type Tab = "performance" | "pacing" | "reach"
 
@@ -40,6 +41,8 @@ type Props = {
   baselineReach: number
   funnelSteps: string[] | null
   keyAction: string | null
+  funnelViews: FunnelView[]
+  activeFunnelViewId: string | null
   contributionMarginPct: number | null
   demographics: MetaDemographicsRow[]
   placements: MetaPlacementsRow[]
@@ -171,6 +174,8 @@ export default function ClientDashboard(props: Props) {
             baselineReach={props.baselineReach}
             funnelSteps={props.funnelSteps}
             keyAction={props.keyAction}
+            funnelViews={props.funnelViews}
+            activeFunnelViewId={props.activeFunnelViewId}
             contributionMarginPct={props.contributionMarginPct}
             demographics={props.demographics}
             placements={props.placements}

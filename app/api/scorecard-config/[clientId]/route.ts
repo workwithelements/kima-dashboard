@@ -1,30 +1,48 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient } from "@/lib/supabase/server"
 import { requireAuth, safeError } from "@/lib/auth/authorize"
+import { synthesiseDefaultView, type FunnelView } from "@/lib/utils/funnel-views"
 
 /**
- * GET /api/scorecard-config/[clientId] — get scorecard config for a client
+ * GET /api/scorecard-config/[clientId]
+ * Returns `{ config, views }`. `views` is the persisted list of
+ * client_funnel_views rows, or a synthesised transient default derived from
+ * the legacy config fields when no rows exist yet.
  */
 export async function GET(
   _request: NextRequest,
   { params }: { params: { clientId: string } }
 ) {
-  const { user, error: authError } = await requireAuth()
+  const { error: authError } = await requireAuth()
   if (authError) return authError
 
   const db = createServiceClient()
-  const { data, error } = await db
-    .from("client_scorecard_config")
-    .select("*")
-    .eq("client_id", params.clientId)
-    .single()
+  const [configRes, viewsRes] = await Promise.all([
+    db
+      .from("client_scorecard_config")
+      .select("*")
+      .eq("client_id", params.clientId)
+      .single(),
+    db
+      .from("client_funnel_views")
+      .select("id, name, sort_order, funnel_steps, key_action, linked_campaign_ids, is_default")
+      .eq("client_id", params.clientId)
+      .order("sort_order", { ascending: true }),
+  ])
 
-  if (error && error.code !== "PGRST116") {
-    return safeError(error)
+  if (configRes.error && configRes.error.code !== "PGRST116") {
+    return safeError(configRes.error)
   }
+  if (viewsRes.error) return safeError(viewsRes.error)
 
-  // Return config or null (no config yet = use defaults)
-  return NextResponse.json(data || null)
+  const config = configRes.data || null
+  const rawViews = (viewsRes.data || []) as FunnelView[]
+  const views: FunnelView[] =
+    rawViews.length > 0
+      ? rawViews
+      : [synthesiseDefaultView(config?.funnel_steps, config?.key_action)]
+
+  return NextResponse.json({ config, views })
 }
 
 /**
@@ -34,7 +52,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: { clientId: string } }
 ) {
-  const { user, error: authError } = await requireAuth()
+  const { error: authError } = await requireAuth()
   if (authError) return authError
 
   const body = await request.json()
