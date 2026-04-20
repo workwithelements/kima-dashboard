@@ -219,9 +219,12 @@ export default function ClientPerformanceView({
     return ids
   }, [createdDates])
 
-  // Active entity IDs — campaigns/adsets/ads with spend on the latest date
-  // in the raw data. Works at all hierarchy levels.
-  const activeEntityIds = useMemo(() => {
+  // Entity status: blue=testing, green=live, red=paused
+  // - "testing": has spend on the latest date AND fewer than 5 distinct spend days
+  // - "live": has spend on the latest date AND 5+ distinct spend days
+  // - "paused": no spend on the latest date
+  const entityStatusMap = useMemo(() => {
+    const map = new Map<string, "testing" | "live" | "paused">()
     let maxDate = ""
     for (const r of rawRows) {
       if (r.date && r.date > maxDate) maxDate = r.date
@@ -229,22 +232,46 @@ export default function ClientPerformanceView({
     for (const r of rawGoogleAdsRows) {
       if (r.date && r.date > maxDate) maxDate = r.date
     }
-    if (!maxDate) return new Set<string>()
-    const ids = new Set<string>()
-    for (const r of rawRows) {
-      if (r.date === maxDate && (r.spend || 0) > 0) {
-        if (r.campaign_id) ids.add(r.campaign_id)
-        if (r.adset_id) ids.add(r.adset_id)
-        if (r.ad_id) ids.add(r.ad_id)
+    if (!maxDate) return map
+
+    // Count distinct spend days per entity and track if active on maxDate
+    const spendDays = new Map<string, Set<string>>()
+    const activeOnMax = new Set<string>()
+
+    function track(id: string, date: string, spend: number) {
+      if (!id) return
+      if (spend > 0) {
+        if (!spendDays.has(id)) spendDays.set(id, new Set())
+        spendDays.get(id)!.add(date)
+        if (date === maxDate) activeOnMax.add(id)
       }
+    }
+
+    for (const r of rawRows) {
+      if (!r.date) continue
+      track(r.campaign_id || "", r.date, r.spend || 0)
+      track(r.adset_id || "", r.date, r.spend || 0)
+      track(r.ad_id || "", r.date, r.spend || 0)
     }
     for (const r of rawGoogleAdsRows) {
-      if (r.date === maxDate && (r.spend || 0) > 0) {
-        if (r.campaign_id) ids.add(r.campaign_id)
-        if (r.ad_group_id) ids.add(r.ad_group_id)
-      }
+      if (!r.date) continue
+      track(r.campaign_id || "", r.date, r.spend || 0)
+      track(r.ad_group_id || "", r.date, r.spend || 0)
     }
-    return ids
+
+    // Assign status
+    const allIds = new Set<string>()
+    spendDays.forEach((_, id) => allIds.add(id))
+    activeOnMax.forEach((id) => allIds.add(id))
+    allIds.forEach((id) => {
+      if (!activeOnMax.has(id)) {
+        map.set(id, "paused")
+      } else {
+        const days = spendDays.get(id)?.size ?? 0
+        map.set(id, days >= 5 ? "live" : "testing")
+      }
+    })
+    return map
   }, [rawRows, rawGoogleAdsRows])
 
   // Client-side date filtering: the server may have fetched a wider window
@@ -1656,7 +1683,7 @@ export default function ClientPerformanceView({
               breadcrumb={drillBreadcrumb}
               onRowClick={handleDrillDown}
               newAdIds={isMeta && metaLevel === "ad" ? newAdIds : undefined}
-              activeIds={activeEntityIds}
+              entityStatus={entityStatusMap}
             />
           </div>
         )}

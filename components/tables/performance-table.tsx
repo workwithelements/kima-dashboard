@@ -293,7 +293,7 @@ export default function PerformanceTable({
   breadcrumb,
   onRowClick,
   newAdIds,
-  activeIds,
+  entityStatus,
 }: {
   data: GroupRow[]
   /** Comparison period data — same shape, matched by row ID for delta badges */
@@ -310,8 +310,8 @@ export default function PerformanceTable({
   onRowClick?: (row: GroupRow) => void
   /** Set of ad IDs in their first 5 days — shows "Test" beaker badge */
   newAdIds?: Set<string>
-  /** Set of IDs with spend on the most recent day — shows green/grey status dot */
-  activeIds?: Set<string>
+  /** Entity status: testing (blue), live (green), paused (red) */
+  entityStatus?: Map<string, "testing" | "live" | "paused">
 }) {
   const [sortKey, setSortKey] = useState<string>("spend")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
@@ -576,21 +576,21 @@ export default function PerformanceTable({
                   >
                     {isName ? (
                       <span className="inline-flex items-center gap-1.5">
-                        {activeIds && (
+                        {entityStatus && (
                           <span
                             className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
-                              activeIds.has(row.id)
-                                ? "bg-green-400"
-                                : row.metrics.impressions > 0
-                                  ? "bg-neutral-600"
-                                  : "bg-red-400/60"
+                              entityStatus.get(row.id) === "testing"
+                                ? "bg-blue-400"
+                                : entityStatus.get(row.id) === "live"
+                                  ? "bg-green-400"
+                                  : "bg-red-400"
                             }`}
                             title={
-                              activeIds.has(row.id)
-                                ? "Active"
-                                : row.metrics.impressions > 0
-                                  ? "Paused"
-                                  : "No delivery"
+                              entityStatus.get(row.id) === "testing"
+                                ? "In testing"
+                                : entityStatus.get(row.id) === "live"
+                                  ? "Live"
+                                  : "Paused"
                             }
                           />
                         )}
