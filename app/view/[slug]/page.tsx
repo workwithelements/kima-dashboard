@@ -18,6 +18,7 @@ import { getPresetRange, getComparisonRange, daysAgo, monthStart, today } from "
 import type { DatePreset } from "@/lib/utils/dates"
 import type { ComparisonType } from "@/lib/utils/types"
 import { calculatePacing } from "@/lib/utils/pacing"
+import { synthesiseDefaultView, type FunnelView } from "@/lib/utils/funnel-views"
 
 type Props = {
   params: { slug: string }
@@ -27,6 +28,7 @@ type Props = {
     to?: string
     tab?: string
     compare?: string
+    view?: string
   }
 }
 
@@ -92,6 +94,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     googleAdsRows,
     googleAdsComparisonRows,
     scorecardConfigRes,
+    funnelViewsRes,
     annotationsRes,
     currentMonthSpend,
     historicalSpend,
@@ -109,6 +112,11 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
       .select("funnel_steps, key_action, contribution_margin_pct")
       .eq("client_id", client.id)
       .single(),
+    supabase
+      .from("client_funnel_views")
+      .select("id, name, sort_order, funnel_steps, key_action, linked_campaign_ids, is_default")
+      .eq("client_id", client.id)
+      .order("sort_order", { ascending: true }),
     supabase
       .from("annotations")
       .select("id, date, text, created_at")
@@ -129,6 +137,11 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
   const contributionMarginPct = scorecardConfigRes.data?.contribution_margin_pct != null
     ? Number(scorecardConfigRes.data.contribution_margin_pct)
     : null
+  const persistedViews = (funnelViewsRes.data || []) as FunnelView[]
+  const funnelViews: FunnelView[] =
+    persistedViews.length > 0
+      ? persistedViews
+      : [synthesiseDefaultView(funnelSteps, keyAction)]
   const annotations = (annotationsRes.data || []).map((a: { id: string; date: string; text: string; created_at: string }) => ({
     id: a.id,
     date: a.date,
@@ -163,6 +176,8 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
       baselineReach={perfData?.baselineReach || 0}
       funnelSteps={funnelSteps}
       keyAction={keyAction}
+      funnelViews={funnelViews}
+      activeFunnelViewId={searchParams.view || null}
       contributionMarginPct={contributionMarginPct}
       demographics={breakdownsData?.demographics ?? []}
       placements={breakdownsData?.placements ?? []}

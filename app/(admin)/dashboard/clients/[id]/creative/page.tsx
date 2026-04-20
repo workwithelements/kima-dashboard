@@ -1,49 +1,16 @@
-export const dynamic = "force-dynamic"
-
-import { fetchCreativeData } from "@/lib/data/fetch-client-data"
-import { getPresetRange } from "@/lib/utils/dates"
-import type { DatePreset } from "@/lib/utils/dates"
-import CreativeAnalysisView from "@/components/dashboard/creative-analysis-view"
-import { notFound } from "next/navigation"
+import { redirect } from "next/navigation"
 
 type Props = {
   params: { id: string }
-  searchParams: {
-    preset?: string
-    from?: string
-    to?: string
-  }
+  searchParams: Record<string, string | string[] | undefined>
 }
 
-export default async function CreativeAnalysisPage({ params, searchParams }: Props) {
-  const preset = (searchParams.preset || "last_30d") as DatePreset
-  const range = searchParams.from && searchParams.to
-    ? { from: searchParams.from, to: searchParams.to }
-    : getPresetRange(preset)
-
-  const [data] = await Promise.all([
-    fetchCreativeData(params.id, range.from, range.to),
-    new Promise((r) => setTimeout(r, 1000)),
-  ])
-  if (!data) notFound()
-
-  return (
-    <CreativeAnalysisView
-      rows={data.rows}
-      preset={preset}
-      from={range.from}
-      to={range.to}
-      clientId={params.id}
-      thumbnails={data.thumbnails}
-      previewsEnabled={data.previewsEnabled}
-      currency={data.client.currency_code ?? "GBP"}
-      metaAccountId={data.client.meta_account_id ?? undefined}
-      keyAction={data.keyAction}
-      funnelSteps={data.funnelSteps}
-      demographics={data.demographics}
-      placements={data.placements}
-      namingConfig={data.namingConfig}
-      createdDates={data.createdDates}
-    />
-  )
+export default function CreativeAnalysisPage({ params, searchParams }: Props) {
+  const qs = new URLSearchParams()
+  for (const [key, value] of Object.entries(searchParams)) {
+    if (Array.isArray(value)) value.forEach((v) => qs.append(key, v))
+    else if (value !== undefined) qs.set(key, value)
+  }
+  const suffix = qs.toString() ? `?${qs.toString()}` : ""
+  redirect(`/dashboard/clients/${params.id}${suffix}`)
 }

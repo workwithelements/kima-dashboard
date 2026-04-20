@@ -19,6 +19,12 @@ import {
 } from "@/lib/utils/aggregate"
 import { fmtCurrency, fmtNumber, fmtPercent, fmtDelta } from "@/lib/utils/format"
 import { calculateFunnelStep, calculateNetNewReach, FUNNEL_STEP_DEFS, type FunnelStepKey } from "@/lib/utils/funnel-steps"
+import {
+  SYNTHESISED_DEFAULT_ID,
+  pickActiveView,
+  synthesiseDefaultView,
+  type FunnelView,
+} from "@/lib/utils/funnel-views"
 import { getComparisonRange, getPresetRange, type DatePreset } from "@/lib/utils/dates"
 import { Card, MetricCard } from "@/components/ui/card"
 import DateRangePicker from "@/components/ui/date-range-picker"
@@ -38,6 +44,16 @@ import {
   getDimensionValue,
   type ParsedAdName,
 } from "@/lib/utils/ad-name-parser"
+import {
+  classifyAllAds,
+  countByClassification,
+  CLASSIFICATIONS,
+  type ClassificationType,
+} from "@/lib/utils/creative-classification"
+import {
+  calculateConcentration,
+  CONCENTRATION_COLORS,
+} from "@/lib/utils/spend-concentration"
 
 // Lazy-load heavy chart components (recharts ~200KB)
 const ChartPlaceholder = () => (
@@ -83,6 +99,10 @@ const PlacementsChart = dynamic(
   () => import("@/components/charts/placements-chart"),
   { ssr: false, loading: ChartPlaceholder }
 )
+const CoverageAnalysis = dynamic(
+  () => import("@/components/charts/coverage-analysis"),
+  { ssr: false, loading: ChartPlaceholder }
+)
 
 // Re-export types/utils from funnel-chart that are used in this file
 import { getFunnelColor, type FunnelSeriesDef } from "@/components/charts/funnel-chart"
@@ -104,6 +124,10 @@ type Props = {
   funnelSteps?: string[] | null
   /** Key action step for CPA chart denominator */
   keyAction?: string | null
+  /** Named funnel views (each with own steps, key action, linked campaigns) */
+  funnelViews?: FunnelView[]
+  /** Active view id from the URL (?view=...) */
+  activeFunnelViewId?: string | null
   /** Demographics breakdown rows (Meta only) */
   demographics?: MetaDemographicsRow[]
   /** Placements breakdown rows (Meta only) */
@@ -168,6 +192,8 @@ export default function ClientPerformanceView({
   baselineReach = 0,
   funnelSteps: initialSteps = null,
   keyAction: initialKeyAction = null,
+  funnelViews: initialViews,
+  activeFunnelViewId,
   annotations: initialAnnotations = [],
   demographics = [],
   placements = [],
@@ -184,8 +210,27 @@ export default function ClientPerformanceView({
   const router = useRouter()
   const [gaLevel, setGaLevel] = useState<"campaign" | "ad_group">("campaign")
   const [showConfig, setShowConfig] = useState(false)
-  const [funnelSteps, setFunnelSteps] = useState<string[]>(initialSteps || [])
-  const [keyAction, setKeyAction] = useState<string | null>(initialKeyAction)
+
+  // Funnel views state. If the server didn't pass any, fall back to a
+  // synthesised default derived from the legacy config fields.
+  const [views, setViews] = useState<FunnelView[]>(() => {
+    if (initialViews && initialViews.length > 0) return initialViews
+    return [synthesiseDefaultView(initialSteps, initialKeyAction)]
+  })
+  const [activeViewId, setActiveViewId] = useState<string>(() => {
+    const seed = initialViews && initialViews.length > 0
+      ? initialViews
+      : [synthesiseDefaultView(initialSteps, initialKeyAction)]
+    const picked = pickActiveView(seed, activeFunnelViewId)
+    return picked?.id || seed[0]?.id || ""
+  })
+  const activeView = useMemo(
+    () => pickActiveView(views, activeViewId) || views[0] || null,
+    [views, activeViewId]
+  )
+  const funnelSteps = activeView?.funnel_steps || []
+  const keyAction = activeView?.key_action || null
+
   const [cmPct, setCmPct] = useState<number | null>(contributionMarginPct)
   // Active CPA step: which funnel step drives the CPA chart (defaults to keyAction or last step)
   const [activeCpaStep, setActiveCpaStep] = useState<string | null>(null)
@@ -348,6 +393,39 @@ export default function ClientPerformanceView({
   const [selectedCampaigns, setSelectedCampaigns] = useState<string[]>(() =>
     campaigns.map((c) => c.id)
   )
+
+  // Sync the Meta campaign selector with the active funnel view. Fires once
+  // on mount (once campaigns are populated) and whenever the user switches
+  // views. Guard against the StrictMode double-invoke + date-range updates
+  // by tracking the last applied view id.
+  const lastAppliedViewIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!activeView) return
+    if (campaigns.length === 0) return
+    if (lastAppliedViewIdRef.current === activeView.id) return
+    lastAppliedViewIdRef.current = activeView.id
+    const linked = activeView.linked_campaign_ids
+    if (linked.length > 0) {
+      const valid = linked.filter((id) => campaigns.some((c) => c.id === id))
+      setSelectedCampaigns(valid.length > 0 ? valid : campaigns.map((c) => c.id))
+    } else {
+      setSelectedCampaigns(campaigns.map((c) => c.id))
+    }
+  }, [activeView, campaigns])
+
+  function handleViewChange(viewId: string) {
+    setActiveViewId(viewId)
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    if (viewId && viewId !== SYNTHESISED_DEFAULT_ID) {
+      params.set("view", viewId)
+    } else {
+      params.delete("view")
+    }
+    const qs = params.toString()
+    const url = qs ? `${window.location.pathname}?${qs}` : window.location.pathname
+    router.replace(url, { scroll: false })
+  }
 
   // Extract unique ad sets from Meta rows with active status
   const adsets = useMemo(() => {
@@ -645,6 +723,34 @@ export default function ClientPerformanceView({
     const testingSpend = testing.reduce((s, a) => s + a.spend, 0)
     return { totalSpend, live, testing, liveSpend, testingSpend }
   }, [filteredRows, entityStatusMap, isMeta])
+
+  // Creative classification (winner/loser/viable/…) for the portfolio-health strip
+  // and Coverage Analysis. Only computed for Meta — Google Ads has no ad-level rows.
+  const classifiedAds = useMemo(
+    () => (isMeta ? classifyAllAds(filteredRows, keyAction ?? undefined, namingConfig) : []),
+    [filteredRows, keyAction, namingConfig, isMeta]
+  )
+
+  const classificationCounts = useMemo(
+    () => countByClassification(classifiedAds),
+    [classifiedAds]
+  )
+
+  const concentration = useMemo(
+    () =>
+      calculateConcentration(
+        classifiedAds.map((a) => ({ adId: a.adId, adName: a.adName, spend: a.spend }))
+      ),
+    [classifiedAds]
+  )
+
+  const coverageAnalysisEligible = useMemo(
+    () =>
+      isMeta &&
+      classifiedAds.length > 0 &&
+      classifiedAds.some((a) => a.parsed?.stage || a.parsed?.job),
+    [classifiedAds, isMeta]
+  )
 
   // Google Ads CPA chart data (conversions bar + CPA line + 7-day rolling)
   const gaCpaChartData = useMemo(() => {
@@ -1173,8 +1279,30 @@ export default function ClientPerformanceView({
       {/* Funnel steps — per-client configurable (Meta only) */}
       {showFunnel && (
         <div>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-medium text-neutral-400">Funnel Metrics</h2>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-medium text-neutral-400">Funnel Metrics</h2>
+              {views.length > 1 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {views.map((v) => {
+                    const isActive = v.id === activeView?.id
+                    return (
+                      <button
+                        key={v.id}
+                        onClick={() => handleViewChange(v.id)}
+                        className={`rounded-full border px-2.5 py-1 text-[11px] transition ${
+                          isActive
+                            ? "border-brand-lime/40 bg-brand-lime/10 text-brand-lime"
+                            : "border-neutral-700 text-neutral-400 hover:border-neutral-600 hover:text-white"
+                        }`}
+                      >
+                        {v.name}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
             {!readOnly && (
               <button
                 onClick={() => setShowConfig(true)}
@@ -1248,6 +1376,123 @@ export default function ClientPerformanceView({
             })}
           </div>
         </div>
+      )}
+
+      {/* Creative Volumes — spend share of currently active ads (live + testing) */}
+      {isMeta && (creativeVolumes.liveSpend + creativeVolumes.testingSpend) > 0 && (
+        <Card>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-medium text-neutral-400">Creative Volumes</h2>
+            <span className="text-[10px] text-neutral-500">
+              Share of spend across currently active ads
+            </span>
+          </div>
+          {(() => {
+            const activeTotal = creativeVolumes.liveSpend + creativeVolumes.testingSpend
+            const livePct = (creativeVolumes.liveSpend / activeTotal) * 100
+            const testingPct = (creativeVolumes.testingSpend / activeTotal) * 100
+            const segments: {
+              key: "live" | "testing"
+              label: string
+              color: string
+              dot: string
+              pct: number
+              spend: number
+              ads: { id: string; name: string; spend: number }[]
+            }[] = [
+              {
+                key: "live",
+                label: "Live",
+                color: "#22c55e",
+                dot: "bg-green-400",
+                pct: livePct,
+                spend: creativeVolumes.liveSpend,
+                ads: creativeVolumes.live,
+              },
+              {
+                key: "testing",
+                label: "Testing",
+                color: "#3b82f6",
+                dot: "bg-blue-400",
+                pct: testingPct,
+                spend: creativeVolumes.testingSpend,
+                ads: creativeVolumes.testing,
+              },
+            ]
+            return (
+              <div className="space-y-3">
+                <div className="flex h-8 overflow-hidden rounded-lg bg-neutral-800">
+                  {segments.map((seg) => {
+                    if (seg.pct <= 0) return null
+                    return (
+                      <div
+                        key={seg.key}
+                        className="group relative flex items-center justify-center transition-opacity hover:opacity-80"
+                        style={{
+                          width: `${seg.pct}%`,
+                          backgroundColor: seg.color,
+                          minWidth: "24px",
+                        }}
+                      >
+                        {seg.pct > 8 && (
+                          <span className="text-xs font-medium text-black">
+                            {seg.pct.toFixed(0)}%
+                          </span>
+                        )}
+                        {/* Tooltip */}
+                        <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-72 -translate-x-1/2 rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-semibold text-neutral-100">
+                              {seg.label} — {seg.ads.length} ad{seg.ads.length !== 1 ? "s" : ""}
+                            </p>
+                            <p className="text-[10px] text-neutral-400">
+                              {fmtCurrency(seg.spend, currency)} · {seg.pct.toFixed(1)}%
+                            </p>
+                          </div>
+                          <div className="mt-1.5 max-h-48 space-y-0.5 overflow-y-auto">
+                            {seg.ads.slice(0, 10).map((ad) => {
+                              const adPct = (ad.spend / activeTotal) * 100
+                              return (
+                                <div
+                                  key={ad.id}
+                                  className="flex items-center justify-between gap-2 text-[10px]"
+                                >
+                                  <span className="truncate text-neutral-300">{ad.name}</span>
+                                  <span className="shrink-0 tabular-nums text-neutral-500">
+                                    {adPct.toFixed(1)}%
+                                  </span>
+                                </div>
+                              )
+                            })}
+                            {seg.ads.length > 10 && (
+                              <p className="pt-1 text-[10px] text-neutral-500">
+                                +{seg.ads.length - 10} more
+                              </p>
+                            )}
+                          </div>
+                          <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-neutral-700" />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <div className="flex flex-wrap items-center gap-4 text-xs">
+                  {segments.map((seg) => (
+                    <div key={seg.key} className="flex items-center gap-1.5">
+                      <span className={`inline-block h-1.5 w-1.5 rounded-full ${seg.dot}`} />
+                      <span className="text-neutral-300">
+                        {seg.label} ({seg.ads.length})
+                      </span>
+                      <span className="text-neutral-500">
+                        {seg.pct.toFixed(1)}% · {fmtCurrency(seg.spend, currency)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+        </Card>
       )}
 
       {/* Revenue / AOV / ROAS — shown when configured via scorecard + revenue > 0 */}
@@ -1659,127 +1904,65 @@ export default function ClientPerformanceView({
         </div>
       )}
 
-      {/* Creative Volumes — spend share of currently live/testing ads */}
-      {isMeta && creativeVolumes.totalSpend > 0 && (creativeVolumes.live.length > 0 || creativeVolumes.testing.length > 0) && (
+      {/* Portfolio health: classification strip (display-only) */}
+      {isMeta && classifiedAds.length > 0 && (
         <Card>
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-medium text-neutral-400">Creative Volumes</h2>
-            <span className="text-[10px] text-neutral-500">
-              Share of overall spend by currently active ads
-            </span>
+            <h2 className="text-sm font-medium text-neutral-400">Portfolio Health</h2>
+            <div className="flex items-center gap-2">
+              <span
+                className="inline-block h-1.5 w-1.5 rounded-full"
+                style={{ backgroundColor: CONCENTRATION_COLORS[concentration.level] }}
+              />
+              <span className="text-xs font-medium text-neutral-300">
+                {concentration.level}
+              </span>
+              <span className="text-[10px] text-neutral-500">
+                Top ad {concentration.topAdShare.toFixed(0)}% of spend
+              </span>
+            </div>
           </div>
-          {(() => {
-            const livePct = (creativeVolumes.liveSpend / creativeVolumes.totalSpend) * 100
-            const testingPct = (creativeVolumes.testingSpend / creativeVolumes.totalSpend) * 100
-            const segments: {
-              key: "live" | "testing"
-              label: string
-              color: string
-              dot: string
-              pct: number
-              spend: number
-              ads: { id: string; name: string; spend: number }[]
-            }[] = [
-              {
-                key: "live",
-                label: "Live",
-                color: "#22c55e",
-                dot: "bg-green-400",
-                pct: livePct,
-                spend: creativeVolumes.liveSpend,
-                ads: creativeVolumes.live,
-              },
-              {
-                key: "testing",
-                label: "Testing",
-                color: "#3b82f6",
-                dot: "bg-blue-400",
-                pct: testingPct,
-                spend: creativeVolumes.testingSpend,
-                ads: creativeVolumes.testing,
-              },
-            ]
-            return (
-              <div className="space-y-3">
-                <div className="flex h-8 overflow-hidden rounded-lg bg-neutral-800">
-                  {segments.map((seg) => {
-                    if (seg.pct <= 0) return null
-                    return (
-                      <div
-                        key={seg.key}
-                        className="group relative flex items-center justify-center transition-opacity hover:opacity-80"
-                        style={{
-                          width: `${seg.pct}%`,
-                          backgroundColor: seg.color,
-                          minWidth: "24px",
-                        }}
-                      >
-                        {seg.pct > 8 && (
-                          <span className="text-xs font-medium text-black">
-                            {seg.pct.toFixed(0)}%
-                          </span>
-                        )}
-                        {/* Tooltip */}
-                        <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-72 -translate-x-1/2 rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-xs font-semibold text-neutral-100">
-                              {seg.label} — {seg.ads.length} ad{seg.ads.length !== 1 ? "s" : ""}
-                            </p>
-                            <p className="text-[10px] text-neutral-400">
-                              {fmtCurrency(seg.spend, currency)} · {seg.pct.toFixed(1)}%
-                            </p>
-                          </div>
-                          <div className="mt-1.5 max-h-48 space-y-0.5 overflow-y-auto">
-                            {seg.ads.slice(0, 10).map((ad) => {
-                              const adPct = (ad.spend / creativeVolumes.totalSpend) * 100
-                              return (
-                                <div
-                                  key={ad.id}
-                                  className="flex items-center justify-between gap-2 text-[10px]"
-                                >
-                                  <span className="truncate text-neutral-300">{ad.name}</span>
-                                  <span className="shrink-0 tabular-nums text-neutral-500">
-                                    {adPct.toFixed(1)}%
-                                  </span>
-                                </div>
-                              )
-                            })}
-                            {seg.ads.length > 10 && (
-                              <p className="pt-1 text-[10px] text-neutral-500">
-                                +{seg.ads.length - 10} more
-                              </p>
-                            )}
-                          </div>
-                          <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-neutral-700" />
-                        </div>
-                      </div>
-                    )
-                  })}
+          <div className="flex flex-wrap gap-x-5 gap-y-2">
+            {(
+              [
+                "DIRECT_WINNER",
+                "INDIRECT_WINNER",
+                "VIABLE_UNDERSCALED",
+                "LOSER",
+                "LOSER_NON_CONTRIBUTING",
+                "LOSER_NO_DELIVERY",
+                "INSUFFICIENT_DATA",
+              ] as ClassificationType[]
+            ).map((type) => {
+              const count = classificationCounts[type]
+              if (!count) return null
+              const def = CLASSIFICATIONS[type]
+              return (
+                <div key={type} className="group relative flex items-center gap-1.5">
+                  <span
+                    className="inline-block h-2.5 w-2.5 rounded-sm"
+                    style={{ backgroundColor: def.color }}
+                  />
+                  <span className="text-xs text-neutral-300">{def.label}</span>
+                  <span className="text-xs tabular-nums text-neutral-500">({count})</span>
+                  {/* Tooltip */}
+                  <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-56 -translate-x-1/2 rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
+                    <p className="text-xs font-semibold text-neutral-100">{def.label}</p>
+                    <p className="mt-0.5 text-[10px] text-neutral-400">{def.description}</p>
+                    <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-neutral-700" />
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-4 text-xs">
-                  {segments.map((seg) => (
-                    <div key={seg.key} className="flex items-center gap-1.5">
-                      <span className={`inline-block h-1.5 w-1.5 rounded-full ${seg.dot}`} />
-                      <span className="text-neutral-300">
-                        {seg.label} ({seg.ads.length})
-                      </span>
-                      <span className="text-neutral-500">
-                        {seg.pct.toFixed(1)}% · {fmtCurrency(seg.spend, currency)}
-                      </span>
-                    </div>
-                  ))}
-                  {livePct + testingPct < 99.5 && (
-                    <div className="flex items-center gap-1.5">
-                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-neutral-600" />
-                      <span className="text-neutral-500">
-                        Paused/other {(100 - livePct - testingPct).toFixed(1)}%
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )
-          })()}
+              )
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* Coverage Analysis — stage × job gap matrix (naming-config-gated, Meta only) */}
+      {coverageAnalysisEligible && (
+        <Card>
+          <h2 className="mb-4 text-sm font-medium text-neutral-400">Coverage Analysis</h2>
+          <CoverageAnalysis ads={classifiedAds} currency={currency} />
         </Card>
       )}
 
@@ -1907,14 +2090,20 @@ export default function ClientPerformanceView({
       {showConfig && (
         <ScorecardConfigModal
           clientId={client.id}
-          selectedSteps={funnelSteps}
-          keyAction={keyAction}
+          views={views}
+          initialActiveViewId={activeViewId}
           contributionMarginPct={cmPct}
+          campaigns={campaigns}
           onClose={() => setShowConfig(false)}
-          onSaved={(steps, newKeyAction, newCmPct) => {
-            setFunnelSteps(steps)
-            setKeyAction(newKeyAction)
+          onSaved={(newViews, newCmPct) => {
+            setViews(newViews)
             setCmPct(newCmPct)
+            // Keep current view selected if still present, else fall back.
+            const stillPresent = newViews.some((v) => v.id === activeViewId)
+            if (!stillPresent) {
+              const next = pickActiveView(newViews, null)
+              if (next) setActiveViewId(next.id)
+            }
             setShowConfig(false)
           }}
         />
