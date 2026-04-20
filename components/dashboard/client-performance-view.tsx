@@ -612,6 +612,40 @@ export default function ClientPerformanceView({
     return byDate
   }, [filteredRows])
 
+  // Creative volumes: spend share per ad, bucketed by current status (live/testing).
+  // "Overall spend" denominator is the total spend of filteredRows in the selected range.
+  const creativeVolumes = useMemo(() => {
+    if (!isMeta) {
+      return { totalSpend: 0, live: [], testing: [], liveSpend: 0, testingSpend: 0 }
+    }
+    const adSpend = new Map<string, { name: string; spend: number }>()
+    let totalSpend = 0
+    for (const r of filteredRows) {
+      const spend = r.spend || 0
+      totalSpend += spend
+      if (!r.ad_id) continue
+      const existing = adSpend.get(r.ad_id)
+      if (existing) {
+        existing.spend += spend
+      } else {
+        adSpend.set(r.ad_id, { name: r.ad_name || r.ad_id, spend })
+      }
+    }
+    const live: { id: string; name: string; spend: number }[] = []
+    const testing: { id: string; name: string; spend: number }[] = []
+    adSpend.forEach((v, id) => {
+      if (v.spend <= 0) return
+      const status = entityStatusMap.get(id)
+      if (status === "live") live.push({ id, name: v.name, spend: v.spend })
+      else if (status === "testing") testing.push({ id, name: v.name, spend: v.spend })
+    })
+    live.sort((a, b) => b.spend - a.spend)
+    testing.sort((a, b) => b.spend - a.spend)
+    const liveSpend = live.reduce((s, a) => s + a.spend, 0)
+    const testingSpend = testing.reduce((s, a) => s + a.spend, 0)
+    return { totalSpend, live, testing, liveSpend, testingSpend }
+  }, [filteredRows, entityStatusMap, isMeta])
+
   // Google Ads CPA chart data (conversions bar + CPA line + 7-day rolling)
   const gaCpaChartData = useMemo(() => {
     if (!isGoogleAds) return []
@@ -1623,6 +1657,130 @@ export default function ClientPerformanceView({
             />
           </Card>
         </div>
+      )}
+
+      {/* Creative Volumes — spend share of currently live/testing ads */}
+      {isMeta && creativeVolumes.totalSpend > 0 && (creativeVolumes.live.length > 0 || creativeVolumes.testing.length > 0) && (
+        <Card>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-medium text-neutral-400">Creative Volumes</h2>
+            <span className="text-[10px] text-neutral-500">
+              Share of overall spend by currently active ads
+            </span>
+          </div>
+          {(() => {
+            const livePct = (creativeVolumes.liveSpend / creativeVolumes.totalSpend) * 100
+            const testingPct = (creativeVolumes.testingSpend / creativeVolumes.totalSpend) * 100
+            const segments: {
+              key: "live" | "testing"
+              label: string
+              color: string
+              dot: string
+              pct: number
+              spend: number
+              ads: { id: string; name: string; spend: number }[]
+            }[] = [
+              {
+                key: "live",
+                label: "Live",
+                color: "#22c55e",
+                dot: "bg-green-400",
+                pct: livePct,
+                spend: creativeVolumes.liveSpend,
+                ads: creativeVolumes.live,
+              },
+              {
+                key: "testing",
+                label: "Testing",
+                color: "#3b82f6",
+                dot: "bg-blue-400",
+                pct: testingPct,
+                spend: creativeVolumes.testingSpend,
+                ads: creativeVolumes.testing,
+              },
+            ]
+            return (
+              <div className="space-y-3">
+                <div className="flex h-8 overflow-hidden rounded-lg bg-neutral-800">
+                  {segments.map((seg) => {
+                    if (seg.pct <= 0) return null
+                    return (
+                      <div
+                        key={seg.key}
+                        className="group relative flex items-center justify-center transition-opacity hover:opacity-80"
+                        style={{
+                          width: `${seg.pct}%`,
+                          backgroundColor: seg.color,
+                          minWidth: "24px",
+                        }}
+                      >
+                        {seg.pct > 8 && (
+                          <span className="text-xs font-medium text-black">
+                            {seg.pct.toFixed(0)}%
+                          </span>
+                        )}
+                        {/* Tooltip */}
+                        <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-72 -translate-x-1/2 rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-semibold text-neutral-100">
+                              {seg.label} — {seg.ads.length} ad{seg.ads.length !== 1 ? "s" : ""}
+                            </p>
+                            <p className="text-[10px] text-neutral-400">
+                              {fmtCurrency(seg.spend, currency)} · {seg.pct.toFixed(1)}%
+                            </p>
+                          </div>
+                          <div className="mt-1.5 max-h-48 space-y-0.5 overflow-y-auto">
+                            {seg.ads.slice(0, 10).map((ad) => {
+                              const adPct = (ad.spend / creativeVolumes.totalSpend) * 100
+                              return (
+                                <div
+                                  key={ad.id}
+                                  className="flex items-center justify-between gap-2 text-[10px]"
+                                >
+                                  <span className="truncate text-neutral-300">{ad.name}</span>
+                                  <span className="shrink-0 tabular-nums text-neutral-500">
+                                    {adPct.toFixed(1)}%
+                                  </span>
+                                </div>
+                              )
+                            })}
+                            {seg.ads.length > 10 && (
+                              <p className="pt-1 text-[10px] text-neutral-500">
+                                +{seg.ads.length - 10} more
+                              </p>
+                            )}
+                          </div>
+                          <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-neutral-700" />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <div className="flex flex-wrap items-center gap-4 text-xs">
+                  {segments.map((seg) => (
+                    <div key={seg.key} className="flex items-center gap-1.5">
+                      <span className={`inline-block h-1.5 w-1.5 rounded-full ${seg.dot}`} />
+                      <span className="text-neutral-300">
+                        {seg.label} ({seg.ads.length})
+                      </span>
+                      <span className="text-neutral-500">
+                        {seg.pct.toFixed(1)}% · {fmtCurrency(seg.spend, currency)}
+                      </span>
+                    </div>
+                  ))}
+                  {livePct + testingPct < 99.5 && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-neutral-600" />
+                      <span className="text-neutral-500">
+                        Paused/other {(100 - livePct - testingPct).toFixed(1)}%
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
+        </Card>
       )}
 
       {/* Funnel drop-off (Meta only) */}
