@@ -308,6 +308,9 @@ export default function ClientPerformanceView({
   const [drillPath, setDrillPath] = useState<DrillCrumb[]>([])
   const [metaLevel, setMetaLevel] = useState<HierarchyLevel>("campaign")
 
+  // Status filter for the performance table — "all" | "live" | "testing" | "paused"
+  const [tableStatusFilter, setTableStatusFilter] = useState<"all" | "live" | "testing" | "paused">("all")
+
   // Platform toggle
   const platforms = useMemo(() => getClientPlatforms(client), [client])
   const [platform, setPlatform] = useState<PlatformView>(() =>
@@ -694,6 +697,7 @@ export default function ClientPerformanceView({
 
   // Table data — apply drill-down filtering for Meta
   const groupedData = useMemo(() => {
+    let base: { id: string; name: string; metrics: AggregatedMetrics; platform?: "meta" | "google" }[]
     if (isMeta) {
       let rows = filteredRows
       if (drillPath.length >= 1) rows = rows.filter(r => r.campaign_id === drillPath[0].id)
@@ -715,14 +719,22 @@ export default function ClientPerformanceView({
         }
       }
 
-      return groupByLevel(rows, metaLevel)
+      base = groupByLevel(rows, metaLevel)
+    } else if (isGoogleAds) {
+      base = groupGoogleAdsByLevel(filteredGaRows, gaLevel)
+    } else {
+      // "all" — combine both platforms grouped by campaign, tagged with platform
+      const metaGroups = groupByLevel(filteredRows, "campaign").map(g => ({ ...g, platform: "meta" as const }))
+      const gaGroups = groupGoogleAdsByLevel(filteredGaRows, "campaign").map(g => ({ ...g, platform: "google" as const }))
+      base = [...metaGroups, ...gaGroups].sort((a, b) => b.metrics.spend - a.metrics.spend)
     }
-    if (isGoogleAds) return groupGoogleAdsByLevel(filteredGaRows, gaLevel)
-    // "all" — combine both platforms grouped by campaign, tagged with platform
-    const metaGroups = groupByLevel(filteredRows, "campaign").map(g => ({ ...g, platform: "meta" as const }))
-    const gaGroups = groupGoogleAdsByLevel(filteredGaRows, "campaign").map(g => ({ ...g, platform: "google" as const }))
-    return [...metaGroups, ...gaGroups].sort((a, b) => b.metrics.spend - a.metrics.spend)
-  }, [filteredRows, filteredGaRows, metaLevel, drillPath, gaLevel, platform, perfDimFilters, perfParsedAds])
+
+    // Apply status filter
+    if (tableStatusFilter !== "all") {
+      base = base.filter((row) => entityStatusMap.get(row.id) === tableStatusFilter)
+    }
+    return base
+  }, [filteredRows, filteredGaRows, metaLevel, drillPath, gaLevel, platform, perfDimFilters, perfParsedAds, tableStatusFilter, entityStatusMap])
 
   // Comparison grouped data — same grouping logic applied to comparison rows
   const compGroupedData = useMemo(() => {
@@ -1672,6 +1684,34 @@ export default function ClientPerformanceView({
                 )}
               </div>
             )}
+            {/* Status filter chips */}
+            <div className="mb-3 flex items-center gap-1.5">
+              <span className="text-[11px] text-neutral-500 mr-1">Show:</span>
+              {(
+                [
+                  { key: "all", label: "All", dot: null },
+                  { key: "live", label: "Live", dot: "bg-green-400" },
+                  { key: "testing", label: "Testing", dot: "bg-blue-400" },
+                  { key: "paused", label: "Paused", dot: "bg-red-400" },
+                ] as const
+              ).map((opt) => {
+                const active = tableStatusFilter === opt.key
+                return (
+                  <button
+                    key={opt.key}
+                    onClick={() => setTableStatusFilter(opt.key)}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                      active
+                        ? "border-brand-lime/40 bg-brand-lime/10 text-brand-lime"
+                        : "border-neutral-700 bg-neutral-900 text-neutral-400 hover:border-neutral-600 hover:text-white"
+                    }`}
+                  >
+                    {opt.dot && <span className={`inline-block h-1.5 w-1.5 rounded-full ${opt.dot}`} />}
+                    {opt.label}
+                  </button>
+                )
+              })}
+            </div>
             <PerformanceTable
               data={groupedData}
               comparisonData={hasComp ? compGroupedData : undefined}
