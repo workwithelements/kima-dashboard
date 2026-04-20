@@ -3,7 +3,6 @@
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import Logo from "@/components/ui/logo"
 import ClientPerformanceView from "@/components/dashboard/client-performance-view"
-import CreativeAnalysisView from "@/components/dashboard/creative-analysis-view"
 import ReachAnalysisView from "@/components/dashboard/reach-analysis-view"
 import PacingCard from "@/components/dashboard/pacing-card"
 import { Card, MetricCard } from "@/components/ui/card"
@@ -18,11 +17,10 @@ import type { Annotation } from "@/components/ui/annotations-bar"
 import type { NamingConfig } from "@/lib/utils/ad-name-parser"
 import type { MetaDemographicsRow, MetaPlacementsRow, MetaDailyRow, GoogleAdsDailyRow, ShopifyDailyOrdersRow, ShopifyAttributionRow } from "@/lib/utils/types"
 
-type Tab = "performance" | "creative" | "pacing" | "reach"
+type Tab = "performance" | "pacing" | "reach"
 
 const TABS: { label: string; value: Tab }[] = [
   { label: "Performance", value: "performance" },
-  { label: "Creative Analysis", value: "creative" },
   { label: "Budget & Pacing", value: "pacing" },
   { label: "Reach Analysis", value: "reach" },
 ]
@@ -79,7 +77,6 @@ export default function ClientDashboard(props: Props) {
   const searchParams = useSearchParams()
 
   const activeTab = (
-    props.tab === "creative" ? "creative" :
     props.tab === "pacing" ? "pacing" :
     props.tab === "reach" ? "reach" :
     "performance"
@@ -184,27 +181,6 @@ export default function ClientDashboard(props: Props) {
             shopifyAttribution={props.shopifyAttribution}
             shopifyCompOrders={props.shopifyCompOrders}
             shopifyCompAttribution={props.shopifyCompAttribution}
-            readOnly
-          />
-        )}
-
-        {activeTab === "creative" && (
-          <CreativeAnalysisView
-            rows={props.creativeRows}
-            preset={props.preset}
-            from={props.from}
-            to={props.to}
-            clientId={props.client.id}
-            thumbnails={props.thumbnails}
-            previewsEnabled={props.previewsEnabled}
-            currency={currency}
-            metaAccountId={props.client.meta_account_id ?? undefined}
-            keyAction={props.creativeKeyAction}
-            funnelSteps={props.creativeFunnelSteps}
-            demographics={props.creativeDemographics}
-            placements={props.creativePlacements}
-            namingConfig={props.creativeNamingConfig}
-            createdDates={props.creativeCreatedDates}
             readOnly
           />
         )}

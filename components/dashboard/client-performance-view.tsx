@@ -38,6 +38,16 @@ import {
   getDimensionValue,
   type ParsedAdName,
 } from "@/lib/utils/ad-name-parser"
+import {
+  classifyAllAds,
+  countByClassification,
+  CLASSIFICATIONS,
+  type ClassificationType,
+} from "@/lib/utils/creative-classification"
+import {
+  calculateConcentration,
+  CONCENTRATION_COLORS,
+} from "@/lib/utils/spend-concentration"
 
 // Lazy-load heavy chart components (recharts ~200KB)
 const ChartPlaceholder = () => (
@@ -81,6 +91,10 @@ const DemographicsChart = dynamic(
 )
 const PlacementsChart = dynamic(
   () => import("@/components/charts/placements-chart"),
+  { ssr: false, loading: ChartPlaceholder }
+)
+const CoverageAnalysis = dynamic(
+  () => import("@/components/charts/coverage-analysis"),
   { ssr: false, loading: ChartPlaceholder }
 )
 
@@ -645,6 +659,34 @@ export default function ClientPerformanceView({
     const testingSpend = testing.reduce((s, a) => s + a.spend, 0)
     return { totalSpend, live, testing, liveSpend, testingSpend }
   }, [filteredRows, entityStatusMap, isMeta])
+
+  // Creative classification (winner/loser/viable/…) for the portfolio-health strip
+  // and Coverage Analysis. Only computed for Meta — Google Ads has no ad-level rows.
+  const classifiedAds = useMemo(
+    () => (isMeta ? classifyAllAds(filteredRows, keyAction ?? undefined, namingConfig) : []),
+    [filteredRows, keyAction, namingConfig, isMeta]
+  )
+
+  const classificationCounts = useMemo(
+    () => countByClassification(classifiedAds),
+    [classifiedAds]
+  )
+
+  const concentration = useMemo(
+    () =>
+      calculateConcentration(
+        classifiedAds.map((a) => ({ adId: a.adId, adName: a.adName, spend: a.spend }))
+      ),
+    [classifiedAds]
+  )
+
+  const coverageAnalysisEligible = useMemo(
+    () =>
+      isMeta &&
+      classifiedAds.length > 0 &&
+      classifiedAds.some((a) => a.parsed?.stage || a.parsed?.job),
+    [classifiedAds, isMeta]
+  )
 
   // Google Ads CPA chart data (conversions bar + CPA line + 7-day rolling)
   const gaCpaChartData = useMemo(() => {
@@ -1780,6 +1822,68 @@ export default function ClientPerformanceView({
               </div>
             )
           })()}
+        </Card>
+      )}
+
+      {/* Portfolio health: classification strip (display-only) */}
+      {isMeta && classifiedAds.length > 0 && (
+        <Card>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-medium text-neutral-400">Portfolio Health</h2>
+            <div className="flex items-center gap-2">
+              <span
+                className="inline-block h-1.5 w-1.5 rounded-full"
+                style={{ backgroundColor: CONCENTRATION_COLORS[concentration.level] }}
+              />
+              <span className="text-xs font-medium text-neutral-300">
+                {concentration.level}
+              </span>
+              <span className="text-[10px] text-neutral-500">
+                Top ad {concentration.topAdShare.toFixed(0)}% of spend
+              </span>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-x-5 gap-y-2">
+            {(
+              [
+                "DIRECT_WINNER",
+                "INDIRECT_WINNER",
+                "VIABLE_UNDERSCALED",
+                "LOSER",
+                "LOSER_NON_CONTRIBUTING",
+                "LOSER_NO_DELIVERY",
+                "INSUFFICIENT_DATA",
+              ] as ClassificationType[]
+            ).map((type) => {
+              const count = classificationCounts[type]
+              if (!count) return null
+              const def = CLASSIFICATIONS[type]
+              return (
+                <div key={type} className="group relative flex items-center gap-1.5">
+                  <span
+                    className="inline-block h-2.5 w-2.5 rounded-sm"
+                    style={{ backgroundColor: def.color }}
+                  />
+                  <span className="text-xs text-neutral-300">{def.label}</span>
+                  <span className="text-xs tabular-nums text-neutral-500">({count})</span>
+                  {/* Tooltip */}
+                  <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-56 -translate-x-1/2 rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
+                    <p className="text-xs font-semibold text-neutral-100">{def.label}</p>
+                    <p className="mt-0.5 text-[10px] text-neutral-400">{def.description}</p>
+                    <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-neutral-700" />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* Coverage Analysis — stage × job gap matrix (naming-config-gated, Meta only) */}
+      {coverageAnalysisEligible && (
+        <Card>
+          <h2 className="mb-4 text-sm font-medium text-neutral-400">Coverage Analysis</h2>
+          <CoverageAnalysis ads={classifiedAds} currency={currency} />
         </Card>
       )}
 

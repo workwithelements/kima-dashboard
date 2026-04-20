@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
+import TagManagerModal, { type Tag } from "@/components/dashboard/tag-manager-modal"
 
 /* ── Types ── */
 type NamingPosition = { index: number; key: string; label: string }
@@ -91,6 +92,27 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
   const [marketingImpactLoading, setMarketingImpactLoading] = useState(true)
   const [marketingImpactSaving, setMarketingImpactSaving] = useState(false)
   const [marketingImpactSaved, setMarketingImpactSaved] = useState(false)
+
+  /* ── Creative tags state ── */
+  const [tags, setTags] = useState<Tag[]>([])
+  const [tagsLoading, setTagsLoading] = useState(true)
+  const [showTagManager, setShowTagManager] = useState(false)
+  const loadTags = useCallback(async () => {
+    setTagsLoading(true)
+    try {
+      const res = await fetch("/api/creative-tags")
+      if (res.ok) {
+        const data = await res.json()
+        if (Array.isArray(data)) setTags(data)
+      }
+    } catch {
+      /* ignore */
+    }
+    setTagsLoading(false)
+  }, [])
+  useEffect(() => {
+    loadTags()
+  }, [loadTags])
 
   /* ── Load existing config ── */
   useEffect(() => {
@@ -705,6 +727,61 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
           </div>
         )}
       </section>
+
+      {/* ── Creative Tags Section ── */}
+      <section className="rounded-xl border border-neutral-800 bg-neutral-900/50">
+        <div className="border-b border-neutral-800 px-5 py-4">
+          <h2 className="text-sm font-semibold text-neutral-100">Creative Tags</h2>
+          <p className="mt-1 text-[11px] text-neutral-500">
+            Tags are shared across clients. Use them to group creatives by theme
+            (e.g. offer, hook, angle) in the Performance drill-down.
+          </p>
+        </div>
+        {tagsLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-lime border-t-transparent" />
+          </div>
+        ) : (
+          <div className="space-y-4 p-5">
+            {tags.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-neutral-700 px-4 py-6 text-center text-xs text-neutral-500">
+                No tags yet.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {tags.map((t) => (
+                  <span
+                    key={t.id}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[11px] text-neutral-200"
+                  >
+                    <span
+                      className="inline-block h-2 w-2 rounded-full"
+                      style={{ backgroundColor: t.color }}
+                    />
+                    {t.name}
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex items-center justify-end border-t border-neutral-800 pt-4">
+              <button
+                onClick={() => setShowTagManager(true)}
+                className="rounded-lg bg-brand-lime px-5 py-2 text-xs font-semibold text-black transition hover:bg-brand-lime/90"
+              >
+                Manage Tags
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {showTagManager && (
+        <TagManagerModal
+          tags={tags}
+          onClose={() => setShowTagManager(false)}
+          onTagsChanged={loadTags}
+        />
+      )}
 
       {/* ── Alerts Section ── */}
       <section className="rounded-xl border border-neutral-800 bg-neutral-900/50">
