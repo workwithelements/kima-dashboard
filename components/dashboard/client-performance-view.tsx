@@ -259,9 +259,13 @@ export default function ClientPerformanceView({
   }, [createdDates])
 
   // Entity status: blue=testing, green=live, red=paused
-  // - "testing": has spend on the latest date AND fewer than 5 distinct spend days
-  // - "live": has spend on the latest date AND 5+ distinct spend days
   // - "paused": no spend on the latest date
+  // - campaigns / ad sets / GA entities: testing until 5+ distinct spend days
+  // - ads: testing until total spend >= AD_LIVE_SPEND_THRESHOLD OR active view's
+  //   key-action count >= AD_LIVE_KEY_ACTION_THRESHOLD. Budget-agnostic spend
+  //   days rule doesn't cover "drip-spent" ads that stay tiny for weeks.
+  const AD_LIVE_SPEND_THRESHOLD = 100
+  const AD_LIVE_KEY_ACTION_THRESHOLD = 10
   const entityStatusMap = useMemo(() => {
     const map = new Map<string, "testing" | "live" | "paused">()
     let maxDate = ""
@@ -276,6 +280,10 @@ export default function ClientPerformanceView({
     // Count distinct spend days per entity and track if active on maxDate
     const spendDays = new Map<string, Set<string>>()
     const activeOnMax = new Set<string>()
+    // Ad-only rollups: total spend and total key-action count.
+    const adIds = new Set<string>()
+    const adSpend = new Map<string, number>()
+    const adKeyCount = new Map<string, number>()
 
     function track(id: string, date: string, spend: number) {
       if (!id) return
@@ -286,11 +294,20 @@ export default function ClientPerformanceView({
       }
     }
 
+    const keyField = keyAction || null
     for (const r of rawRows) {
       if (!r.date) continue
       track(r.campaign_id || "", r.date, r.spend || 0)
       track(r.adset_id || "", r.date, r.spend || 0)
       track(r.ad_id || "", r.date, r.spend || 0)
+      if (r.ad_id) {
+        adIds.add(r.ad_id)
+        adSpend.set(r.ad_id, (adSpend.get(r.ad_id) || 0) + (r.spend || 0))
+        if (keyField) {
+          const n = Number((r as Record<string, unknown>)[keyField]) || 0
+          if (n) adKeyCount.set(r.ad_id, (adKeyCount.get(r.ad_id) || 0) + n)
+        }
+      }
     }
     for (const r of rawGoogleAdsRows) {
       if (!r.date) continue
@@ -305,13 +322,21 @@ export default function ClientPerformanceView({
     allIds.forEach((id) => {
       if (!activeOnMax.has(id)) {
         map.set(id, "paused")
+        return
+      }
+      if (adIds.has(id)) {
+        const spent = adSpend.get(id) || 0
+        const conv = adKeyCount.get(id) || 0
+        const hasGraduated =
+          spent >= AD_LIVE_SPEND_THRESHOLD || conv >= AD_LIVE_KEY_ACTION_THRESHOLD
+        map.set(id, hasGraduated ? "live" : "testing")
       } else {
         const days = spendDays.get(id)?.size ?? 0
         map.set(id, days >= 5 ? "live" : "testing")
       }
     })
     return map
-  }, [rawRows, rawGoogleAdsRows])
+  }, [rawRows, rawGoogleAdsRows, keyAction])
 
   // Client-side date filtering: the server may have fetched a wider window
   // than the user's current selection so that switching between short presets
