@@ -114,16 +114,19 @@ export function getComparisonRange(
 ): DateRange | null {
   if (type === "none") return null
 
-  const from = new Date(primary.from + "T00:00:00")
-  const to = new Date(primary.to + "T00:00:00")
+  // Parse as UTC so date arithmetic below is timezone-agnostic. Using
+  // "T00:00:00" without a Z suffix parses as LOCAL time, which caused
+  // a 1-day offset when the user's timezone is east of UTC (e.g. BST).
+  const from = new Date(primary.from + "T00:00:00Z")
+  const to = new Date(primary.to + "T00:00:00Z")
   const days = Math.round((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)) + 1
 
   switch (type) {
     case "previous_period": {
       const compTo = new Date(from)
-      compTo.setDate(compTo.getDate() - 1)
+      compTo.setUTCDate(compTo.getUTCDate() - 1)
       const compFrom = new Date(compTo)
-      compFrom.setDate(compFrom.getDate() - days + 1)
+      compFrom.setUTCDate(compFrom.getUTCDate() - days + 1)
       return {
         from: compFrom.toISOString().split("T")[0],
         to: compTo.toISOString().split("T")[0],
@@ -131,9 +134,9 @@ export function getComparisonRange(
     }
     case "previous_month": {
       const compFrom = new Date(from)
-      compFrom.setMonth(compFrom.getMonth() - 1)
+      compFrom.setUTCMonth(compFrom.getUTCMonth() - 1)
       const compTo = new Date(to)
-      compTo.setMonth(compTo.getMonth() - 1)
+      compTo.setUTCMonth(compTo.getUTCMonth() - 1)
       return {
         from: compFrom.toISOString().split("T")[0],
         to: compTo.toISOString().split("T")[0],
@@ -141,9 +144,9 @@ export function getComparisonRange(
     }
     case "previous_year": {
       const compFrom = new Date(from)
-      compFrom.setFullYear(compFrom.getFullYear() - 1)
+      compFrom.setUTCFullYear(compFrom.getUTCFullYear() - 1)
       const compTo = new Date(to)
-      compTo.setFullYear(compTo.getFullYear() - 1)
+      compTo.setUTCFullYear(compTo.getUTCFullYear() - 1)
       return {
         from: compFrom.toISOString().split("T")[0],
         to: compTo.toISOString().split("T")[0],

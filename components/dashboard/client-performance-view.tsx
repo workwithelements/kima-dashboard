@@ -1007,7 +1007,6 @@ export default function ClientPerformanceView({
           label="Spend"
           value={fmtCurrency(metrics.spend, currency)}
           delta={delta(metrics.spend, compMetrics.spend)}
-          subValue={`${from} to ${to} | comp: ${clientCompRange?.from ?? "—"} to ${clientCompRange?.to ?? "—"} (${fmtCurrency(compMetrics.spend, currency)})`}
         />
         <MetricCard
           label="Impressions"
