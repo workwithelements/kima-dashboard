@@ -219,6 +219,34 @@ export default function ClientPerformanceView({
     return ids
   }, [createdDates])
 
+  // Active entity IDs — campaigns/adsets/ads with spend on the latest date
+  // in the raw data. Works at all hierarchy levels.
+  const activeEntityIds = useMemo(() => {
+    let maxDate = ""
+    for (const r of rawRows) {
+      if (r.date && r.date > maxDate) maxDate = r.date
+    }
+    for (const r of rawGoogleAdsRows) {
+      if (r.date && r.date > maxDate) maxDate = r.date
+    }
+    if (!maxDate) return new Set<string>()
+    const ids = new Set<string>()
+    for (const r of rawRows) {
+      if (r.date === maxDate && (r.spend || 0) > 0) {
+        if (r.campaign_id) ids.add(r.campaign_id)
+        if (r.adset_id) ids.add(r.adset_id)
+        if (r.ad_id) ids.add(r.ad_id)
+      }
+    }
+    for (const r of rawGoogleAdsRows) {
+      if (r.date === maxDate && (r.spend || 0) > 0) {
+        if (r.campaign_id) ids.add(r.campaign_id)
+        if (r.ad_group_id) ids.add(r.ad_group_id)
+      }
+    }
+    return ids
+  }, [rawRows, rawGoogleAdsRows])
+
   // Client-side date filtering: the server may have fetched a wider window
   // than the user's current selection so that switching between short presets
   // is instant. Here we narrow the raw rows down to the display range.
@@ -1628,6 +1656,7 @@ export default function ClientPerformanceView({
               breadcrumb={drillBreadcrumb}
               onRowClick={handleDrillDown}
               newAdIds={isMeta && metaLevel === "ad" ? newAdIds : undefined}
+              activeIds={activeEntityIds}
             />
           </div>
         )}

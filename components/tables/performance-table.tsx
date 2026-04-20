@@ -293,6 +293,7 @@ export default function PerformanceTable({
   breadcrumb,
   onRowClick,
   newAdIds,
+  activeIds,
 }: {
   data: GroupRow[]
   /** Comparison period data — same shape, matched by row ID for delta badges */
@@ -309,6 +310,8 @@ export default function PerformanceTable({
   onRowClick?: (row: GroupRow) => void
   /** Set of ad IDs in their first 5 days — shows "Test" beaker badge */
   newAdIds?: Set<string>
+  /** Set of IDs with spend on the most recent day — shows green/grey status dot */
+  activeIds?: Set<string>
 }) {
   const [sortKey, setSortKey] = useState<string>("spend")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
@@ -573,6 +576,24 @@ export default function PerformanceTable({
                   >
                     {isName ? (
                       <span className="inline-flex items-center gap-1.5">
+                        {activeIds && (
+                          <span
+                            className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
+                              activeIds.has(row.id)
+                                ? "bg-green-400"
+                                : row.metrics.impressions > 0
+                                  ? "bg-neutral-600"
+                                  : "bg-red-400/60"
+                            }`}
+                            title={
+                              activeIds.has(row.id)
+                                ? "Active"
+                                : row.metrics.impressions > 0
+                                  ? "Paused"
+                                  : "No delivery"
+                            }
+                          />
+                        )}
                         {row.platform && (
                           <span
                             className={`inline-flex shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${

@@ -53,17 +53,27 @@ export async function GET(request: NextRequest) {
   }
 
   // If cached URL failed and we have a creative_id, fetch fresh from Meta
-  if (!imageRes && meta.creative_id) {
+  if (!imageRes) {
     const accessToken = process.env.META_ACCESS_TOKEN
     if (accessToken) {
       try {
+        // Try creative_id first, fall back to ad_id
+        const fetchId = meta.creative_id || adId
+        const fields = meta.creative_id
+          ? "image_url,thumbnail_url"
+          : "creative{image_url,thumbnail_url}"
         const graphRes = await fetch(
-          `${META_GRAPH_URL}/${meta.creative_id}?fields=image_url,thumbnail_url&access_token=${accessToken}`,
+          `${META_GRAPH_URL}/${fetchId}?fields=${fields}&access_token=${accessToken}`,
           { next: { revalidate: 0 } }
         )
         if (graphRes.ok) {
           const data = await graphRes.json()
-          const freshUrl = data.image_url || data.thumbnail_url
+          // Extract URL — from creative_id query or from ad → creative nested object
+          const freshUrl =
+            data.image_url ||
+            data.thumbnail_url ||
+            data.creative?.image_url ||
+            data.creative?.thumbnail_url
           if (freshUrl) {
             // Update the cached URL in DB (fire-and-forget)
             supabase
