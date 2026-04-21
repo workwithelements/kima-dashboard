@@ -241,7 +241,6 @@ export default function ClientPerformanceView({
   const [cmPct, setCmPct] = useState<number | null>(contributionMarginPct)
   // Active CPA step: which funnel step drives the CPA chart (defaults to keyAction or last step)
   const [activeCpaStep, setActiveCpaStep] = useState<string | null>(null)
-  const [selectedVolumeSeg, setSelectedVolumeSeg] = useState<"live" | "testing">("live")
   const [breakdownTab, setBreakdownTab] = useState<"demographics" | "placements">("demographics")
   const [breakdownMetric, setBreakdownMetric] = useState<"spend" | "impressions" | "purchases">("spend")
   const [breakdownOpen, setBreakdownOpen] = useState(true)
@@ -729,40 +728,6 @@ export default function ClientPerformanceView({
     }
     return byDate
   }, [filteredRows])
-
-  // Creative volumes: spend share per ad, bucketed by current status (live/testing).
-  // "Overall spend" denominator is the total spend of filteredRows in the selected range.
-  const creativeVolumes = useMemo(() => {
-    if (!isMeta) {
-      return { totalSpend: 0, live: [], testing: [], liveSpend: 0, testingSpend: 0 }
-    }
-    const adSpend = new Map<string, { name: string; spend: number }>()
-    let totalSpend = 0
-    for (const r of filteredRows) {
-      const spend = r.spend || 0
-      totalSpend += spend
-      if (!r.ad_id) continue
-      const existing = adSpend.get(r.ad_id)
-      if (existing) {
-        existing.spend += spend
-      } else {
-        adSpend.set(r.ad_id, { name: r.ad_name || r.ad_id, spend })
-      }
-    }
-    const live: { id: string; name: string; spend: number }[] = []
-    const testing: { id: string; name: string; spend: number }[] = []
-    adSpend.forEach((v, id) => {
-      if (v.spend <= 0) return
-      const status = entityStatusMap.get(id)
-      if (status === "live") live.push({ id, name: v.name, spend: v.spend })
-      else if (status === "testing") testing.push({ id, name: v.name, spend: v.spend })
-    })
-    live.sort((a, b) => b.spend - a.spend)
-    testing.sort((a, b) => b.spend - a.spend)
-    const liveSpend = live.reduce((s, a) => s + a.spend, 0)
-    const testingSpend = testing.reduce((s, a) => s + a.spend, 0)
-    return { totalSpend, live, testing, liveSpend, testingSpend }
-  }, [filteredRows, entityStatusMap, isMeta])
 
   // Creative classification feeds the Coverage Analysis matrix. Only computed
   // for Meta — Google Ads has no ad-level rows.
@@ -1544,155 +1509,6 @@ export default function ClientPerformanceView({
           </div>
         </div>
       )}
-
-      {/* Creative Volumes — spend share of currently active ads (live + testing) */}
-      {isMeta && (creativeVolumes.liveSpend + creativeVolumes.testingSpend) > 0 && (
-        <Card>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-medium text-neutral-400">Creative Volumes</h2>
-            <span className="text-[10px] text-neutral-500">
-              Share of spend across currently active ads
-            </span>
-          </div>
-          {(() => {
-            const activeTotal = creativeVolumes.liveSpend + creativeVolumes.testingSpend
-            const livePct = (creativeVolumes.liveSpend / activeTotal) * 100
-            const testingPct = (creativeVolumes.testingSpend / activeTotal) * 100
-            const segments: {
-              key: "live" | "testing"
-              label: string
-              color: string
-              dot: string
-              pct: number
-              spend: number
-              ads: { id: string; name: string; spend: number }[]
-            }[] = [
-              {
-                key: "live",
-                label: "Live",
-                color: "#22c55e",
-                dot: "bg-green-400",
-                pct: livePct,
-                spend: creativeVolumes.liveSpend,
-                ads: creativeVolumes.live,
-              },
-              {
-                key: "testing",
-                label: "Testing",
-                color: "#3b82f6",
-                dot: "bg-blue-400",
-                pct: testingPct,
-                spend: creativeVolumes.testingSpend,
-                ads: creativeVolumes.testing,
-              },
-            ]
-            return (
-              <div className="space-y-3">
-                <div className="flex h-8 overflow-hidden rounded-lg bg-neutral-800">
-                  {segments.map((seg) => {
-                    if (seg.pct <= 0) return null
-                    const isSelected = selectedVolumeSeg === seg.key
-                    return (
-                      <button
-                        key={seg.key}
-                        type="button"
-                        onMouseEnter={() => setSelectedVolumeSeg(seg.key)}
-                        onFocus={() => setSelectedVolumeSeg(seg.key)}
-                        onClick={() => setSelectedVolumeSeg(seg.key)}
-                        className={`relative flex items-center justify-center transition ${
-                          isSelected ? "opacity-100" : "opacity-70 hover:opacity-100"
-                        }`}
-                        style={{
-                          width: `${seg.pct}%`,
-                          backgroundColor: seg.color,
-                          minWidth: "24px",
-                        }}
-                        aria-pressed={isSelected}
-                      >
-                        {seg.pct > 8 && (
-                          <span className="text-xs font-medium text-black">
-                            {seg.pct.toFixed(0)}%
-                          </span>
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-                <div className="flex flex-wrap items-center gap-4 text-xs">
-                  {segments.map((seg) => {
-                    const isSelected = selectedVolumeSeg === seg.key
-                    return (
-                      <button
-                        key={seg.key}
-                        type="button"
-                        onMouseEnter={() => setSelectedVolumeSeg(seg.key)}
-                        onClick={() => setSelectedVolumeSeg(seg.key)}
-                        className={`flex items-center gap-1.5 rounded-full border px-2 py-0.5 transition ${
-                          isSelected
-                            ? "border-neutral-600 bg-neutral-800/60"
-                            : "border-transparent hover:bg-neutral-800/40"
-                        }`}
-                      >
-                        <span className={`inline-block h-1.5 w-1.5 rounded-full ${seg.dot}`} />
-                        <span className="text-neutral-300">
-                          {seg.label} ({seg.ads.length})
-                        </span>
-                        <span className="text-neutral-500">
-                          {seg.pct.toFixed(1)}% · {fmtCurrency(seg.spend, currency)}
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            )
-          })()}
-        </Card>
-      )}
-
-      {/* Ads in the hovered/selected creative-volumes segment */}
-      {isMeta && (creativeVolumes.liveSpend + creativeVolumes.testingSpend) > 0 && (() => {
-        const activeTotal = creativeVolumes.liveSpend + creativeVolumes.testingSpend
-        const seg = selectedVolumeSeg === "live"
-          ? { label: "Live", dot: "bg-green-400", ads: creativeVolumes.live, spend: creativeVolumes.liveSpend }
-          : { label: "Testing", dot: "bg-blue-400", ads: creativeVolumes.testing, spend: creativeVolumes.testingSpend }
-        const pct = activeTotal > 0 ? (seg.spend / activeTotal) * 100 : 0
-        return (
-          <Card>
-            <div className="mb-3 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className={`inline-block h-1.5 w-1.5 rounded-full ${seg.dot}`} />
-                <h2 className="text-sm font-medium text-neutral-300">
-                  {seg.label} ads ({seg.ads.length})
-                </h2>
-              </div>
-              <span className="text-[10px] text-neutral-500">
-                {fmtCurrency(seg.spend, currency)} · {pct.toFixed(1)}% of active spend
-              </span>
-            </div>
-            {seg.ads.length === 0 ? (
-              <p className="text-xs text-neutral-500">No ads in this segment.</p>
-            ) : (
-              <div className="max-h-64 space-y-0.5 overflow-y-auto">
-                {seg.ads.map((ad) => {
-                  const adPct = activeTotal > 0 ? (ad.spend / activeTotal) * 100 : 0
-                  return (
-                    <div
-                      key={ad.id}
-                      className="flex items-center justify-between gap-2 rounded px-1.5 py-0.5 text-[11px] hover:bg-neutral-800/40"
-                    >
-                      <span className="truncate text-neutral-300">{ad.name}</span>
-                      <span className="shrink-0 tabular-nums text-neutral-500">
-                        {fmtCurrency(ad.spend, currency)} · {adPct.toFixed(1)}%
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </Card>
-        )
-      })()}
 
       {/* Revenue / AOV / ROAS — shown when configured via scorecard + revenue > 0 */}
       {metrics.revenue > 0 && funnelSteps.length > 0 && (
