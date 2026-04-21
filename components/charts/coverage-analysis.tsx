@@ -224,6 +224,35 @@ const STATUS_LABELS: Record<CoverageStatus, string> = {
 /*  Sub-components                                                     */
 /* ------------------------------------------------------------------ */
 
+function CollapsibleSection({
+  title,
+  defaultOpen = true,
+  children,
+}: {
+  title: string
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-2 text-xs font-medium text-neutral-400 hover:text-neutral-200 transition mb-3"
+      >
+        <span
+          className="inline-block transition-transform"
+          style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
+        >
+          ▸
+        </span>
+        {title}
+      </button>
+      {open && children}
+    </div>
+  )
+}
+
 function ClassificationDots({
   classifications,
 }: {
@@ -257,8 +286,7 @@ function StageCoverageCards({
   currency: string
 }) {
   return (
-    <div>
-      <p className="text-xs font-medium text-neutral-400 mb-3">Awareness Stage</p>
+    <CollapsibleSection title="Awareness Stage">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {stages.map((entry) => {
           const style = STATUS_STYLES[entry.status]
@@ -311,7 +339,7 @@ function StageCoverageCards({
           )
         })}
       </div>
-    </div>
+    </CollapsibleSection>
   )
 }
 
@@ -336,8 +364,7 @@ function JobCoverageChart({
   const chartHeight = Math.max(displayed.length * 36, 80)
 
   return (
-    <div>
-      <p className="text-xs font-medium text-neutral-400 mb-3">Job / Persona</p>
+    <CollapsibleSection title="Job / Persona">
       <ResponsiveContainer width="100%" height={chartHeight}>
         <BarChart
           data={displayed}
@@ -386,7 +413,7 @@ function JobCoverageChart({
           {showAll ? "Show less" : `Show all ${jobs.length} jobs`}
         </button>
       )}
-    </div>
+    </CollapsibleSection>
   )
 }
 
@@ -401,8 +428,6 @@ function CoverageMatrix({
   matrix: Map<string, Map<string, MatrixCell>>
   currency: string
 }) {
-  const [expanded, setExpanded] = useState(jobs.length <= 8)
-
   // Total spend across all matrix cells, used to compute % share per cell
   const totalMatrixSpend = useMemo(() => {
     let total = 0
@@ -415,21 +440,8 @@ function CoverageMatrix({
   }, [matrix])
 
   return (
-    <div>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 text-xs font-medium text-neutral-400 hover:text-neutral-200 transition mb-3"
-      >
-        <span
-          className="inline-block transition-transform"
-          style={{ transform: expanded ? "rotate(90deg)" : "rotate(0deg)" }}
-        >
-          ▸
-        </span>
-        Job × Stage Matrix
-      </button>
-      {expanded && (
-        <div className="overflow-x-auto">
+    <CollapsibleSection title="Job × Stage Matrix" defaultOpen={jobs.length <= 8}>
+      <div className="overflow-x-auto">
           <table className="w-full text-[11px]">
             <thead>
               <tr>
@@ -489,8 +501,7 @@ function CoverageMatrix({
             </tbody>
           </table>
         </div>
-      )}
-    </div>
+    </CollapsibleSection>
   )
 }
 
