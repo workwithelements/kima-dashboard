@@ -392,8 +392,8 @@ export default function ClientPerformanceView({
   const [drillPath, setDrillPath] = useState<DrillCrumb[]>([])
   const [metaLevel, setMetaLevel] = useState<HierarchyLevel>("campaign")
 
-  // Status filter for the performance table — "all" | "live" | "testing" | "paused"
-  const [tableStatusFilter, setTableStatusFilter] = useState<"all" | "live" | "testing" | "paused">("all")
+  // Status filter for the performance table — empty set = "all"
+  const [tableStatusFilter, setTableStatusFilter] = useState<Set<"live" | "testing" | "paused">>(new Set())
 
   // Platform toggle
   const platforms = useMemo(() => getClientPlatforms(client), [client])
@@ -839,8 +839,11 @@ export default function ClientPerformanceView({
   const gridAds = useMemo(() => {
     let ads = enrichedAds
 
-    if (tableStatusFilter !== "all") {
-      ads = ads.filter((ad) => entityStatusMap.get(ad.adId) === tableStatusFilter)
+    if (tableStatusFilter.size > 0) {
+      ads = ads.filter((ad) => {
+        const s = entityStatusMap.get(ad.adId)
+        return s != null && tableStatusFilter.has(s)
+      })
     }
 
     const activeDimFilters = Object.entries(perfDimFilters).filter(([, vals]) => vals.length > 0)
@@ -1002,8 +1005,11 @@ export default function ClientPerformanceView({
     }
 
     // Apply status filter
-    if (tableStatusFilter !== "all") {
-      base = base.filter((row) => entityStatusMap.get(row.id) === tableStatusFilter)
+    if (tableStatusFilter.size > 0) {
+      base = base.filter((row) => {
+        const s = entityStatusMap.get(row.id)
+        return s != null && tableStatusFilter.has(s)
+      })
     }
     return base
   }, [filteredRows, filteredGaRows, metaLevel, drillPath, gaLevel, platform, perfDimFilters, perfParsedAds, tableStatusFilter, entityStatusMap])
@@ -2010,7 +2016,7 @@ export default function ClientPerformanceView({
                 )}
               </div>
             )}
-            {/* Status filter chips + Table/Grid toggle */}
+            {/* Status filter chips (multi-select) + Table/Grid toggle */}
             <div className="mb-3 flex flex-wrap items-center gap-1.5">
               <span className="text-[11px] text-neutral-500 mr-1">Show:</span>
               {(
@@ -2021,11 +2027,24 @@ export default function ClientPerformanceView({
                   { key: "paused", label: "Paused", dot: "bg-red-400" },
                 ] as const
               ).map((opt) => {
-                const active = tableStatusFilter === opt.key
+                const active = opt.key === "all"
+                  ? tableStatusFilter.size === 0
+                  : tableStatusFilter.has(opt.key)
                 return (
                   <button
                     key={opt.key}
-                    onClick={() => setTableStatusFilter(opt.key)}
+                    onClick={() => {
+                      if (opt.key === "all") {
+                        setTableStatusFilter(new Set())
+                        return
+                      }
+                      setTableStatusFilter((prev) => {
+                        const next = new Set(prev)
+                        if (next.has(opt.key)) next.delete(opt.key)
+                        else next.add(opt.key)
+                        return next
+                      })
+                    }}
                     className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
                       active
                         ? "border-brand-lime/40 bg-brand-lime/10 text-brand-lime"
