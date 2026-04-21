@@ -2067,9 +2067,33 @@ export default function ClientPerformanceView({
         const cpaStepLabel = FUNNEL_STEP_DEFS[cpaStepKey]?.label || "Action"
         return (
           <Card>
-            <h2 className="mb-4 text-sm font-medium text-neutral-400">
-              Cost Per {cpaStepLabel}
-            </h2>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-sm font-medium text-neutral-400">
+                Cost Per {cpaStepLabel}
+              </h2>
+              {funnelSteps.length > 1 && (
+                <div className="flex flex-wrap gap-1">
+                  {funnelSteps.map((step) => {
+                    const def = FUNNEL_STEP_DEFS[step]
+                    if (!def) return null
+                    const active = step === cpaStepKey
+                    return (
+                      <button
+                        key={step}
+                        onClick={() => setActiveCpaStep(step)}
+                        className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                          active
+                            ? "border-brand-lime/40 bg-brand-lime/10 text-brand-lime"
+                            : "border-neutral-700 bg-neutral-900 text-neutral-400 hover:border-neutral-600 hover:text-white"
+                        }`}
+                      >
+                        {def.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
             <CPAChart
               data={funnelSeries}
               stepKey={cpaStepKey}
@@ -2103,19 +2127,19 @@ export default function ClientPerformanceView({
         </div>
       )}
 
-      {/* Coverage Analysis — stage × job gap matrix (naming-config-gated, Meta only) */}
-      {coverageAnalysisEligible && (
-        <Card>
-          <h2 className="mb-4 text-sm font-medium text-neutral-400">Coverage Analysis</h2>
-          <CoverageAnalysis ads={classifiedAds} currency={currency} />
-        </Card>
-      )}
-
       {/* Funnel drop-off (Meta only) */}
       {showFunnel && (
         <Card>
           <h2 className="mb-4 text-sm font-medium text-neutral-400">Funnel Drop-Off</h2>
           <FunnelDropOffChart metrics={metrics} funnelSteps={funnelSteps} />
+        </Card>
+      )}
+
+      {/* Coverage Analysis — stage × job gap matrix (naming-config-gated, Meta only) */}
+      {coverageAnalysisEligible && (
+        <Card>
+          <h2 className="mb-4 text-sm font-medium text-neutral-400">Coverage Analysis</h2>
+          <CoverageAnalysis ads={classifiedAds} currency={currency} />
         </Card>
       )}
 
