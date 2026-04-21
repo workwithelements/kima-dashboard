@@ -34,6 +34,10 @@ import PerformanceTable from "@/components/tables/performance-table"
 import AlexiaClarkStructureView from "@/components/dashboard/alexia-clark-structure-view"
 import AdsSidebar, { type AdEntry } from "@/components/ui/ads-sidebar"
 import ScorecardConfigModal from "./scorecard-config-modal"
+import TagSelector, { UNTAGGED_FILTER_ID } from "@/components/ui/tag-selector"
+import CreativeCardGrid, { type TagInfo } from "@/components/dashboard/creative-card-grid"
+import CreativeDetailModal from "@/components/dashboard/creative-detail-modal"
+import type { Tag } from "@/components/dashboard/tag-manager-modal"
 import AnnotationsBar, { type Annotation } from "@/components/ui/annotations-bar"
 import { calculatePacing } from "@/lib/utils/pacing"
 import {
@@ -46,7 +50,11 @@ import {
 } from "@/lib/utils/ad-name-parser"
 import {
   classifyAllAds,
+  mergeClassificationWithFatigue,
+  type ClassifiedAd,
 } from "@/lib/utils/creative-classification"
+import { detectFatigueAll } from "@/lib/utils/fatigue-detection"
+import { isVideoAd } from "@/lib/utils/video-retention"
 
 // Lazy-load heavy chart components (recharts ~200KB)
 const ChartPlaceholder = () => (
@@ -143,6 +151,10 @@ type Props = {
   namingConfig?: NamingConfig
   /** ad_id → ISO created_time for test badge */
   createdDates?: Record<string, string>
+  /** Meta ad_id → thumbnail URL (powers the creative grid) */
+  thumbnails?: Record<string, string>
+  /** Whether creative thumbnails/grid are enabled for this client */
+  previewsEnabled?: boolean
 }
 
 const COMPARE_OPTIONS: { value: ComparisonType; label: string }[] = [
@@ -198,6 +210,8 @@ export default function ClientPerformanceView({
   readOnly = false,
   namingConfig,
   createdDates = {},
+  thumbnails = {},
+  previewsEnabled = false,
 }: Props) {
   const currency = client.currency_code ?? "GBP"
   const router = useRouter()
@@ -234,6 +248,13 @@ export default function ClientPerformanceView({
   const [annotations, setAnnotations] = useState<Annotation[]>(initialAnnotations)
   // Dimension filters for ad-level view
   const [perfDimFilters, setPerfDimFilters] = useState<Record<string, string[]>>({})
+
+  // Creative grid state (ad-level, Meta only, previewsEnabled)
+  const [tableViewMode, setTableViewMode] = useState<"table" | "grid">("table")
+  const [tags, setTags] = useState<Tag[]>([])
+  const [adTagMap, setAdTagMap] = useState<Record<string, string[]>>({})
+  const [selectedTagFilters, setSelectedTagFilters] = useState<string[]>([])
+  const [detailAd, setDetailAd] = useState<ClassifiedAd | null>(null)
 
   // Compute new ad IDs (first 5 days of activity) for test badge
   const newAdIds = useMemo(() => {
@@ -749,6 +770,146 @@ export default function ClientPerformanceView({
     () => (isMeta ? classifyAllAds(filteredRows, keyAction ?? undefined, namingConfig) : []),
     [filteredRows, keyAction, namingConfig, isMeta]
   )
+
+  // Fatigue detection + enrichment — only computed when the grid is in play
+  const fatigueMap = useMemo(() => {
+    if (!previewsEnabled || !isMeta) return {}
+    const adIds = classifiedAds.map((a) => a.adId)
+    return detectFatigueAll(filteredRows, adIds, 7, to, keyAction ?? undefined)
+  }, [previewsEnabled, isMeta, classifiedAds, filteredRows, to, keyAction])
+
+  const enrichedAds = useMemo(
+    () => mergeClassificationWithFatigue(classifiedAds, fatigueMap),
+    [classifiedAds, fatigueMap]
+  )
+
+  // Video ad detection for the grid / detail modal
+  const videoAdIds = useMemo(() => {
+    const ids = new Set<string>()
+    if (!previewsEnabled || !isMeta) return ids
+    for (const ad of enrichedAds) {
+      if (isVideoAd(filteredRows, ad.adId)) ids.add(ad.adId)
+    }
+    return ids
+  }, [previewsEnabled, isMeta, enrichedAds, filteredRows])
+
+  // Fetch tags + ad→tag map when the grid is available
+  useEffect(() => {
+    if (!previewsEnabled || !isMeta) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [tagsRes, adTagsRes] = await Promise.all([
+          fetch("/api/creative-tags"),
+          fetch(`/api/creative-ad-tags?client_id=${client.id}`),
+        ])
+        if (!cancelled && tagsRes.ok) {
+          setTags(await tagsRes.json())
+        }
+        if (!cancelled && adTagsRes.ok) {
+          const rows: { ad_id: string; tag_id: string }[] = await adTagsRes.json()
+          const map: Record<string, string[]> = {}
+          rows.forEach((row) => {
+            if (!map[row.ad_id]) map[row.ad_id] = []
+            map[row.ad_id].push(row.tag_id)
+          })
+          setAdTagMap(map)
+        }
+      } catch { /* ignore */ }
+    })()
+    return () => { cancelled = true }
+  }, [previewsEnabled, isMeta, client.id])
+
+  async function assignTag(adId: string, tagId: string) {
+    try {
+      const res = await fetch("/api/creative-ad-tags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ad_id: adId, tag_id: tagId, client_id: client.id }),
+      })
+      if (res.ok) {
+        setAdTagMap((prev) => ({ ...prev, [adId]: [...(prev[adId] || []), tagId] }))
+      }
+    } catch { /* ignore */ }
+  }
+
+  async function removeTag(adId: string, tagId: string) {
+    try {
+      const res = await fetch("/api/creative-ad-tags", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ad_id: adId, tag_id: tagId }),
+      })
+      if (res.ok) {
+        setAdTagMap((prev) => ({
+          ...prev,
+          [adId]: (prev[adId] || []).filter((t) => t !== tagId),
+        }))
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Proxy thumbnail URLs — Meta CDN URLs expire after ~24h, so we proxy through
+  // /api/thumbnail which refreshes them from the Graph API as needed.
+  const proxyThumbnails = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const [adId, url] of Object.entries(thumbnails)) {
+      if (url) map[adId] = `/api/thumbnail?ad_id=${encodeURIComponent(adId)}`
+    }
+    return map
+  }, [thumbnails])
+
+  // Per-ad tag lookup for the card grid
+  const adTagsLookup = useMemo(() => {
+    const lookup: Record<string, TagInfo[]> = {}
+    for (const [adId, tagIds] of Object.entries(adTagMap)) {
+      lookup[adId] = tagIds
+        .map((tid) => tags.find((t) => t.id === tid))
+        .filter((t): t is Tag => t !== undefined)
+    }
+    return lookup
+  }, [adTagMap, tags])
+
+  // Ads to show in the grid — applies status, dimension and tag filters
+  const gridAds = useMemo(() => {
+    let ads = enrichedAds
+
+    if (tableStatusFilter !== "all") {
+      ads = ads.filter((ad) => entityStatusMap.get(ad.adId) === tableStatusFilter)
+    }
+
+    const activeDimFilters = Object.entries(perfDimFilters).filter(([, vals]) => vals.length > 0)
+    if (activeDimFilters.length > 0) {
+      ads = ads.filter((ad) => {
+        if (!ad.parsed) return false
+        return activeDimFilters.every(([dim, vals]) => {
+          const v = getDimensionValue(ad.parsed, dim)
+          return v ? vals.includes(v) : false
+        })
+      })
+    }
+
+    if (selectedTagFilters.length > 0) {
+      const wantUntagged = selectedTagFilters.includes(UNTAGGED_FILTER_ID)
+      const tagFilterIds = selectedTagFilters.filter((t) => t !== UNTAGGED_FILTER_ID)
+      ads = ads.filter((ad) => {
+        const adTags = adTagMap[ad.adId] || []
+        if (wantUntagged && adTags.length === 0) return true
+        if (tagFilterIds.length > 0 && tagFilterIds.some((t) => adTags.includes(t))) return true
+        return false
+      })
+    }
+
+    // Sort by spend desc — matches the default table sort
+    return [...ads].sort((a, b) => b.spend - a.spend)
+  }, [enrichedAds, tableStatusFilter, entityStatusMap, perfDimFilters, selectedTagFilters, adTagMap])
+
+  // Reset to table view whenever the grid becomes unavailable
+  useEffect(() => {
+    if (tableViewMode === "grid" && !(previewsEnabled && isMeta && metaLevel === "ad")) {
+      setTableViewMode("table")
+    }
+  }, [tableViewMode, previewsEnabled, isMeta, metaLevel])
 
   const coverageAnalysisEligible = useMemo(
     () =>
@@ -2009,8 +2170,8 @@ export default function ClientPerformanceView({
                 )}
               </div>
             )}
-            {/* Status filter chips */}
-            <div className="mb-3 flex items-center gap-1.5">
+            {/* Status filter chips + Table/Grid toggle */}
+            <div className="mb-3 flex flex-wrap items-center gap-1.5">
               <span className="text-[11px] text-neutral-500 mr-1">Show:</span>
               {(
                 [
@@ -2036,20 +2197,61 @@ export default function ClientPerformanceView({
                   </button>
                 )
               })}
+              {previewsEnabled && isMeta && metaLevel === "ad" && (
+                <>
+                  <span className="mx-1 h-4 w-px bg-neutral-800" />
+                  <TagSelector
+                    tags={tags}
+                    selected={selectedTagFilters}
+                    onChange={setSelectedTagFilters}
+                  />
+                  <div className="ml-auto flex overflow-hidden rounded-full border border-neutral-700">
+                    {(["table", "grid"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        onClick={() => setTableViewMode(mode)}
+                        className={`px-3 py-1 text-[11px] font-medium capitalize transition ${
+                          tableViewMode === mode
+                            ? "bg-brand-lime/10 text-brand-lime"
+                            : "bg-neutral-900 text-neutral-400 hover:text-white"
+                        }`}
+                      >
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
-            <PerformanceTable
-              data={groupedData}
-              comparisonData={hasComp ? compGroupedData : undefined}
-              level={currentTableLevel}
-              onLevelChange={handleTableLevelChange}
-              funnelSteps={isMeta ? funnelSteps : []}
-              levelOptions={tableLevelOptions}
-              currency={currency}
-              breadcrumb={drillBreadcrumb}
-              onRowClick={handleDrillDown}
-              newAdIds={isMeta && metaLevel === "ad" ? newAdIds : undefined}
-              entityStatus={entityStatusMap}
-            />
+            {tableViewMode === "grid" && previewsEnabled && isMeta && metaLevel === "ad" ? (
+              <CreativeCardGrid
+                ads={gridAds}
+                thumbnails={proxyThumbnails}
+                videoAdIds={videoAdIds}
+                rows={filteredRows}
+                currency={currency}
+                adTags={adTagsLookup}
+                allTags={tags}
+                onAdClick={setDetailAd}
+                onAssignTag={readOnly ? undefined : assignTag}
+                onRemoveTag={readOnly ? undefined : removeTag}
+                newAdIds={newAdIds}
+              />
+            ) : (
+              <PerformanceTable
+                data={groupedData}
+                comparisonData={hasComp ? compGroupedData : undefined}
+                level={currentTableLevel}
+                onLevelChange={handleTableLevelChange}
+                funnelSteps={isMeta ? funnelSteps : []}
+                levelOptions={tableLevelOptions}
+                currency={currency}
+                breadcrumb={drillBreadcrumb}
+                onRowClick={handleDrillDown}
+                newAdIds={isMeta && metaLevel === "ad" ? newAdIds : undefined}
+                entityStatus={entityStatusMap}
+              />
+            )}
           </div>
         )}
       </Card>
@@ -2090,6 +2292,24 @@ export default function ClientPerformanceView({
             }
             setShowConfig(false)
           }}
+        />
+      )}
+
+      {/* Creative detail modal */}
+      {detailAd && (
+        <CreativeDetailModal
+          ad={detailAd}
+          thumbnailUrl={proxyThumbnails[detailAd.adId]}
+          isVideo={videoAdIds.has(detailAd.adId)}
+          rows={filteredRows}
+          currency={currency}
+          tags={adTagsLookup[detailAd.adId]}
+          metaAccountId={client.meta_account_id ?? undefined}
+          demographics={demographics}
+          placements={placements}
+          funnelSteps={funnelSteps}
+          keyAction={keyAction ?? undefined}
+          onClose={() => setDetailAd(null)}
         />
       )}
     </div>

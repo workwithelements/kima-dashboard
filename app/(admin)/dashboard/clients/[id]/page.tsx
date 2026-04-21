@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic"
 
 import { notFound } from "next/navigation"
-import { fetchClientData, fetchGoogleAdsData, fetchBreakdownsData } from "@/lib/data/fetch-client-data"
+import { fetchClientData, fetchGoogleAdsData, fetchBreakdownsData, fetchCreativeData } from "@/lib/data/fetch-client-data"
 import { fetchShopifyData } from "@/lib/data/fetch-shopify-data"
 import { createServiceClient } from "@/lib/supabase/server"
 import { getPresetRange, getComparisonRange } from "@/lib/utils/dates"
@@ -65,7 +65,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
   const supabase = createServiceClient()
 
   const minDelay = new Promise((r) => setTimeout(r, 1000))
-  const [data, configRes, funnelViewsRes, gaRows, gaCompRows, breakdownsData, annotationsRes, shopifyData, shopifyCompData] = await Promise.all([
+  const [data, configRes, funnelViewsRes, gaRows, gaCompRows, breakdownsData, annotationsRes, shopifyData, shopifyCompData, creativeData] = await Promise.all([
     fetchClientData(
       params.id,
       range.from,
@@ -99,6 +99,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
     fetchCompFrom && fetchCompTo
       ? fetchShopifyData(params.id, fetchCompFrom, fetchCompTo)
       : Promise.resolve({ orders: [], attribution: [] }),
+    fetchCreativeData(params.id, range.from, range.to),
     minDelay,
   ])
 
@@ -149,6 +150,8 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       shopifyAttribution={shopifyData.attribution}
       shopifyCompOrders={shopifyCompData.orders}
       shopifyCompAttribution={shopifyCompData.attribution}
+      thumbnails={creativeData?.thumbnails || {}}
+      previewsEnabled={creativeData?.previewsEnabled || false}
     />
   )
 }

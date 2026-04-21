@@ -54,16 +54,9 @@ type Props = {
   shopifyAttribution?: ShopifyAttributionRow[]
   shopifyCompOrders?: ShopifyDailyOrdersRow[]
   shopifyCompAttribution?: ShopifyAttributionRow[]
-  /* Creative */
-  creativeRows: Partial<MetaDailyRow>[]
+  /* Creative — thumbnails feed the Performance grid */
   thumbnails: Record<string, string>
   previewsEnabled: boolean
-  creativeFunnelSteps?: string[]
-  creativeKeyAction?: string
-  creativeDemographics: MetaDemographicsRow[]
-  creativePlacements: MetaPlacementsRow[]
-  creativeNamingConfig?: NamingConfig
-  creativeCreatedDates: Record<string, string>
   /* Reach */
   reachRows: { date: string; reach: number; impressions: number; spend?: number; adset_id?: string; adset_name?: string }[]
   reachBaselineReach: number
@@ -186,6 +179,8 @@ export default function ClientDashboard(props: Props) {
             shopifyAttribution={props.shopifyAttribution}
             shopifyCompOrders={props.shopifyCompOrders}
             shopifyCompAttribution={props.shopifyCompAttribution}
+            thumbnails={props.thumbnails}
+            previewsEnabled={props.previewsEnabled}
             readOnly
           />
         )}
