@@ -274,3 +274,39 @@ export type MetaAttributionComparison = {
   revenueDiscrepancy: number      // metaReported - shopifyAttributed
   revenueDiscrepancyPct: number   // ((metaReported - shopifyAttributed) / shopifyAttributed) * 100
 }
+
+/** A row from instagram_tagged_posts (Apify-scraped). */
+export type InstagramTaggedPostRow = {
+  post_url: string
+  shortcode: string
+  post_type: string | null
+  taken_at: string
+  week_start_date: string
+  author_username: string
+  author_full_name: string | null
+  author_followers: number | null
+  author_is_verified: boolean | null
+  caption: string | null
+  thumbnail_url: string | null
+  like_count: number
+  comment_count: number
+  video_view_count: number | null
+  play_count: number | null
+  hashtags: string[]
+  mentions: string[]
+}
+
+/** A row from weekly_bookings (CSV-imported). */
+export type WeeklyBookingRow = {
+  week_start_date: string
+  bookings: number
+  revenue: number | null
+  notes: string | null
+}
+
+/** A row from weekly_hdyhau (CSV-imported, long format). */
+export type WeeklyHdyhauRow = {
+  week_start_date: string
+  channel: string
+  dollars: number
+}
