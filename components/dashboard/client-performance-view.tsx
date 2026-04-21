@@ -392,8 +392,9 @@ export default function ClientPerformanceView({
   const [drillPath, setDrillPath] = useState<DrillCrumb[]>([])
   const [metaLevel, setMetaLevel] = useState<HierarchyLevel>("campaign")
 
-  // Status filter for the performance table — empty set = "all"
-  const [tableStatusFilter, setTableStatusFilter] = useState<Set<"live" | "testing" | "paused">>(new Set())
+  // Status filter for the performance table — empty array = "all"
+  type StatusKey = "live" | "testing" | "paused"
+  const [tableStatusFilter, setTableStatusFilter] = useState<StatusKey[]>([])
 
   // Platform toggle
   const platforms = useMemo(() => getClientPlatforms(client), [client])
@@ -839,10 +840,10 @@ export default function ClientPerformanceView({
   const gridAds = useMemo(() => {
     let ads = enrichedAds
 
-    if (tableStatusFilter.size > 0) {
+    if (tableStatusFilter.length > 0) {
       ads = ads.filter((ad) => {
         const s = entityStatusMap.get(ad.adId)
-        return s != null && tableStatusFilter.has(s)
+        return s != null && tableStatusFilter.includes(s)
       })
     }
 
@@ -1005,10 +1006,10 @@ export default function ClientPerformanceView({
     }
 
     // Apply status filter
-    if (tableStatusFilter.size > 0) {
+    if (tableStatusFilter.length > 0) {
       base = base.filter((row) => {
         const s = entityStatusMap.get(row.id)
-        return s != null && tableStatusFilter.has(s)
+        return s != null && tableStatusFilter.includes(s)
       })
     }
     return base
@@ -2028,22 +2029,22 @@ export default function ClientPerformanceView({
                 ] as const
               ).map((opt) => {
                 const active = opt.key === "all"
-                  ? tableStatusFilter.size === 0
-                  : tableStatusFilter.has(opt.key)
+                  ? tableStatusFilter.length === 0
+                  : tableStatusFilter.includes(opt.key)
                 return (
                   <button
                     key={opt.key}
+                    type="button"
                     onClick={() => {
                       if (opt.key === "all") {
-                        setTableStatusFilter(new Set())
+                        setTableStatusFilter([])
                         return
                       }
-                      setTableStatusFilter((prev) => {
-                        const next = new Set(prev)
-                        if (next.has(opt.key)) next.delete(opt.key)
-                        else next.add(opt.key)
-                        return next
-                      })
+                      setTableStatusFilter((prev) =>
+                        prev.includes(opt.key)
+                          ? prev.filter((s) => s !== opt.key)
+                          : [...prev, opt.key]
+                      )
                     }}
                     className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
                       active
