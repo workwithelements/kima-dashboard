@@ -34,6 +34,10 @@ import PerformanceTable from "@/components/tables/performance-table"
 import AlexiaClarkStructureView from "@/components/dashboard/alexia-clark-structure-view"
 import AdsSidebar, { type AdEntry } from "@/components/ui/ads-sidebar"
 import ScorecardConfigModal from "./scorecard-config-modal"
+import TagSelector, { UNTAGGED_FILTER_ID } from "@/components/ui/tag-selector"
+import CreativeCardGrid, { type TagInfo } from "@/components/dashboard/creative-card-grid"
+import CreativeDetailModal from "@/components/dashboard/creative-detail-modal"
+import type { Tag } from "@/components/dashboard/tag-manager-modal"
 import AnnotationsBar, { type Annotation } from "@/components/ui/annotations-bar"
 import { calculatePacing } from "@/lib/utils/pacing"
 import {
@@ -46,14 +50,11 @@ import {
 } from "@/lib/utils/ad-name-parser"
 import {
   classifyAllAds,
-  countByClassification,
-  CLASSIFICATIONS,
-  type ClassificationType,
+  mergeClassificationWithFatigue,
+  type ClassifiedAd,
 } from "@/lib/utils/creative-classification"
-import {
-  calculateConcentration,
-  CONCENTRATION_COLORS,
-} from "@/lib/utils/spend-concentration"
+import { detectFatigueAll } from "@/lib/utils/fatigue-detection"
+import { isVideoAd } from "@/lib/utils/video-retention"
 
 // Lazy-load heavy chart components (recharts ~200KB)
 const ChartPlaceholder = () => (
@@ -150,6 +151,10 @@ type Props = {
   namingConfig?: NamingConfig
   /** ad_id → ISO created_time for test badge */
   createdDates?: Record<string, string>
+  /** Meta ad_id → thumbnail URL (powers the creative grid) */
+  thumbnails?: Record<string, string>
+  /** Whether creative thumbnails/grid are enabled for this client */
+  previewsEnabled?: boolean
 }
 
 const COMPARE_OPTIONS: { value: ComparisonType; label: string }[] = [
@@ -205,6 +210,8 @@ export default function ClientPerformanceView({
   readOnly = false,
   namingConfig,
   createdDates = {},
+  thumbnails = {},
+  previewsEnabled = false,
 }: Props) {
   const currency = client.currency_code ?? "GBP"
   const router = useRouter()
@@ -234,12 +241,20 @@ export default function ClientPerformanceView({
   const [cmPct, setCmPct] = useState<number | null>(contributionMarginPct)
   // Active CPA step: which funnel step drives the CPA chart (defaults to keyAction or last step)
   const [activeCpaStep, setActiveCpaStep] = useState<string | null>(null)
+  const [selectedVolumeSeg, setSelectedVolumeSeg] = useState<"live" | "testing">("live")
   const [breakdownTab, setBreakdownTab] = useState<"demographics" | "placements">("demographics")
   const [breakdownMetric, setBreakdownMetric] = useState<"spend" | "impressions" | "purchases">("spend")
   const [breakdownOpen, setBreakdownOpen] = useState(true)
   const [annotations, setAnnotations] = useState<Annotation[]>(initialAnnotations)
   // Dimension filters for ad-level view
   const [perfDimFilters, setPerfDimFilters] = useState<Record<string, string[]>>({})
+
+  // Creative grid state (ad-level, Meta only, previewsEnabled)
+  const [tableViewMode, setTableViewMode] = useState<"table" | "grid">("table")
+  const [tags, setTags] = useState<Tag[]>([])
+  const [adTagMap, setAdTagMap] = useState<Record<string, string[]>>({})
+  const [selectedTagFilters, setSelectedTagFilters] = useState<string[]>([])
+  const [detailAd, setDetailAd] = useState<ClassifiedAd | null>(null)
 
   // Compute new ad IDs (first 5 days of activity) for test badge
   const newAdIds = useMemo(() => {
@@ -265,9 +280,13 @@ export default function ClientPerformanceView({
   }, [createdDates])
 
   // Entity status: blue=testing, green=live, red=paused
-  // - "testing": has spend on the latest date AND fewer than 5 distinct spend days
-  // - "live": has spend on the latest date AND 5+ distinct spend days
   // - "paused": no spend on the latest date
+  // - campaigns / ad sets / GA entities: testing until 5+ distinct spend days
+  // - ads: testing until total spend >= AD_LIVE_SPEND_THRESHOLD OR active view's
+  //   key-action count >= AD_LIVE_KEY_ACTION_THRESHOLD. Budget-agnostic spend
+  //   days rule doesn't cover "drip-spent" ads that stay tiny for weeks.
+  const AD_LIVE_SPEND_THRESHOLD = 100
+  const AD_LIVE_KEY_ACTION_THRESHOLD = 10
   const entityStatusMap = useMemo(() => {
     const map = new Map<string, "testing" | "live" | "paused">()
     let maxDate = ""
@@ -282,6 +301,10 @@ export default function ClientPerformanceView({
     // Count distinct spend days per entity and track if active on maxDate
     const spendDays = new Map<string, Set<string>>()
     const activeOnMax = new Set<string>()
+    // Ad-only rollups: total spend and total key-action count.
+    const adIds = new Set<string>()
+    const adSpend = new Map<string, number>()
+    const adKeyCount = new Map<string, number>()
 
     function track(id: string, date: string, spend: number) {
       if (!id) return
@@ -292,11 +315,20 @@ export default function ClientPerformanceView({
       }
     }
 
+    const keyField = keyAction || null
     for (const r of rawRows) {
       if (!r.date) continue
       track(r.campaign_id || "", r.date, r.spend || 0)
       track(r.adset_id || "", r.date, r.spend || 0)
       track(r.ad_id || "", r.date, r.spend || 0)
+      if (r.ad_id) {
+        adIds.add(r.ad_id)
+        adSpend.set(r.ad_id, (adSpend.get(r.ad_id) || 0) + (r.spend || 0))
+        if (keyField) {
+          const n = Number((r as Record<string, unknown>)[keyField]) || 0
+          if (n) adKeyCount.set(r.ad_id, (adKeyCount.get(r.ad_id) || 0) + n)
+        }
+      }
     }
     for (const r of rawGoogleAdsRows) {
       if (!r.date) continue
@@ -311,13 +343,21 @@ export default function ClientPerformanceView({
     allIds.forEach((id) => {
       if (!activeOnMax.has(id)) {
         map.set(id, "paused")
+        return
+      }
+      if (adIds.has(id)) {
+        const spent = adSpend.get(id) || 0
+        const conv = adKeyCount.get(id) || 0
+        const hasGraduated =
+          spent >= AD_LIVE_SPEND_THRESHOLD || conv >= AD_LIVE_KEY_ACTION_THRESHOLD
+        map.set(id, hasGraduated ? "live" : "testing")
       } else {
         const days = spendDays.get(id)?.size ?? 0
         map.set(id, days >= 5 ? "live" : "testing")
       }
     })
     return map
-  }, [rawRows, rawGoogleAdsRows])
+  }, [rawRows, rawGoogleAdsRows, keyAction])
 
   // Client-side date filtering: the server may have fetched a wider window
   // than the user's current selection so that switching between short presets
@@ -724,25 +764,152 @@ export default function ClientPerformanceView({
     return { totalSpend, live, testing, liveSpend, testingSpend }
   }, [filteredRows, entityStatusMap, isMeta])
 
-  // Creative classification (winner/loser/viable/…) for the portfolio-health strip
-  // and Coverage Analysis. Only computed for Meta — Google Ads has no ad-level rows.
+  // Creative classification feeds the Coverage Analysis matrix. Only computed
+  // for Meta — Google Ads has no ad-level rows.
   const classifiedAds = useMemo(
     () => (isMeta ? classifyAllAds(filteredRows, keyAction ?? undefined, namingConfig) : []),
     [filteredRows, keyAction, namingConfig, isMeta]
   )
 
-  const classificationCounts = useMemo(
-    () => countByClassification(classifiedAds),
-    [classifiedAds]
+  // Fatigue detection + enrichment — only computed when the grid is in play
+  const fatigueMap = useMemo(() => {
+    if (!previewsEnabled || !isMeta) return {}
+    const adIds = classifiedAds.map((a) => a.adId)
+    return detectFatigueAll(filteredRows, adIds, 7, to, keyAction ?? undefined)
+  }, [previewsEnabled, isMeta, classifiedAds, filteredRows, to, keyAction])
+
+  const enrichedAds = useMemo(
+    () => mergeClassificationWithFatigue(classifiedAds, fatigueMap),
+    [classifiedAds, fatigueMap]
   )
 
-  const concentration = useMemo(
-    () =>
-      calculateConcentration(
-        classifiedAds.map((a) => ({ adId: a.adId, adName: a.adName, spend: a.spend }))
-      ),
-    [classifiedAds]
-  )
+  // Video ad detection for the grid / detail modal
+  const videoAdIds = useMemo(() => {
+    const ids = new Set<string>()
+    if (!previewsEnabled || !isMeta) return ids
+    for (const ad of enrichedAds) {
+      if (isVideoAd(filteredRows, ad.adId)) ids.add(ad.adId)
+    }
+    return ids
+  }, [previewsEnabled, isMeta, enrichedAds, filteredRows])
+
+  // Fetch tags + ad→tag map when the grid is available
+  useEffect(() => {
+    if (!previewsEnabled || !isMeta) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [tagsRes, adTagsRes] = await Promise.all([
+          fetch("/api/creative-tags"),
+          fetch(`/api/creative-ad-tags?client_id=${client.id}`),
+        ])
+        if (!cancelled && tagsRes.ok) {
+          setTags(await tagsRes.json())
+        }
+        if (!cancelled && adTagsRes.ok) {
+          const rows: { ad_id: string; tag_id: string }[] = await adTagsRes.json()
+          const map: Record<string, string[]> = {}
+          rows.forEach((row) => {
+            if (!map[row.ad_id]) map[row.ad_id] = []
+            map[row.ad_id].push(row.tag_id)
+          })
+          setAdTagMap(map)
+        }
+      } catch { /* ignore */ }
+    })()
+    return () => { cancelled = true }
+  }, [previewsEnabled, isMeta, client.id])
+
+  async function assignTag(adId: string, tagId: string) {
+    try {
+      const res = await fetch("/api/creative-ad-tags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ad_id: adId, tag_id: tagId, client_id: client.id }),
+      })
+      if (res.ok) {
+        setAdTagMap((prev) => ({ ...prev, [adId]: [...(prev[adId] || []), tagId] }))
+      }
+    } catch { /* ignore */ }
+  }
+
+  async function removeTag(adId: string, tagId: string) {
+    try {
+      const res = await fetch("/api/creative-ad-tags", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ad_id: adId, tag_id: tagId }),
+      })
+      if (res.ok) {
+        setAdTagMap((prev) => ({
+          ...prev,
+          [adId]: (prev[adId] || []).filter((t) => t !== tagId),
+        }))
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Proxy thumbnail URLs — Meta CDN URLs expire after ~24h, so we proxy through
+  // /api/thumbnail which refreshes them from the Graph API as needed.
+  const proxyThumbnails = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const [adId, url] of Object.entries(thumbnails)) {
+      if (url) map[adId] = `/api/thumbnail?ad_id=${encodeURIComponent(adId)}`
+    }
+    return map
+  }, [thumbnails])
+
+  // Per-ad tag lookup for the card grid
+  const adTagsLookup = useMemo(() => {
+    const lookup: Record<string, TagInfo[]> = {}
+    for (const [adId, tagIds] of Object.entries(adTagMap)) {
+      lookup[adId] = tagIds
+        .map((tid) => tags.find((t) => t.id === tid))
+        .filter((t): t is Tag => t !== undefined)
+    }
+    return lookup
+  }, [adTagMap, tags])
+
+  // Ads to show in the grid — applies status, dimension and tag filters
+  const gridAds = useMemo(() => {
+    let ads = enrichedAds
+
+    if (tableStatusFilter !== "all") {
+      ads = ads.filter((ad) => entityStatusMap.get(ad.adId) === tableStatusFilter)
+    }
+
+    const activeDimFilters = Object.entries(perfDimFilters).filter(([, vals]) => vals.length > 0)
+    if (activeDimFilters.length > 0) {
+      ads = ads.filter((ad) => {
+        if (!ad.parsed) return false
+        return activeDimFilters.every(([dim, vals]) => {
+          const v = getDimensionValue(ad.parsed, dim)
+          return v ? vals.includes(v) : false
+        })
+      })
+    }
+
+    if (selectedTagFilters.length > 0) {
+      const wantUntagged = selectedTagFilters.includes(UNTAGGED_FILTER_ID)
+      const tagFilterIds = selectedTagFilters.filter((t) => t !== UNTAGGED_FILTER_ID)
+      ads = ads.filter((ad) => {
+        const adTags = adTagMap[ad.adId] || []
+        if (wantUntagged && adTags.length === 0) return true
+        if (tagFilterIds.length > 0 && tagFilterIds.some((t) => adTags.includes(t))) return true
+        return false
+      })
+    }
+
+    // Sort by spend desc — matches the default table sort
+    return [...ads].sort((a, b) => b.spend - a.spend)
+  }, [enrichedAds, tableStatusFilter, entityStatusMap, perfDimFilters, selectedTagFilters, adTagMap])
+
+  // Reset to table view whenever the grid becomes unavailable
+  useEffect(() => {
+    if (tableViewMode === "grid" && !(previewsEnabled && isMeta && metaLevel === "ad")) {
+      setTableViewMode("table")
+    }
+  }, [tableViewMode, previewsEnabled, isMeta, metaLevel])
 
   const coverageAnalysisEligible = useMemo(
     () =>
@@ -1424,76 +1591,108 @@ export default function ClientPerformanceView({
                 <div className="flex h-8 overflow-hidden rounded-lg bg-neutral-800">
                   {segments.map((seg) => {
                     if (seg.pct <= 0) return null
+                    const isSelected = selectedVolumeSeg === seg.key
                     return (
-                      <div
+                      <button
                         key={seg.key}
-                        className="group relative flex items-center justify-center transition-opacity hover:opacity-80"
+                        type="button"
+                        onMouseEnter={() => setSelectedVolumeSeg(seg.key)}
+                        onFocus={() => setSelectedVolumeSeg(seg.key)}
+                        onClick={() => setSelectedVolumeSeg(seg.key)}
+                        className={`relative flex items-center justify-center transition ${
+                          isSelected ? "opacity-100" : "opacity-70 hover:opacity-100"
+                        }`}
                         style={{
                           width: `${seg.pct}%`,
                           backgroundColor: seg.color,
                           minWidth: "24px",
                         }}
+                        aria-pressed={isSelected}
                       >
                         {seg.pct > 8 && (
                           <span className="text-xs font-medium text-black">
                             {seg.pct.toFixed(0)}%
                           </span>
                         )}
-                        {/* Tooltip */}
-                        <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-72 -translate-x-1/2 rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-xs font-semibold text-neutral-100">
-                              {seg.label} — {seg.ads.length} ad{seg.ads.length !== 1 ? "s" : ""}
-                            </p>
-                            <p className="text-[10px] text-neutral-400">
-                              {fmtCurrency(seg.spend, currency)} · {seg.pct.toFixed(1)}%
-                            </p>
-                          </div>
-                          <div className="mt-1.5 max-h-48 space-y-0.5 overflow-y-auto">
-                            {seg.ads.slice(0, 10).map((ad) => {
-                              const adPct = (ad.spend / activeTotal) * 100
-                              return (
-                                <div
-                                  key={ad.id}
-                                  className="flex items-center justify-between gap-2 text-[10px]"
-                                >
-                                  <span className="truncate text-neutral-300">{ad.name}</span>
-                                  <span className="shrink-0 tabular-nums text-neutral-500">
-                                    {adPct.toFixed(1)}%
-                                  </span>
-                                </div>
-                              )
-                            })}
-                            {seg.ads.length > 10 && (
-                              <p className="pt-1 text-[10px] text-neutral-500">
-                                +{seg.ads.length - 10} more
-                              </p>
-                            )}
-                          </div>
-                          <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-neutral-700" />
-                        </div>
-                      </div>
+                      </button>
                     )
                   })}
                 </div>
                 <div className="flex flex-wrap items-center gap-4 text-xs">
-                  {segments.map((seg) => (
-                    <div key={seg.key} className="flex items-center gap-1.5">
-                      <span className={`inline-block h-1.5 w-1.5 rounded-full ${seg.dot}`} />
-                      <span className="text-neutral-300">
-                        {seg.label} ({seg.ads.length})
-                      </span>
-                      <span className="text-neutral-500">
-                        {seg.pct.toFixed(1)}% · {fmtCurrency(seg.spend, currency)}
-                      </span>
-                    </div>
-                  ))}
+                  {segments.map((seg) => {
+                    const isSelected = selectedVolumeSeg === seg.key
+                    return (
+                      <button
+                        key={seg.key}
+                        type="button"
+                        onMouseEnter={() => setSelectedVolumeSeg(seg.key)}
+                        onClick={() => setSelectedVolumeSeg(seg.key)}
+                        className={`flex items-center gap-1.5 rounded-full border px-2 py-0.5 transition ${
+                          isSelected
+                            ? "border-neutral-600 bg-neutral-800/60"
+                            : "border-transparent hover:bg-neutral-800/40"
+                        }`}
+                      >
+                        <span className={`inline-block h-1.5 w-1.5 rounded-full ${seg.dot}`} />
+                        <span className="text-neutral-300">
+                          {seg.label} ({seg.ads.length})
+                        </span>
+                        <span className="text-neutral-500">
+                          {seg.pct.toFixed(1)}% · {fmtCurrency(seg.spend, currency)}
+                        </span>
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
             )
           })()}
         </Card>
       )}
+
+      {/* Ads in the hovered/selected creative-volumes segment */}
+      {isMeta && (creativeVolumes.liveSpend + creativeVolumes.testingSpend) > 0 && (() => {
+        const activeTotal = creativeVolumes.liveSpend + creativeVolumes.testingSpend
+        const seg = selectedVolumeSeg === "live"
+          ? { label: "Live", dot: "bg-green-400", ads: creativeVolumes.live, spend: creativeVolumes.liveSpend }
+          : { label: "Testing", dot: "bg-blue-400", ads: creativeVolumes.testing, spend: creativeVolumes.testingSpend }
+        const pct = activeTotal > 0 ? (seg.spend / activeTotal) * 100 : 0
+        return (
+          <Card>
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className={`inline-block h-1.5 w-1.5 rounded-full ${seg.dot}`} />
+                <h2 className="text-sm font-medium text-neutral-300">
+                  {seg.label} ads ({seg.ads.length})
+                </h2>
+              </div>
+              <span className="text-[10px] text-neutral-500">
+                {fmtCurrency(seg.spend, currency)} · {pct.toFixed(1)}% of active spend
+              </span>
+            </div>
+            {seg.ads.length === 0 ? (
+              <p className="text-xs text-neutral-500">No ads in this segment.</p>
+            ) : (
+              <div className="max-h-64 space-y-0.5 overflow-y-auto">
+                {seg.ads.map((ad) => {
+                  const adPct = activeTotal > 0 ? (ad.spend / activeTotal) * 100 : 0
+                  return (
+                    <div
+                      key={ad.id}
+                      className="flex items-center justify-between gap-2 rounded px-1.5 py-0.5 text-[11px] hover:bg-neutral-800/40"
+                    >
+                      <span className="truncate text-neutral-300">{ad.name}</span>
+                      <span className="shrink-0 tabular-nums text-neutral-500">
+                        {fmtCurrency(ad.spend, currency)} · {adPct.toFixed(1)}%
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </Card>
+        )
+      })()}
 
       {/* Revenue / AOV / ROAS — shown when configured via scorecard + revenue > 0 */}
       {metrics.revenue > 0 && funnelSteps.length > 0 && (
@@ -1904,60 +2103,6 @@ export default function ClientPerformanceView({
         </div>
       )}
 
-      {/* Portfolio health: classification strip (display-only) */}
-      {isMeta && classifiedAds.length > 0 && (
-        <Card>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-medium text-neutral-400">Portfolio Health</h2>
-            <div className="flex items-center gap-2">
-              <span
-                className="inline-block h-1.5 w-1.5 rounded-full"
-                style={{ backgroundColor: CONCENTRATION_COLORS[concentration.level] }}
-              />
-              <span className="text-xs font-medium text-neutral-300">
-                {concentration.level}
-              </span>
-              <span className="text-[10px] text-neutral-500">
-                Top ad {concentration.topAdShare.toFixed(0)}% of spend
-              </span>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-x-5 gap-y-2">
-            {(
-              [
-                "DIRECT_WINNER",
-                "INDIRECT_WINNER",
-                "VIABLE_UNDERSCALED",
-                "LOSER",
-                "LOSER_NON_CONTRIBUTING",
-                "LOSER_NO_DELIVERY",
-                "INSUFFICIENT_DATA",
-              ] as ClassificationType[]
-            ).map((type) => {
-              const count = classificationCounts[type]
-              if (!count) return null
-              const def = CLASSIFICATIONS[type]
-              return (
-                <div key={type} className="group relative flex items-center gap-1.5">
-                  <span
-                    className="inline-block h-2.5 w-2.5 rounded-sm"
-                    style={{ backgroundColor: def.color }}
-                  />
-                  <span className="text-xs text-neutral-300">{def.label}</span>
-                  <span className="text-xs tabular-nums text-neutral-500">({count})</span>
-                  {/* Tooltip */}
-                  <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-56 -translate-x-1/2 rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
-                    <p className="text-xs font-semibold text-neutral-100">{def.label}</p>
-                    <p className="mt-0.5 text-[10px] text-neutral-400">{def.description}</p>
-                    <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-neutral-700" />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </Card>
-      )}
-
       {/* Coverage Analysis — stage × job gap matrix (naming-config-gated, Meta only) */}
       {coverageAnalysisEligible && (
         <Card>
@@ -2025,8 +2170,8 @@ export default function ClientPerformanceView({
                 )}
               </div>
             )}
-            {/* Status filter chips */}
-            <div className="mb-3 flex items-center gap-1.5">
+            {/* Status filter chips + Table/Grid toggle */}
+            <div className="mb-3 flex flex-wrap items-center gap-1.5">
               <span className="text-[11px] text-neutral-500 mr-1">Show:</span>
               {(
                 [
@@ -2052,20 +2197,61 @@ export default function ClientPerformanceView({
                   </button>
                 )
               })}
+              {previewsEnabled && isMeta && metaLevel === "ad" && (
+                <>
+                  <span className="mx-1 h-4 w-px bg-neutral-800" />
+                  <TagSelector
+                    tags={tags}
+                    selected={selectedTagFilters}
+                    onChange={setSelectedTagFilters}
+                  />
+                  <div className="ml-auto flex overflow-hidden rounded-full border border-neutral-700">
+                    {(["table", "grid"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        onClick={() => setTableViewMode(mode)}
+                        className={`px-3 py-1 text-[11px] font-medium capitalize transition ${
+                          tableViewMode === mode
+                            ? "bg-brand-lime/10 text-brand-lime"
+                            : "bg-neutral-900 text-neutral-400 hover:text-white"
+                        }`}
+                      >
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
-            <PerformanceTable
-              data={groupedData}
-              comparisonData={hasComp ? compGroupedData : undefined}
-              level={currentTableLevel}
-              onLevelChange={handleTableLevelChange}
-              funnelSteps={isMeta ? funnelSteps : []}
-              levelOptions={tableLevelOptions}
-              currency={currency}
-              breadcrumb={drillBreadcrumb}
-              onRowClick={handleDrillDown}
-              newAdIds={isMeta && metaLevel === "ad" ? newAdIds : undefined}
-              entityStatus={entityStatusMap}
-            />
+            {tableViewMode === "grid" && previewsEnabled && isMeta && metaLevel === "ad" ? (
+              <CreativeCardGrid
+                ads={gridAds}
+                thumbnails={proxyThumbnails}
+                videoAdIds={videoAdIds}
+                rows={filteredRows}
+                currency={currency}
+                adTags={adTagsLookup}
+                allTags={tags}
+                onAdClick={setDetailAd}
+                onAssignTag={readOnly ? undefined : assignTag}
+                onRemoveTag={readOnly ? undefined : removeTag}
+                newAdIds={newAdIds}
+              />
+            ) : (
+              <PerformanceTable
+                data={groupedData}
+                comparisonData={hasComp ? compGroupedData : undefined}
+                level={currentTableLevel}
+                onLevelChange={handleTableLevelChange}
+                funnelSteps={isMeta ? funnelSteps : []}
+                levelOptions={tableLevelOptions}
+                currency={currency}
+                breadcrumb={drillBreadcrumb}
+                onRowClick={handleDrillDown}
+                newAdIds={isMeta && metaLevel === "ad" ? newAdIds : undefined}
+                entityStatus={entityStatusMap}
+              />
+            )}
           </div>
         )}
       </Card>
@@ -2106,6 +2292,24 @@ export default function ClientPerformanceView({
             }
             setShowConfig(false)
           }}
+        />
+      )}
+
+      {/* Creative detail modal */}
+      {detailAd && (
+        <CreativeDetailModal
+          ad={detailAd}
+          thumbnailUrl={proxyThumbnails[detailAd.adId]}
+          isVideo={videoAdIds.has(detailAd.adId)}
+          rows={filteredRows}
+          currency={currency}
+          tags={adTagsLookup[detailAd.adId]}
+          metaAccountId={client.meta_account_id ?? undefined}
+          demographics={demographics}
+          placements={placements}
+          funnelSteps={funnelSteps}
+          keyAction={keyAction ?? undefined}
+          onClose={() => setDetailAd(null)}
         />
       )}
     </div>

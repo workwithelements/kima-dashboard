@@ -188,16 +188,9 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
       shopifyAttribution={shopifyData.attribution}
       shopifyCompOrders={shopifyCompData.orders}
       shopifyCompAttribution={shopifyCompData.attribution}
-      /* Creative tab */
-      creativeRows={creativeData?.rows || []}
+      /* Creative — thumbnails feed the Performance grid */
       thumbnails={creativeData?.thumbnails || {}}
       previewsEnabled={creativeData?.previewsEnabled || false}
-      creativeFunnelSteps={creativeData?.funnelSteps || undefined}
-      creativeKeyAction={creativeData?.keyAction || undefined}
-      creativeDemographics={creativeData?.demographics || []}
-      creativePlacements={creativeData?.placements || []}
-      creativeNamingConfig={creativeData?.namingConfig}
-      creativeCreatedDates={creativeData?.createdDates || {}}
       /* Reach tab */
       reachRows={reachData?.rows || []}
       reachBaselineReach={reachData?.baselineReach || 0}
