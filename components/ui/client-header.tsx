@@ -21,6 +21,7 @@ const TABS = [
   { label: "Marketing Impact", href: "/meta-impact", requiresMarketingImpact: true },
   { label: "Retention Lift Test", href: "/retention-lift-test", clientOnly: "TouchNote" },
   { label: "NAC Analysis", href: "/nac-analysis", clientOnly: "TouchNote" },
+  { label: "Organic Social", href: "/organic-social", clientOnly: "Ezra" },
   { label: "Settings", href: "/settings" },
 ]
 
