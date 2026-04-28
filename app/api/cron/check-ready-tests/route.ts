@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
   for (const cid of clientIds) {
     const { data } = await db
       .from("client_naming_config")
-      .select("positions, value_maps")
+      .select("positions, value_maps, separator")
       .eq("client_id", cid)
       .maybeSingle()
 
@@ -71,6 +71,7 @@ export async function POST(request: NextRequest) {
       namingConfigs.set(cid, {
         positions: data.positions as NamingConfig["positions"],
         valueMaps: (data.value_maps || {}) as NamingConfig["valueMaps"],
+        separator: (data as any).separator || undefined,
       })
     }
   }

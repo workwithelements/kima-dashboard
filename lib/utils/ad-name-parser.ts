@@ -18,6 +18,15 @@ export type NamingPosition = { index: number; key: string; label: string }
 export type NamingConfig = {
   positions: NamingPosition[]
   valueMaps: Record<string, Record<string, string>>
+  /** Delimiter between segments. Defaults to "_" when omitted. */
+  separator?: string
+}
+
+/** Default ad-name segment separator when the client config doesn't override it. */
+export const DEFAULT_SEPARATOR = "_"
+
+function getSeparator(config?: NamingConfig): string {
+  return config?.separator || DEFAULT_SEPARATOR
 }
 
 // --- Landing Page Codes ---
@@ -162,12 +171,14 @@ export function parseAdName(adName: string, config?: NamingConfig): ParsedAdName
     originalName: adName,
   }
 
-  if (!adName || !adName.includes("_")) {
+  const separator = getSeparator(config)
+
+  if (!adName || !adName.includes(separator)) {
     result.conceptName = adName || null
     return result
   }
 
-  const parts = adName.split("_")
+  const parts = adName.split(separator)
   const get = (idx: number): string | null =>
     idx < parts.length && parts[idx] ? parts[idx] : null
 
@@ -365,8 +376,9 @@ export function isConformingAdName(
   adName: string,
   config?: NamingConfig
 ): boolean {
-  if (!adName || !adName.includes("_")) return false
-  const parts = adName.split("_")
+  const separator = getSeparator(config)
+  if (!adName || !adName.includes(separator)) return false
+  const parts = adName.split(separator)
 
   if (config && config.positions.length > 0) {
     const conceptPos = config.positions.find((p) => p.key === "conceptName")

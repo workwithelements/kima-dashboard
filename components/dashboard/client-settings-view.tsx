@@ -54,6 +54,7 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
   /* ── Naming config state ── */
   const [positions, setPositions] = useState<NamingPosition[]>([])
   const [valueMaps, setValueMaps] = useState<Record<string, Record<string, string>>>({})
+  const [separator, setSeparator] = useState<string>("_")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -130,6 +131,7 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
           if (data) {
             setPositions(data.positions || [])
             setValueMaps(data.value_maps || {})
+            if (data.separator) setSeparator(data.separator)
           }
         }
         if (alertsRes.ok) {
@@ -258,7 +260,7 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
       const res = await fetch(`/api/naming-config/${clientId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ positions, value_maps: valueMaps }),
+        body: JSON.stringify({ positions, value_maps: valueMaps, separator }),
       })
       if (res.ok) {
         setSaved(true)
@@ -419,7 +421,7 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
             Naming Convention
           </h2>
           <p className="mt-1 text-[11px] text-neutral-500">
-            Define how underscore-delimited ad names map to dimensions. This powers
+            Define how delimited ad names map to dimensions. This powers
             filters and grouping on the Performance and Creative tabs.
           </p>
         </div>
@@ -430,6 +432,29 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
           </div>
         ) : (
           <div className="space-y-6 p-5">
+            {/* ── Separator ── */}
+            <div>
+              <p className="mb-1 text-xs font-medium text-neutral-400">
+                Separator
+              </p>
+              <p className="mb-2 text-[10px] text-neutral-500">
+                The delimiter between segments in your ad names. Default is
+                underscore (<code className="text-neutral-400">_</code>). Use
+                <code className="mx-1 text-neutral-400"> // </code>
+                (with surrounding spaces) for the W&amp;B convention.
+              </p>
+              <input
+                type="text"
+                value={separator}
+                onChange={(e) => {
+                  setSeparator(e.target.value)
+                  setSaved(false)
+                }}
+                placeholder="_"
+                className="w-32 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 font-mono text-xs text-white focus:border-brand-lime focus:outline-none"
+              />
+            </div>
+
             {/* ── Position list ── */}
             <div>
               <p className="mb-2 text-xs font-medium text-neutral-400">
