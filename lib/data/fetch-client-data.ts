@@ -15,7 +15,7 @@ const CACHE_TTL_SECONDS = 300
  * Paginated Supabase fetch — works around the PostgREST 1000-row default cap.
  * `buildQuery` is called per page so the builder is fresh each time.
  */
-async function fetchAllRows<T>(
+export async function fetchAllRows<T>(
   buildQuery: () => any,
   pageSize = 1000
 ): Promise<T[]> {

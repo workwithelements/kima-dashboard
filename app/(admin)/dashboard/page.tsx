@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic"
 
 import { createServiceClient } from "@/lib/supabase/server"
+import { fetchAllRows } from "@/lib/data/fetch-client-data"
 import { Card, MetricCard } from "@/components/ui/card"
 import SpendChart from "@/components/charts/spend-chart"
 import ClientsOverviewTable from "@/components/tables/clients-overview-table"
@@ -34,8 +35,10 @@ export default async function DashboardPage({ searchParams }: Props) {
   // Comparison range (previous period)
   const compRange = getComparisonRange(range, "previous_period")
 
-  // Fetch clients, configs, Meta + Google Ads data, and comparison data in parallel
-  const [clientsResult, configResult, perfResult, gaPerfResult, compPerfResult] = await Promise.all([
+  // Fetch clients, configs, Meta + Google Ads data, and comparison data in parallel.
+  // Perf tables have rows per (date, client_id, ad_id), so paginate to avoid the
+  // PostgREST 1000-row cap silently truncating recent dates.
+  const [clientsResult, configResult, metaRows, gaRows, compRows] = await Promise.all([
     supabase
       .from("clients")
       .select("id, name")
@@ -44,42 +47,53 @@ export default async function DashboardPage({ searchParams }: Props) {
     supabase
       .from("client_scorecard_config")
       .select("client_id, funnel_steps, key_action"),
-    supabase
-      .from("meta_daily_performance")
-      .select(
-        "date, client_id, spend, impressions, reach, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, checkouts_initiated, purchases, purchase_value, app_installs"
-      )
-      .gte("date", fromDate)
-      .lte("date", toDate)
-      .order("date")
-      .limit(10000),
-    Promise.resolve(
+    fetchAllRows<{
+      date: string
+      client_id: string
+      spend: number
+      impressions: number
+      reach: number
+      unique_link_clicks: number
+      landing_page_views: number
+      adds_to_cart: number
+      registrations_completed: number
+      checkouts_initiated: number
+      purchases: number
+      purchase_value: number
+      app_installs: number
+    }>(() =>
+      supabase
+        .from("meta_daily_performance")
+        .select(
+          "date, client_id, spend, impressions, reach, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, checkouts_initiated, purchases, purchase_value, app_installs"
+        )
+        .gte("date", fromDate)
+        .lte("date", toDate)
+        .order("date")
+    ),
+    fetchAllRows<{ date: string; client_id: string; spend: number }>(() =>
       supabase
         .from("google_ads_daily_performance")
         .select("date, client_id, spend")
         .gte("date", fromDate)
         .lte("date", toDate)
         .order("date")
-        .limit(10000)
-    ).catch(() => ({ data: [] as any[] })),
+    ).catch(() => [] as { date: string; client_id: string; spend: number }[]),
     compRange
-      ? supabase
-          .from("meta_daily_performance")
-          .select(
-            "client_id, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, checkouts_initiated, purchases, app_installs"
-          )
-          .gte("date", compRange.from)
-          .lte("date", compRange.to)
-          .limit(10000)
-      : Promise.resolve({ data: [] as any[] }),
-    new Promise((r) => setTimeout(r, 1000)),
+      ? fetchAllRows<Record<string, any>>(() =>
+          supabase
+            .from("meta_daily_performance")
+            .select(
+              "client_id, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, checkouts_initiated, purchases, app_installs"
+            )
+            .gte("date", compRange.from)
+            .lte("date", compRange.to)
+        )
+      : Promise.resolve([] as Record<string, any>[]),
   ])
 
   const clients = clientsResult.data || []
   const configs = configResult.data || []
-  const metaRows = perfResult.data || []
-  const gaRows = (gaPerfResult.data || []) as { date: string; client_id: string; spend: number }[]
-  const compRows = (compPerfResult.data || []) as any[]
 
   // Build config map: client_id → key_action (the configured key action)
   const keyActionMap: Record<string, string | null> = {}
