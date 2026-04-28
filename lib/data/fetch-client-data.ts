@@ -15,7 +15,7 @@ const CACHE_TTL_SECONDS = 300
  * Paginated Supabase fetch — works around the PostgREST 1000-row default cap.
  * `buildQuery` is called per page so the builder is fresh each time.
  */
-async function fetchAllRows<T>(
+export async function fetchAllRows<T>(
   buildQuery: () => any,
   pageSize = 1000
 ): Promise<T[]> {
@@ -147,7 +147,7 @@ async function _fetchClientDataInner(
     // Fetch naming config
     supabase
       .from("client_naming_config")
-      .select("positions, value_maps")
+      .select("positions, value_maps, separator")
       .eq("client_id", clientId)
       .single(),
   ])
@@ -171,7 +171,7 @@ async function _fetchClientDataInner(
 
   // Build naming config
   let namingConfig: NamingConfig | undefined
-  const namingData = namingResult?.data
+  const namingData = namingResult?.data as { positions?: unknown; value_maps?: unknown; separator?: string | null } | undefined
   if (namingResult?.error && namingResult.error.code !== "PGRST116") {
     // PGRST116 = "no rows returned" (expected when no config set) — only log real errors
     console.warn("[fetchClientData] naming config error:", namingResult.error.message)
@@ -180,6 +180,7 @@ async function _fetchClientDataInner(
     namingConfig = {
       positions: namingData.positions as NamingConfig["positions"],
       valueMaps: (namingData.value_maps || {}) as NamingConfig["valueMaps"],
+      separator: namingData.separator || undefined,
     }
   }
 
@@ -448,7 +449,7 @@ async function _fetchCreativeDataInner(
       .single(),
     supabase
       .from("client_naming_config")
-      .select("positions, value_maps")
+      .select("positions, value_maps, separator")
       .eq("client_id", clientId)
       .single(),
   ])
@@ -521,11 +522,12 @@ async function _fetchCreativeDataInner(
 
   // Build naming config if found
   let namingConfig: NamingConfig | undefined
-  const namingData2 = namingResult2?.data
+  const namingData2 = namingResult2?.data as { positions?: unknown; value_maps?: unknown; separator?: string | null } | undefined
   if (namingData2 && namingData2.positions) {
     namingConfig = {
       positions: namingData2.positions as NamingConfig["positions"],
       valueMaps: (namingData2.value_maps || {}) as NamingConfig["valueMaps"],
+      separator: namingData2.separator || undefined,
     }
   }
 

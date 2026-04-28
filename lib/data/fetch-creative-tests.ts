@@ -141,7 +141,7 @@ async function _fetchCreativeTestsInner(
       .maybeSingle(),
     supabase
       .from("client_naming_config")
-      .select("positions, value_maps")
+      .select("positions, value_maps, separator")
       .eq("client_id", clientId)
       .maybeSingle(),
   ])
@@ -155,11 +155,12 @@ async function _fetchCreativeTestsInner(
 
   // Build naming config
   let namingConfig: NamingConfig | undefined
-  const nd = namingResp?.data
+  const nd = namingResp?.data as { positions?: unknown; value_maps?: unknown; separator?: string | null } | undefined
   if (nd && nd.positions) {
     namingConfig = {
       positions: nd.positions as NamingConfig["positions"],
       valueMaps: (nd.value_maps || {}) as NamingConfig["valueMaps"],
+      separator: nd.separator || undefined,
     }
   }
 
