@@ -94,6 +94,20 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
   const [marketingImpactSaving, setMarketingImpactSaving] = useState(false)
   const [marketingImpactSaved, setMarketingImpactSaved] = useState(false)
 
+  /* ── Amplitude config state ── */
+  const [amplitudeEnabled, setAmplitudeEnabled] = useState(false)
+  const [amplitudeOrg, setAmplitudeOrg] = useState("")
+  const [amplitudeApiKey, setAmplitudeApiKey] = useState("")
+  const [amplitudeSecretKey, setAmplitudeSecretKey] = useState("")
+  const [amplitudeApiKeyPreview, setAmplitudeApiKeyPreview] = useState("")
+  const [amplitudeHasCredentials, setAmplitudeHasCredentials] = useState(false)
+  const [amplitudeCharts, setAmplitudeCharts] = useState<
+    Array<{ chart_id: string; title: string }>
+  >([])
+  const [amplitudeLoading, setAmplitudeLoading] = useState(true)
+  const [amplitudeSaving, setAmplitudeSaving] = useState(false)
+  const [amplitudeSaved, setAmplitudeSaved] = useState(false)
+
   /* ── Creative tags state ── */
   const [tags, setTags] = useState<Tag[]>([])
   const [tagsLoading, setTagsLoading] = useState(true)
@@ -119,12 +133,13 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
   useEffect(() => {
     async function load() {
       try {
-        const [namingRes, alertsRes, testConfigRes, shopifyRes, marketingImpactRes] = await Promise.all([
+        const [namingRes, alertsRes, testConfigRes, shopifyRes, marketingImpactRes, amplitudeRes] = await Promise.all([
           fetch(`/api/naming-config/${clientId}`),
           fetch(`/api/alert-config/${clientId}`),
           fetch(`/api/creative-test-config/${clientId}`),
           fetch(`/api/clients/${clientId}/shopify`),
           fetch(`/api/clients/${clientId}/marketing-impact`),
+          fetch(`/api/clients/${clientId}/amplitude`),
         ])
         if (namingRes.ok) {
           const data = await namingRes.json()
@@ -166,6 +181,23 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
             setMarketingImpactEnabled(data.enabled ?? false)
           }
         }
+        if (amplitudeRes.ok) {
+          const data = await amplitudeRes.json()
+          if (data) {
+            setAmplitudeEnabled(data.enabled ?? false)
+            setAmplitudeOrg(data.org ?? "")
+            setAmplitudeHasCredentials(data.has_credentials ?? false)
+            setAmplitudeApiKeyPreview(data.api_key_preview ?? "")
+            setAmplitudeCharts(
+              Array.isArray(data.charts)
+                ? data.charts.map((c: { chart_id: string; title: string | null }) => ({
+                    chart_id: c.chart_id,
+                    title: c.title ?? "",
+                  }))
+                : []
+            )
+          }
+        }
       } catch {
         /* ignore */
       }
@@ -174,6 +206,7 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
       setTestConfigLoading(false)
       setShopifyLoading(false)
       setMarketingImpactLoading(false)
+      setAmplitudeLoading(false)
     }
     load()
   }, [clientId])
@@ -392,6 +425,38 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
       }
     } catch { /* ignore */ }
     setShopifySaving(false)
+  }
+
+  /* ── Save Amplitude config ── */
+  async function handleSaveAmplitude() {
+    setAmplitudeSaving(true)
+    try {
+      const body: Record<string, unknown> = {
+        enabled: amplitudeEnabled,
+        org: amplitudeOrg,
+        charts: amplitudeCharts.filter((c) => c.chart_id.trim().length > 0),
+      }
+      // Only send credential fields when the user typed something — empty
+      // strings would clobber stored values via the PUT semantics.
+      if (amplitudeApiKey.trim()) body.api_key = amplitudeApiKey.trim()
+      if (amplitudeSecretKey.trim()) body.secret_key = amplitudeSecretKey.trim()
+
+      const res = await fetch(`/api/clients/${clientId}/amplitude`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setAmplitudeHasCredentials(data.has_credentials ?? false)
+        setAmplitudeApiKeyPreview(data.api_key_preview ?? "")
+        setAmplitudeApiKey("")
+        setAmplitudeSecretKey("")
+        setAmplitudeSaved(true)
+        setTimeout(() => setAmplitudeSaved(false), 3000)
+      }
+    } catch { /* ignore */ }
+    setAmplitudeSaving(false)
   }
 
   /* ── Save Marketing Impact config ── */
@@ -1269,6 +1334,203 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
                 className="rounded-lg bg-brand-lime px-5 py-2 text-xs font-semibold text-black transition hover:bg-brand-lime/90 disabled:opacity-50"
               >
                 {shopifySaving ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ── Amplitude Integration Section ── */}
+      <section className="rounded-xl border border-neutral-800 bg-neutral-900/50">
+        <div className="border-b border-neutral-800 px-5 py-4">
+          <h2 className="text-sm font-semibold text-neutral-100">
+            Amplitude Integration
+          </h2>
+          <p className="mt-1 text-[11px] text-neutral-500">
+            Pull saved Amplitude charts (e.g. <code className="text-neutral-400">app.amplitude.com/analytics/leafe/chart/wdgzgtg</code>)
+            straight into the client dashboard. Each Amplitude project has its own API key + secret key.
+          </p>
+        </div>
+
+        {amplitudeLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-lime border-t-transparent" />
+          </div>
+        ) : (
+          <div className="space-y-4 p-5">
+            {/* Enable toggle */}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-neutral-300">Enable Amplitude data</p>
+                <p className="text-[11px] text-neutral-500">
+                  Renders saved Amplitude charts on the client dashboard
+                </p>
+              </div>
+              <button
+                onClick={() => setAmplitudeEnabled((v) => !v)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
+                  amplitudeEnabled ? "bg-brand-lime" : "bg-neutral-700"
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                    amplitudeEnabled ? "translate-x-[18px]" : "translate-x-[3px]"
+                  }`}
+                />
+              </button>
+            </div>
+
+            {amplitudeEnabled && (
+              <>
+                {/* Org slug */}
+                <div>
+                  <label className="mb-1 block text-[11px] text-neutral-500">
+                    Org slug
+                  </label>
+                  <input
+                    type="text"
+                    value={amplitudeOrg}
+                    onChange={(e) => setAmplitudeOrg(e.target.value)}
+                    placeholder="leafe"
+                    className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-brand-lime"
+                  />
+                  <p className="mt-1 text-[10px] text-neutral-600">
+                    Found in the Amplitude URL: app.amplitude.com/analytics/<strong>&lt;org&gt;</strong>/chart/...
+                  </p>
+                </div>
+
+                {/* API Key */}
+                <div>
+                  <label className="mb-1 block text-[11px] text-neutral-500">
+                    API Key
+                  </label>
+                  <input
+                    type="password"
+                    value={amplitudeApiKey}
+                    onChange={(e) => setAmplitudeApiKey(e.target.value)}
+                    placeholder={
+                      amplitudeHasCredentials
+                        ? `Stored (${amplitudeApiKeyPreview}) — leave blank to keep`
+                        : "Amplitude project API key"
+                    }
+                    className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-brand-lime"
+                  />
+                </div>
+
+                {/* Secret Key */}
+                <div>
+                  <label className="mb-1 block text-[11px] text-neutral-500">
+                    Secret Key
+                  </label>
+                  <input
+                    type="password"
+                    value={amplitudeSecretKey}
+                    onChange={(e) => setAmplitudeSecretKey(e.target.value)}
+                    placeholder={
+                      amplitudeHasCredentials
+                        ? "Stored — leave blank to keep"
+                        : "Amplitude project secret key"
+                    }
+                    className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-brand-lime"
+                  />
+                  <p className="mt-1 text-[10px] text-neutral-600">
+                    Settings → Projects → API Keys in Amplitude. Stored server-side; never sent back to the browser.
+                  </p>
+                </div>
+
+                {/* Saved charts */}
+                <div className="rounded-lg border border-neutral-800 bg-neutral-950/50 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-[11px] font-medium text-neutral-400">
+                      Saved charts ({amplitudeCharts.length})
+                    </p>
+                    <button
+                      onClick={() =>
+                        setAmplitudeCharts((rows) => [
+                          ...rows,
+                          { chart_id: "", title: "" },
+                        ])
+                      }
+                      className="text-[11px] text-brand-lime hover:underline"
+                    >
+                      + Add chart
+                    </button>
+                  </div>
+                  <p className="mb-3 text-[10px] text-neutral-500">
+                    Paste the chart ID from the URL — for{" "}
+                    <code className="text-neutral-400">
+                      app.amplitude.com/analytics/leafe/chart/wdgzgtg/edit/...
+                    </code>{" "}
+                    use <code className="text-neutral-400">wdgzgtg</code>.
+                  </p>
+                  {amplitudeCharts.length === 0 && (
+                    <p className="text-[10px] text-neutral-600">
+                      No charts yet. Add one to surface it on the dashboard.
+                    </p>
+                  )}
+                  <div className="space-y-2">
+                    {amplitudeCharts.map((row, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={row.chart_id}
+                          onChange={(e) =>
+                            setAmplitudeCharts((rows) =>
+                              rows.map((r, idx) =>
+                                idx === i ? { ...r, chart_id: e.target.value } : r
+                              )
+                            )
+                          }
+                          placeholder="chart id (e.g. wdgzgtg)"
+                          className="w-32 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-[11px] outline-none focus:border-brand-lime"
+                        />
+                        <input
+                          type="text"
+                          value={row.title}
+                          onChange={(e) =>
+                            setAmplitudeCharts((rows) =>
+                              rows.map((r, idx) =>
+                                idx === i ? { ...r, title: e.target.value } : r
+                              )
+                            )
+                          }
+                          placeholder="display title (optional)"
+                          className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-[11px] outline-none focus:border-brand-lime"
+                        />
+                        <button
+                          onClick={() =>
+                            setAmplitudeCharts((rows) =>
+                              rows.filter((_, idx) => idx !== i)
+                            )
+                          }
+                          className="text-[11px] text-neutral-500 hover:text-red-400"
+                          aria-label="Remove chart"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Save */}
+            <div className="flex items-center justify-end gap-3 border-t border-neutral-800 pt-4">
+              {amplitudeSaved && (
+                <span className="text-xs font-medium text-green-400">Saved</span>
+              )}
+              <button
+                onClick={handleSaveAmplitude}
+                disabled={
+                  amplitudeSaving ||
+                  (amplitudeEnabled &&
+                    !amplitudeHasCredentials &&
+                    (!amplitudeApiKey.trim() || !amplitudeSecretKey.trim()))
+                }
+                className="rounded-lg bg-brand-lime px-5 py-2 text-xs font-semibold text-black transition hover:bg-brand-lime/90 disabled:opacity-50"
+              >
+                {amplitudeSaving ? "Saving..." : "Save"}
               </button>
             </div>
           </div>
