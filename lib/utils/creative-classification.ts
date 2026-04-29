@@ -128,6 +128,7 @@ function getConversionValue(row: Partial<MetaDailyRow>, keyAction?: string): num
     case "adds_to_cart": return row.adds_to_cart || 0
     case "checkouts_initiated": return row.checkouts_initiated || 0
     case "registrations_completed": return row.registrations_completed || 0
+    case "trials_started": return row.trials_started || 0
     case "app_installs": return row.app_installs || 0
     case "mobile_app_registrations": return row.mobile_app_registrations || 0
     case "purchases":

@@ -5,7 +5,7 @@ import { requireAuth, safeError } from "@/lib/auth/authorize"
 const VALID_METRICS = [
   "spend", "impressions", "reach", "unique_link_clicks",
   "landing_page_views", "adds_to_cart", "registrations_completed",
-  "checkouts_initiated", "purchases", "purchase_value",
+  "trials_started", "checkouts_initiated", "purchases", "purchase_value",
   "app_installs", "mobile_app_registrations",
   "video_plays", "video_3s_views",
   "cpa", "roas", "ctr", "cpm",

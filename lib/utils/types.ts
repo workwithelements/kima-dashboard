@@ -19,6 +19,7 @@ export type MetaDailyRow = {
   landing_page_views: number
   adds_to_cart: number
   registrations_completed: number
+  trials_started: number
   checkouts_initiated: number
   purchases: number
   purchase_value: number
@@ -42,6 +43,7 @@ export type AggregatedMetrics = {
   landingPageViews: number
   addsToCart: number
   registrationsCompleted: number
+  trialsStarted: number
   checkoutsInitiated: number
   purchases: number
   revenue: number
@@ -134,6 +136,7 @@ export const BASE_METRIC_FIELDS = [
   { value: "landing_page_views", label: "Landing Page Views" },
   { value: "adds_to_cart", label: "Adds to Cart" },
   { value: "registrations_completed", label: "Registrations Completed" },
+  { value: "trials_started", label: "Trials Started" },
   { value: "checkouts_initiated", label: "Checkouts Initiated" },
   { value: "purchases", label: "Purchases" },
   { value: "purchase_value", label: "Purchase Value (Revenue)" },

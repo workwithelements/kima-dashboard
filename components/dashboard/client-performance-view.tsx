@@ -18,7 +18,15 @@ import {
   calculateMetaAttribution,
 } from "@/lib/utils/aggregate"
 import { fmtCurrency, fmtNumber, fmtPercent, fmtDelta } from "@/lib/utils/format"
-import { calculateFunnelStep, calculateNetNewReach, FUNNEL_STEP_DEFS, type FunnelStepKey } from "@/lib/utils/funnel-steps"
+import {
+  calculateFunnelStep,
+  calculateNetNewReach,
+  FUNNEL_STEP_DEFS,
+  AMPLITUDE_STEP_PREFIX,
+  isAmplitudeStep,
+  amplitudeChartId,
+  type FunnelStepKey,
+} from "@/lib/utils/funnel-steps"
 import {
   SYNTHESISED_DEFAULT_ID,
   pickActiveView,
@@ -174,6 +182,7 @@ function mergeMetrics(a: AggregatedMetrics, b: AggregatedMetrics): AggregatedMet
     landingPageViews: a.landingPageViews + b.landingPageViews,
     addsToCart: a.addsToCart + b.addsToCart,
     registrationsCompleted: a.registrationsCompleted + b.registrationsCompleted,
+    trialsStarted: a.trialsStarted + b.trialsStarted,
     checkoutsInitiated: a.checkoutsInitiated + b.checkoutsInitiated,
     purchases: a.purchases + b.purchases,
     revenue: a.revenue + b.revenue,
@@ -700,24 +709,138 @@ export default function ClientPerformanceView({
     }))
   }, [filteredRows, filteredGaRows, platform, allDates])
 
-  // Build funnel chart series from configured steps (Meta only)
-  const funnelChartSeries: FunnelSeriesDef[] = useMemo(
-    () =>
-      isMeta
-        ? funnelSteps
-            .map((key, i) => {
-              const def = FUNNEL_STEP_DEFS[key]
-              if (!def) return null
-              return { key, label: def.label, color: getFunnelColor(i) }
-            })
-            .filter(Boolean) as FunnelSeriesDef[]
-        : [],
-    [funnelSteps, platform]
+  /* ── Amplitude funnel steps ── */
+  // For each `amplitude:CHART_ID` step, fetch the chart's daily values from
+  // the proxy route and merge into `funnelSeries` rows by date. The labels
+  // and titles for the rendered bars come from the saved-charts list on the
+  // client record.
+  const amplitudeStepKeys = useMemo(
+    () => funnelSteps.filter(isAmplitudeStep),
+    [funnelSteps]
   )
-  const funnelSeries = useMemo(
-    () => (isMeta ? dailyFunnelSeries(filteredRows, funnelSteps) : []),
-    [filteredRows, funnelSteps, platform]
-  )
+  const [amplitudeChartTitles, setAmplitudeChartTitles] = useState<
+    Record<string, string>
+  >({})
+  const [amplitudeData, setAmplitudeData] = useState<
+    Record<string, Record<string, number>>
+  >({})
+
+  // Load chart titles once per client.
+  useEffect(() => {
+    if (amplitudeStepKeys.length === 0) return
+    let cancelled = false
+    fetch(`/api/clients/${client.id}/amplitude`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data || !Array.isArray(data.charts)) return
+        const titles: Record<string, string> = {}
+        for (const c of data.charts as Array<{
+          chart_id: string
+          title: string | null
+        }>) {
+          titles[c.chart_id] = c.title?.trim() || `Amplitude: ${c.chart_id}`
+        }
+        setAmplitudeChartTitles(titles)
+      })
+      .catch(() => {
+        /* ignore */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [client.id, amplitudeStepKeys.length])
+
+  // Fetch each Amplitude chart's normalised series; sum across series per day.
+  useEffect(() => {
+    if (amplitudeStepKeys.length === 0) {
+      setAmplitudeData({})
+      return
+    }
+    let cancelled = false
+    Promise.all(
+      amplitudeStepKeys.map(async (key) => {
+        const id = amplitudeChartId(key)
+        try {
+          const res = await fetch(
+            `/api/clients/${client.id}/amplitude/chart/${id}`
+          )
+          if (!res.ok) return [key, {} as Record<string, number>] as const
+          const payload = (await res.json()) as {
+            xValues?: string[]
+            points?: Array<Record<string, number | string>>
+          }
+          const byDate: Record<string, number> = {}
+          for (const point of payload.points ?? []) {
+            const date = String(point.x)
+            let total = 0
+            for (const [k, v] of Object.entries(point)) {
+              if (k === "x") continue
+              if (typeof v === "number") total += v
+            }
+            byDate[date] = (byDate[date] || 0) + total
+          }
+          return [key, byDate] as const
+        } catch {
+          return [key, {} as Record<string, number>] as const
+        }
+      })
+    ).then((entries) => {
+      if (cancelled) return
+      const next: Record<string, Record<string, number>> = {}
+      for (const [key, data] of entries) next[key] = data
+      setAmplitudeData(next)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [client.id, amplitudeStepKeys.join(","), from, to])
+
+  // Build funnel chart series from configured steps (Meta only). Includes
+  // amplitude-prefixed steps with synthesised labels.
+  const funnelChartSeries: FunnelSeriesDef[] = useMemo(() => {
+    if (!isMeta) return []
+    return funnelSteps
+      .map((key, i) => {
+        if (isAmplitudeStep(key)) {
+          const id = amplitudeChartId(key)
+          return {
+            key,
+            label: amplitudeChartTitles[id] || `Amplitude: ${id}`,
+            color: getFunnelColor(i),
+          }
+        }
+        const def = FUNNEL_STEP_DEFS[key]
+        if (!def) return null
+        return { key, label: def.label, color: getFunnelColor(i) }
+      })
+      .filter(Boolean) as FunnelSeriesDef[]
+  }, [funnelSteps, platform, amplitudeChartTitles])
+
+  const funnelSeries = useMemo(() => {
+    if (!isMeta) return []
+    const metaKeys = funnelSteps.filter((k) => !isAmplitudeStep(k))
+    const base = dailyFunnelSeries(filteredRows, metaKeys)
+    if (amplitudeStepKeys.length === 0) return base
+
+    // Union of dates across Meta rows and Amplitude responses, so the chart
+    // doesn't drop days that only have Amplitude data.
+    const dateSet = new Set<string>(base.map((r) => r.date as string))
+    for (const key of amplitudeStepKeys) {
+      for (const d of Object.keys(amplitudeData[key] ?? {})) dateSet.add(d)
+    }
+    const dates = Array.from(dateSet).sort()
+    const baseByDate = new Map(base.map((r) => [r.date as string, r]))
+    return dates.map((date) => {
+      const row: Record<string, number | string> = {
+        date,
+        ...(baseByDate.get(date) ?? {}),
+      }
+      for (const key of amplitudeStepKeys) {
+        row[key] = amplitudeData[key]?.[date] ?? 0
+      }
+      return row
+    })
+  }, [filteredRows, funnelSteps, platform, amplitudeStepKeys, amplitudeData])
 
   // Daily spend lookup (keyed by date) for CPA line on funnel bar chart
   const spendByDate = useMemo(() => {
@@ -1450,17 +1573,55 @@ export default function ClientPerformanceView({
           </div>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
             {funnelSteps.map((stepKey, stepIdx) => {
+              const resolvedCpaStep = activeCpaStep || keyAction || funnelSteps[funnelSteps.length - 1]
+              const isActive = stepKey === resolvedCpaStep
+
+              // Amplitude-backed step — count comes from the merged daily series,
+              // rate is N/A (flat line; no funnel relationship to neighbours),
+              // cost-per uses total Meta spend over the date range.
+              if (isAmplitudeStep(stepKey)) {
+                const id = amplitudeChartId(stepKey)
+                const label = amplitudeChartTitles[id] || `Amplitude: ${id}`
+                const dailyCounts = amplitudeData[stepKey] ?? {}
+                const count = Object.values(dailyCounts).reduce((a, b) => a + b, 0)
+                const costPer = count > 0 ? metrics.spend / count : null
+                return [
+                  <button
+                    key={`${stepKey}-count`}
+                    onClick={() => setActiveCpaStep(stepKey)}
+                    className={`rounded-xl text-left transition ${isActive ? "ring-1 ring-brand-lime/40" : "ring-1 ring-transparent hover:ring-neutral-700"}`}
+                  >
+                    <MetricCard label={label} value={fmtNumber(count)} delta={null} />
+                  </button>,
+                  <MetricCard key={`${stepKey}-rate`} label="—" value="—" delta={null} />,
+                  <button
+                    key={`${stepKey}-cost`}
+                    onClick={() => setActiveCpaStep(stepKey)}
+                    className={`rounded-xl text-left transition ${isActive ? "ring-1 ring-brand-lime/40" : "ring-1 ring-transparent hover:ring-neutral-700"}`}
+                  >
+                    <MetricCard
+                      label={`Cost per ${label}`}
+                      value={costPer !== null ? fmtCurrency(costPer, currency) : "—"}
+                      delta={null}
+                      invertDelta
+                    />
+                  </button>,
+                ]
+              }
+
               const def = FUNNEL_STEP_DEFS[stepKey]
               if (!def) return null
-              // Use previous funnel step as denominator (if available)
-              const prevStepField = stepIdx > 0
-                ? FUNNEL_STEP_DEFS[funnelSteps[stepIdx - 1]]?.field
-                : undefined
+              // Use previous Meta funnel step as denominator (if available).
+              // Amplitude predecessors are skipped so the rate stays meaningful.
+              let prevStepField: keyof AggregatedMetrics | undefined
+              for (let p = stepIdx - 1; p >= 0; p--) {
+                if (isAmplitudeStep(funnelSteps[p])) continue
+                prevStepField = FUNNEL_STEP_DEFS[funnelSteps[p]]?.field
+                break
+              }
               const vals = calculateFunnelStep(stepKey, metrics, prevStepField)
               const compVals = hasComp ? calculateFunnelStep(stepKey, compMetrics, prevStepField) : null
               const rateDecimals = def.rateDecimals ?? 1
-              const resolvedCpaStep = activeCpaStep || keyAction || funnelSteps[funnelSteps.length - 1]
-              const isActive = stepKey === resolvedCpaStep
               return [
                 <button
                   key={`${stepKey}-count`}
@@ -1880,7 +2041,10 @@ export default function ClientPerformanceView({
       {/* CPA Chart (Meta only, when funnel steps exist) */}
       {showFunnel && (() => {
         const cpaStepKey = activeCpaStep || keyAction || funnelSteps[funnelSteps.length - 1]
-        const cpaStepLabel = FUNNEL_STEP_DEFS[cpaStepKey]?.label || "Action"
+        const cpaStepLabel = isAmplitudeStep(cpaStepKey)
+          ? amplitudeChartTitles[amplitudeChartId(cpaStepKey)] ||
+            `Amplitude: ${amplitudeChartId(cpaStepKey)}`
+          : FUNNEL_STEP_DEFS[cpaStepKey]?.label || "Action"
         return (
           <Card>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -1890,8 +2054,12 @@ export default function ClientPerformanceView({
               {funnelSteps.length > 1 && (
                 <div className="flex flex-wrap gap-1">
                   {funnelSteps.map((step) => {
-                    const def = FUNNEL_STEP_DEFS[step]
-                    if (!def) return null
+                    const isAmp = isAmplitudeStep(step)
+                    const label = isAmp
+                      ? amplitudeChartTitles[amplitudeChartId(step)] ||
+                        `Amplitude: ${amplitudeChartId(step)}`
+                      : FUNNEL_STEP_DEFS[step]?.label
+                    if (!label) return null
                     const active = step === cpaStepKey
                     return (
                       <button
@@ -1903,7 +2071,7 @@ export default function ClientPerformanceView({
                             : "border-neutral-700 bg-neutral-900 text-neutral-400 hover:border-neutral-600 hover:text-white"
                         }`}
                       >
-                        {def.label}
+                        {label}
                       </button>
                     )
                   })}

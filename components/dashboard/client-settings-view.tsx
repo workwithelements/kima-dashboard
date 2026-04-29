@@ -25,6 +25,7 @@ const ALERT_METRIC_OPTIONS = [
   { value: "purchase_value", label: "Revenue" },
   { value: "adds_to_cart", label: "Add to Carts" },
   { value: "checkouts_initiated", label: "Checkouts" },
+  { value: "trials_started", label: "Trials Started" },
   { value: "cpa", label: "CPA" },
   { value: "roas", label: "ROAS" },
   { value: "ctr", label: "CTR" },
@@ -1094,6 +1095,7 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
                 <option value="adds_to_cart">Add to Carts</option>
                 <option value="checkouts_initiated">Checkouts Initiated</option>
                 <option value="registrations_completed">Registrations</option>
+                <option value="trials_started">Trials Started</option>
                 <option value="app_installs">App Installs</option>
                 <option value="purchases">Purchases</option>
               </select>
