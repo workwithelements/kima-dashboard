@@ -1,33 +1,29 @@
 /**
- * Server-side fetcher for Amplitude's Dashboard REST API.
+ * Server-side fetcher for Amplitude's Dashboard REST API event segmentation
+ * endpoint. Pulls daily counts for a named event so we can render them as a
+ * funnel-step bar/card.
  *
- * Docs: https://amplitude.com/docs/apis/analytics/dashboard-rest
+ * Docs: https://amplitude.com/docs/apis/analytics/dashboard-rest#segmentation
  *
- * Each Amplitude project has its own API key + secret key (Basic auth).
- * Credentials are stored per client on the `clients` row.
+ * Each Amplitude project has its own API key + secret key (Basic auth), stored
+ * per-client on the `clients` row. Tracked event names live in
+ * `amplitude_events`.
  */
 
 import { createServiceClient } from "@/lib/supabase/server"
 
-const AMPLITUDE_BASE = "https://amplitude.com/api/3"
+const AMPLITUDE_BASE = "https://amplitude.com/api/2"
 /** EU residency endpoint — flip per-client if you ever onboard EU projects. */
-// const AMPLITUDE_BASE_EU = "https://analytics.eu.amplitude.com/api/3"
+// const AMPLITUDE_BASE_EU = "https://analytics.eu.amplitude.com/api/2"
 
-export type AmplitudeChartResponse = {
+export type AmplitudeSegmentationResponse = {
   data: {
-    series?: number[][][]
+    series?: number[][]
     seriesLabels?: Array<string | number>
     seriesMeta?: unknown[]
     xValues?: string[]
     [key: string]: unknown
   }
-}
-
-/** Normalised shape consumed by the recharts widget. */
-export type AmplitudeSeriesPoint = {
-  x: string
-  /** Each saved series gets its own key (`series_0`, `series_1`, …). */
-  [seriesKey: string]: string | number
 }
 
 export type AmplitudeFetchError = {
@@ -39,11 +35,12 @@ export type AmplitudeFetchError = {
   message?: string
 }
 
-export type NormalisedAmplitudeChart = {
-  chartId: string
-  xValues: string[]
-  seriesLabels: string[]
-  points: AmplitudeSeriesPoint[]
+/** Daily counts keyed by ISO date (YYYY-MM-DD). */
+export type AmplitudeDailySeries = {
+  eventName: string
+  byDate: Record<string, number>
+  /** Total over the queried window. */
+  total: number
   /** Present when the upstream call failed or returned no usable data. */
   error?: AmplitudeFetchError
 }
@@ -80,16 +77,29 @@ function statusCode(status: number): string {
   return `HTTP ${status}`
 }
 
+/** Amplitude expects YYYYMMDD with no separators. */
+function toAmplitudeDate(iso: string): string {
+  return iso.replace(/-/g, "").slice(0, 8)
+}
+
+export type AmplitudeSegmentationOptions = {
+  /** "totals" = total event count (default), "uniques" = unique users */
+  metric?: "totals" | "uniques"
+}
+
 /**
- * Low-level chart query. Returns either the raw Amplitude payload or a
- * structured error so the caller can surface a useful message.
+ * Low-level call to /events/segmentation. Returns either the raw payload or
+ * a structured error so callers can surface a useful message.
  */
-export async function fetchAmplitudeChart(
+export async function fetchAmplitudeSegmentation(
   clientId: string,
-  chartId: string,
-  credsOverride?: AmplitudeCredentials
+  eventName: string,
+  from: string,
+  to: string,
+  credsOverride?: AmplitudeCredentials,
+  options: AmplitudeSegmentationOptions = {}
 ): Promise<
-  | { ok: true; data: AmplitudeChartResponse }
+  | { ok: true; data: AmplitudeSegmentationResponse }
   | { ok: false; error: AmplitudeFetchError }
 > {
   const creds = credsOverride ?? (await getCredentials(clientId))
@@ -106,15 +116,22 @@ export async function fetchAmplitudeChart(
 
   const auth = Buffer.from(`${creds.apiKey}:${creds.secretKey}`).toString("base64")
 
+  const url = new URL(`${AMPLITUDE_BASE}/events/segmentation`)
+  url.searchParams.set("e", JSON.stringify({ event_type: eventName }))
+  url.searchParams.set("start", toAmplitudeDate(from))
+  url.searchParams.set("end", toAmplitudeDate(to))
+  url.searchParams.set("m", options.metric ?? "totals")
+  url.searchParams.set("i", "1") // 1 = daily bucket
+
   let res: Response
   try {
-    res = await fetch(`${AMPLITUDE_BASE}/chart/${chartId}/query`, {
+    res = await fetch(url.toString(), {
       headers: {
         Authorization: `Basic ${auth}`,
         Accept: "application/json",
       },
-      // Amplitude rate-limits to 360 queries/hour per project, so cache briefly
-      // when this is hit from multiple components in the same render.
+      // Amplitude rate-limits to 360 queries/hour per project; cache briefly
+      // when the same series is requested by multiple components.
       next: { revalidate: 60 },
     })
   } catch (err) {
@@ -130,7 +147,12 @@ export async function fetchAmplitudeChart(
 
   if (!res.ok) {
     const body = await res.text().catch(() => "")
-    console.error("[Amplitude] Chart query failed", chartId, res.status, body)
+    console.error(
+      "[Amplitude] Segmentation query failed",
+      eventName,
+      res.status,
+      body
+    )
     return {
       ok: false,
       error: {
@@ -141,85 +163,71 @@ export async function fetchAmplitudeChart(
     }
   }
 
-  const data = (await res.json()) as AmplitudeChartResponse
+  const data = (await res.json()) as AmplitudeSegmentationResponse
   return { ok: true, data }
 }
 
 /**
- * Flatten an Amplitude chart payload into the per-x-value rows recharts expects.
- *
- * Amplitude returns `series` as `[ [ [y, ...], [y, ...] ], ... ]` where the
- * outer index is the series and the inner pairs/values map onto `xValues`.
- * We collapse that to one object per x value with one key per series.
+ * Collapse an event-segmentation payload into per-day counts. The shape is
+ * documented as `series: [[ <int>, <int>, ... ]]` aligned with `xValues`,
+ * but we defensively unwrap [ts, value] pairs in case Amplitude returns the
+ * realtime variant.
  */
-export function normaliseChart(
-  chartId: string,
-  payload: AmplitudeChartResponse | null
-): NormalisedAmplitudeChart {
+export function collapseSegmentation(
+  eventName: string,
+  payload: AmplitudeSegmentationResponse | null
+): AmplitudeDailySeries {
   if (!payload?.data) {
     return {
-      chartId,
-      xValues: [],
-      seriesLabels: [],
-      points: [],
-      error: { status: 0, code: "Empty response", message: "Amplitude returned no data block." },
+      eventName,
+      byDate: {},
+      total: 0,
+      error: {
+        status: 0,
+        code: "Empty response",
+        message: "Amplitude returned no data block.",
+      },
     }
   }
 
   const xValues = payload.data.xValues ?? []
   const rawSeries = payload.data.series ?? []
-  const seriesLabels = (payload.data.seriesLabels ?? []).map(String)
+  const firstSeries = rawSeries[0] ?? []
 
-  const points: AmplitudeSeriesPoint[] = xValues.map((x, xIdx) => {
-    const row: AmplitudeSeriesPoint = { x }
-    rawSeries.forEach((series, sIdx) => {
-      const point = series[xIdx]
-      // Amplitude wraps each y as [value] or [timestamp, value] depending on chart type
-      const value = Array.isArray(point) ? point[point.length - 1] : point
-      row[`series_${sIdx}`] = typeof value === "number" ? value : 0
-    })
-    return row
+  const byDate: Record<string, number> = {}
+  let total = 0
+  xValues.forEach((x, idx) => {
+    const point = firstSeries[idx] as number | number[] | undefined
+    const value = Array.isArray(point) ? point[point.length - 1] : point
+    const num = typeof value === "number" && Number.isFinite(value) ? value : 0
+    byDate[String(x)] = num
+    total += num
   })
 
-  const result: NormalisedAmplitudeChart = {
-    chartId,
-    xValues,
-    seriesLabels: seriesLabels.length > 0
-      ? seriesLabels
-      : rawSeries.map((_, i) => `Series ${i + 1}`),
-    points,
-  }
-
-  if (xValues.length === 0 || rawSeries.length === 0) {
+  const result: AmplitudeDailySeries = { eventName, byDate, total }
+  if (xValues.length === 0) {
     result.error = {
       status: 200,
-      code: "No series in response",
-      message:
-        "Amplitude returned 200 but no xValues/series. The chart may be a Funnel/" +
-        "Pathfinder type whose payload shape this normaliser doesn't support yet.",
+      code: "No data points",
+      message: `Amplitude returned 200 but no xValues for "${eventName}". Verify the event name matches your taxonomy exactly (case + spaces).`,
     }
   }
-
   return result
 }
 
 /**
- * Convenience: fetch and normalise in one call. Always returns a result; when
- * the upstream call failed, `points` is empty and `error` is populated.
+ * Convenience: fetch + collapse in one call. Always returns a result; when
+ * the upstream call failed, `byDate` is empty and `error` is populated.
  */
-export async function fetchNormalisedAmplitudeChart(
+export async function fetchAmplitudeEventDaily(
   clientId: string,
-  chartId: string
-): Promise<NormalisedAmplitudeChart> {
-  const raw = await fetchAmplitudeChart(clientId, chartId)
+  eventName: string,
+  from: string,
+  to: string
+): Promise<AmplitudeDailySeries> {
+  const raw = await fetchAmplitudeSegmentation(clientId, eventName, from, to)
   if (!raw.ok) {
-    return {
-      chartId,
-      xValues: [],
-      seriesLabels: [],
-      points: [],
-      error: raw.error,
-    }
+    return { eventName, byDate: {}, total: 0, error: raw.error }
   }
-  return normaliseChart(chartId, raw.data)
+  return collapseSegmentation(eventName, raw.data)
 }

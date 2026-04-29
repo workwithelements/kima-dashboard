@@ -6,7 +6,7 @@ import {
   FUNNEL_STEP_ORDER,
   AMPLITUDE_STEP_PREFIX,
   isAmplitudeStep,
-  amplitudeChartId,
+  amplitudeEventId,
   type FunnelStepKey,
 } from "@/lib/utils/funnel-steps"
 import {
@@ -69,23 +69,30 @@ export default function ScorecardConfigModal({
     initialViews.map(makeDraft)
   )
   const [deletedIds, setDeletedIds] = useState<string[]>([])
-  const [amplitudeCharts, setAmplitudeCharts] = useState<
-    Array<{ chart_id: string; title: string | null }>
+  const [amplitudeEvents, setAmplitudeEvents] = useState<
+    Array<{ id: string; event_name: string; display_title: string | null }>
   >([])
 
-  // Pull saved Amplitude charts so they show up as available funnel steps.
+  // Pull tracked Amplitude events so they show up as available funnel steps.
   useEffect(() => {
     let cancelled = false
     fetch(`/api/clients/${clientId}/amplitude`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data) return
-        setAmplitudeCharts(
-          Array.isArray(data.charts)
-            ? data.charts.map((c: { chart_id: string; title: string | null }) => ({
-                chart_id: c.chart_id,
-                title: c.title,
-              }))
+        setAmplitudeEvents(
+          Array.isArray(data.events)
+            ? data.events.map(
+                (e: {
+                  id: string
+                  event_name: string
+                  display_title: string | null
+                }) => ({
+                  id: e.id,
+                  event_name: e.event_name,
+                  display_title: e.display_title,
+                })
+              )
             : []
         )
       })
@@ -99,11 +106,12 @@ export default function ScorecardConfigModal({
 
   const amplitudeStepLabel = useCallback(
     (key: string) => {
-      const id = amplitudeChartId(key)
-      const found = amplitudeCharts.find((c) => c.chart_id === id)
-      return found?.title?.trim() || `Amplitude: ${id}`
+      const id = amplitudeEventId(key)
+      const found = amplitudeEvents.find((e) => e.id === id)
+      if (!found) return `Amplitude: ${id}`
+      return found.display_title?.trim() || found.event_name
     },
-    [amplitudeCharts]
+    [amplitudeEvents]
   )
   const [activeId, setActiveId] = useState<string>(() => {
     const requested = initialActiveViewId
@@ -346,9 +354,9 @@ export default function ScorecardConfigModal({
     ? FUNNEL_STEP_ORDER.filter((k) => !active.funnel_steps.includes(k))
     : []
   const availableAmplitude = active
-    ? amplitudeCharts.filter(
-        (c) =>
-          !active.funnel_steps.includes(`${AMPLITUDE_STEP_PREFIX}${c.chart_id}`)
+    ? amplitudeEvents.filter(
+        (e) =>
+          !active.funnel_steps.includes(`${AMPLITUDE_STEP_PREFIX}${e.id}`)
       )
     : []
 
@@ -573,8 +581,9 @@ export default function ScorecardConfigModal({
                       Amplitude ({availableAmplitude.length})
                     </h3>
                     <div className="space-y-1">
-                      {availableAmplitude.map((c) => {
-                        const key = `${AMPLITUDE_STEP_PREFIX}${c.chart_id}`
+                      {availableAmplitude.map((e) => {
+                        const key = `${AMPLITUDE_STEP_PREFIX}${e.id}`
+                        const label = e.display_title?.trim() || e.event_name
                         return (
                           <button
                             key={key}
@@ -585,11 +594,9 @@ export default function ScorecardConfigModal({
                               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                             </svg>
                             <div className="flex-1">
-                              <span className="text-sm">
-                                {c.title?.trim() || `Amplitude: ${c.chart_id}`}
-                              </span>
+                              <span className="text-sm">{label}</span>
                               <span className="ml-2 text-[10px] text-neutral-500">
-                                Count only · no rate
+                                Event · count only
                               </span>
                             </div>
                           </button>

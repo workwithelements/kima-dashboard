@@ -24,7 +24,7 @@ import {
   FUNNEL_STEP_DEFS,
   AMPLITUDE_STEP_PREFIX,
   isAmplitudeStep,
-  amplitudeChartId,
+  amplitudeEventId,
   type FunnelStepKey,
 } from "@/lib/utils/funnel-steps"
 import {
@@ -710,10 +710,9 @@ export default function ClientPerformanceView({
   }, [filteredRows, filteredGaRows, platform, allDates])
 
   /* ── Amplitude funnel steps ── */
-  // For each `amplitude:CHART_ID` step, fetch the chart's daily values from
-  // the proxy route and merge into `funnelSeries` rows by date. The labels
-  // and titles for the rendered bars come from the saved-charts list on the
-  // client record.
+  // For each `amplitude:EVENT_ROW_ID` step, hit the proxy with the dashboard's
+  // current date range. The proxy resolves the row id to an event name and
+  // calls Amplitude's /events/segmentation endpoint, returning daily counts.
   const amplitudeStepKeys = useMemo(
     () => funnelSteps.filter(isAmplitudeStep),
     [funnelSteps]
@@ -728,20 +727,21 @@ export default function ClientPerformanceView({
     Record<string, { code: string; status: number; message?: string }>
   >({})
 
-  // Load chart titles once per client.
+  // Load event display titles once per client (keyed by event row id).
   useEffect(() => {
     if (amplitudeStepKeys.length === 0) return
     let cancelled = false
     fetch(`/api/clients/${client.id}/amplitude`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (cancelled || !data || !Array.isArray(data.charts)) return
+        if (cancelled || !data || !Array.isArray(data.events)) return
         const titles: Record<string, string> = {}
-        for (const c of data.charts as Array<{
-          chart_id: string
-          title: string | null
+        for (const e of data.events as Array<{
+          id: string
+          event_name: string
+          display_title: string | null
         }>) {
-          titles[c.chart_id] = c.title?.trim() || `Amplitude: ${c.chart_id}`
+          titles[e.id] = e.display_title?.trim() || e.event_name
         }
         setAmplitudeChartTitles(titles)
       })
@@ -753,7 +753,7 @@ export default function ClientPerformanceView({
     }
   }, [client.id, amplitudeStepKeys.length])
 
-  // Fetch each Amplitude chart's normalised series; sum across series per day.
+  // Fetch each Amplitude event's daily counts over the dashboard window.
   useEffect(() => {
     if (amplitudeStepKeys.length === 0) {
       setAmplitudeData({})
@@ -761,17 +761,17 @@ export default function ClientPerformanceView({
       return
     }
     let cancelled = false
-    type ChartFetch = {
+    type EventFetch = {
       key: string
       byDate: Record<string, number>
       error?: { code: string; status: number; message?: string }
     }
-    Promise.all<ChartFetch>(
+    Promise.all<EventFetch>(
       amplitudeStepKeys.map(async (key) => {
-        const id = amplitudeChartId(key)
+        const id = amplitudeEventId(key)
         try {
           const res = await fetch(
-            `/api/clients/${client.id}/amplitude/chart/${id}`
+            `/api/clients/${client.id}/amplitude/event/${id}?from=${from}&to=${to}`
           )
           if (!res.ok) {
             return {
@@ -785,21 +785,10 @@ export default function ClientPerformanceView({
             }
           }
           const payload = (await res.json()) as {
-            xValues?: string[]
-            points?: Array<Record<string, number | string>>
+            by_date?: Record<string, number>
             error?: { code: string; status: number; message?: string }
           }
-          const byDate: Record<string, number> = {}
-          for (const point of payload.points ?? []) {
-            const date = String(point.x)
-            let total = 0
-            for (const [k, v] of Object.entries(point)) {
-              if (k === "x") continue
-              if (typeof v === "number") total += v
-            }
-            byDate[date] = (byDate[date] || 0) + total
-          }
-          return { key, byDate, error: payload.error }
+          return { key, byDate: payload.by_date ?? {}, error: payload.error }
         } catch (e) {
           return {
             key,
@@ -838,7 +827,7 @@ export default function ClientPerformanceView({
     return funnelSteps
       .map((key, i) => {
         if (isAmplitudeStep(key)) {
-          const id = amplitudeChartId(key)
+          const id = amplitudeEventId(key)
           return {
             key,
             label: amplitudeChartTitles[id] || `Amplitude: ${id}`,
@@ -1617,7 +1606,7 @@ export default function ClientPerformanceView({
               <ul className="mt-1 space-y-0.5 text-[10px] text-amber-300/80">
                 {Object.entries(amplitudeErrors).map(([key, err]) => (
                   <li key={key} className="break-all">
-                    <span className="font-mono">{amplitudeChartId(key)}</span>:{" "}
+                    <span className="font-mono">{amplitudeEventId(key)}</span>:{" "}
                     {err.code}
                     {err.status ? ` (${err.status})` : ""}
                     {err.message ? ` — ${err.message.slice(0, 200)}` : ""}
@@ -1635,7 +1624,7 @@ export default function ClientPerformanceView({
               // rate is N/A (flat line; no funnel relationship to neighbours),
               // cost-per uses total Meta spend over the date range.
               if (isAmplitudeStep(stepKey)) {
-                const id = amplitudeChartId(stepKey)
+                const id = amplitudeEventId(stepKey)
                 const label = amplitudeChartTitles[id] || `Amplitude: ${id}`
                 const dailyCounts = amplitudeData[stepKey] ?? {}
                 const count = Object.values(dailyCounts).reduce((a, b) => a + b, 0)
@@ -2097,8 +2086,8 @@ export default function ClientPerformanceView({
       {showFunnel && (() => {
         const cpaStepKey = activeCpaStep || keyAction || funnelSteps[funnelSteps.length - 1]
         const cpaStepLabel = isAmplitudeStep(cpaStepKey)
-          ? amplitudeChartTitles[amplitudeChartId(cpaStepKey)] ||
-            `Amplitude: ${amplitudeChartId(cpaStepKey)}`
+          ? amplitudeChartTitles[amplitudeEventId(cpaStepKey)] ||
+            `Amplitude: ${amplitudeEventId(cpaStepKey)}`
           : FUNNEL_STEP_DEFS[cpaStepKey]?.label || "Action"
         return (
           <Card>
@@ -2111,8 +2100,8 @@ export default function ClientPerformanceView({
                   {funnelSteps.map((step) => {
                     const isAmp = isAmplitudeStep(step)
                     const label = isAmp
-                      ? amplitudeChartTitles[amplitudeChartId(step)] ||
-                        `Amplitude: ${amplitudeChartId(step)}`
+                      ? amplitudeChartTitles[amplitudeEventId(step)] ||
+                        `Amplitude: ${amplitudeEventId(step)}`
                       : FUNNEL_STEP_DEFS[step]?.label
                     if (!label) return null
                     const active = step === cpaStepKey

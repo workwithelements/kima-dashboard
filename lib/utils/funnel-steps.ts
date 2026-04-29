@@ -135,9 +135,10 @@ export type FunnelStepKey = (typeof FUNNEL_STEP_ORDER)[number]
 
 /**
  * Amplitude-backed funnel steps are persisted with this prefix to distinguish
- * them from `meta_daily_performance` columns. The suffix is the saved chart's
- * Amplitude chart ID (e.g. `amplitude:wdgzgtg`). Their values come from the
- * Amplitude Dashboard REST API at render-time, not from the DB rows.
+ * them from `meta_daily_performance` columns. The suffix is the row id of the
+ * tracked event in `amplitude_events` (e.g. `amplitude:f3a8…`). Counts come
+ * from Amplitude's `/events/segmentation` API at render-time using the
+ * dashboard's date range, not from the DB rows.
  */
 export const AMPLITUDE_STEP_PREFIX = "amplitude:"
 
@@ -145,7 +146,8 @@ export function isAmplitudeStep(key: string): boolean {
   return key.startsWith(AMPLITUDE_STEP_PREFIX)
 }
 
-export function amplitudeChartId(key: string): string {
+/** The suffix of an amplitude funnel-step key — a row id from `amplitude_events`. */
+export function amplitudeEventId(key: string): string {
   return key.slice(AMPLITUDE_STEP_PREFIX.length)
 }
 
