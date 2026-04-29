@@ -5,7 +5,7 @@
 
 import { unstable_cache } from "next/cache"
 import { createServiceClient } from "@/lib/supabase/server"
-import type { MetaDailyRow, MetaDemographicsRow, MetaPlacementsRow, GoogleAdsDailyRow, Client, AdPlatform, DailySpendRow } from "@/lib/utils/types"
+import type { MetaDailyRow, MetaDemographicsRow, MetaPlacementsRow, GoogleAdsDailyRow, Client, AdPlatform, DailySpendRow, AdditionalSpendEntry } from "@/lib/utils/types"
 import type { NamingConfig } from "@/lib/utils/ad-name-parser"
 
 /** Cache TTL for dashboard data fetches (5 minutes) */
@@ -680,6 +680,116 @@ export function consolidateDailySpend(
   for (const r of rows) {
     byDate[r.date] = (byDate[r.date] || 0) + r.spend
   }
+  return Object.entries(byDate)
+    .map(([date, spend]) => ({ date, spend: Math.round(spend * 100) / 100 }))
+    .sort((a, b) => a.date.localeCompare(b.date))
+}
+
+/**
+ * Fetch manually-entered additional spend entries that overlap [from, to].
+ * Returned amounts are entry totals (not daily). Use expandAdditionalSpendDaily
+ * to convert to a per-day series.
+ */
+export async function fetchAdditionalSpend(
+  clientId: string,
+  from: string,
+  to: string
+): Promise<AdditionalSpendEntry[]> {
+  const supabase = createServiceClient()
+  const { data, error } = await supabase
+    .from("client_additional_spend")
+    .select("id, client_id, start_date, end_date, amount, note")
+    .eq("client_id", clientId)
+    .lte("start_date", to)
+    .gte("end_date", from)
+    .order("start_date", { ascending: false })
+
+  if (error) {
+    console.warn("[fetchAdditionalSpend]", error.message)
+    return []
+  }
+  return (data || []).map((r) => ({
+    id: r.id,
+    client_id: r.client_id,
+    start_date: r.start_date,
+    end_date: r.end_date,
+    amount: Number(r.amount) || 0,
+    note: r.note ?? null,
+  }))
+}
+
+/** All entries for a client (no date filter). Used by the admin manager UI. */
+export async function fetchAllAdditionalSpend(
+  clientId: string
+): Promise<AdditionalSpendEntry[]> {
+  const supabase = createServiceClient()
+  const { data, error } = await supabase
+    .from("client_additional_spend")
+    .select("id, client_id, start_date, end_date, amount, note")
+    .eq("client_id", clientId)
+    .order("start_date", { ascending: false })
+
+  if (error) {
+    console.warn("[fetchAllAdditionalSpend]", error.message)
+    return []
+  }
+  return (data || []).map((r) => ({
+    id: r.id,
+    client_id: r.client_id,
+    start_date: r.start_date,
+    end_date: r.end_date,
+    amount: Number(r.amount) || 0,
+    note: r.note ?? null,
+  }))
+}
+
+/**
+ * Expand entries to a daily { date, spend }[] series, distributing each
+ * entry's total amount evenly across the days in its range that fall inside
+ * [from, to]. Returns one row per date that has nonzero contribution, sorted
+ * ascending. Entries outside the window contribute nothing.
+ */
+export function expandAdditionalSpendDaily(
+  entries: AdditionalSpendEntry[],
+  from: string,
+  to: string
+): { date: string; spend: number }[] {
+  const byDate: Record<string, number> = {}
+  const fromMs = Date.parse(from + "T00:00:00Z")
+  const toMs = Date.parse(to + "T00:00:00Z")
+  if (Number.isNaN(fromMs) || Number.isNaN(toMs) || toMs < fromMs) return []
+
+  for (const e of entries) {
+    const sMs = Date.parse(e.start_date + "T00:00:00Z")
+    const eMs = Date.parse(e.end_date + "T00:00:00Z")
+    if (Number.isNaN(sMs) || Number.isNaN(eMs) || eMs < sMs) continue
+    const totalDays = Math.round((eMs - sMs) / 86_400_000) + 1
+    if (totalDays <= 0) continue
+    const perDay = e.amount / totalDays
+
+    const startMs = Math.max(sMs, fromMs)
+    const endMs = Math.min(eMs, toMs)
+    if (endMs < startMs) continue
+
+    for (let d = startMs; d <= endMs; d += 86_400_000) {
+      const date = new Date(d).toISOString().slice(0, 10)
+      byDate[date] = (byDate[date] || 0) + perDay
+    }
+  }
+
+  return Object.entries(byDate)
+    .map(([date, spend]) => ({ date, spend: Math.round(spend * 100) / 100 }))
+    .sort((a, b) => a.date.localeCompare(b.date))
+}
+
+/** Sum two daily { date, spend }[] series by date. Returns sorted ascending. */
+export function mergeDailySpend(
+  a: { date: string; spend: number }[],
+  b: { date: string; spend: number }[]
+): { date: string; spend: number }[] {
+  const byDate: Record<string, number> = {}
+  for (const r of a) byDate[r.date] = (byDate[r.date] || 0) + r.spend
+  for (const r of b) byDate[r.date] = (byDate[r.date] || 0) + r.spend
   return Object.entries(byDate)
     .map(([date, spend]) => ({ date, spend: Math.round(spend * 100) / 100 }))
     .sort((a, b) => a.date.localeCompare(b.date))

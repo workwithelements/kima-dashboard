@@ -5,6 +5,7 @@ import Logo from "@/components/ui/logo"
 import ClientPerformanceView from "@/components/dashboard/client-performance-view"
 import ReachAnalysisView from "@/components/dashboard/reach-analysis-view"
 import PacingCard from "@/components/dashboard/pacing-card"
+import AdditionalSpendList from "@/components/dashboard/additional-spend-list"
 import { Card, MetricCard } from "@/components/ui/card"
 import MetricChart from "@/components/charts/metric-chart"
 import DateRangePicker from "@/components/ui/date-range-picker"
@@ -15,7 +16,7 @@ import type { DatePreset } from "@/lib/utils/dates"
 import type { ComparisonType, Client } from "@/lib/utils/types"
 import type { Annotation } from "@/components/ui/annotations-bar"
 import type { NamingConfig } from "@/lib/utils/ad-name-parser"
-import type { MetaDemographicsRow, MetaPlacementsRow, MetaDailyRow, GoogleAdsDailyRow, ShopifyDailyOrdersRow, ShopifyAttributionRow } from "@/lib/utils/types"
+import type { MetaDemographicsRow, MetaPlacementsRow, MetaDailyRow, GoogleAdsDailyRow, ShopifyDailyOrdersRow, ShopifyAttributionRow, AdditionalSpendEntry } from "@/lib/utils/types"
 import type { FunnelView } from "@/lib/utils/funnel-views"
 
 type Tab = "performance" | "pacing" | "reach"
@@ -65,6 +66,7 @@ type Props = {
   pacing: PacingResult
   monthlyBudget: number | null
   currentMonthDailySpend: { date: string; spend: number }[]
+  additionalSpendEntries: AdditionalSpendEntry[]
 }
 
 export default function ClientDashboard(props: Props) {
@@ -248,6 +250,11 @@ export default function ClientDashboard(props: Props) {
                 subValue={`of ${props.pacing.daysElapsed} elapsed`}
               />
             </div>
+
+            <AdditionalSpendList
+              entries={props.additionalSpendEntries}
+              currency={currency}
+            />
 
             {!props.monthlyBudget && (
               <Card className="border-amber-900/50 bg-amber-950/20">

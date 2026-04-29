@@ -5,9 +5,16 @@ import { notFound } from "next/navigation"
 import { monthStart, today, daysAgo } from "@/lib/utils/dates"
 import { dailySpendSeries } from "@/lib/utils/aggregate"
 import { calculatePacing } from "@/lib/utils/pacing"
-import { fetchConsolidatedSpend, consolidateDailySpend } from "@/lib/data/fetch-client-data"
+import {
+  fetchConsolidatedSpend,
+  consolidateDailySpend,
+  fetchAllAdditionalSpend,
+  expandAdditionalSpendDaily,
+  mergeDailySpend,
+} from "@/lib/data/fetch-client-data"
 import BudgetEditor from "@/components/dashboard/budget-editor"
 import PacingCard from "@/components/dashboard/pacing-card"
+import AdditionalSpendManager from "@/components/dashboard/additional-spend-manager"
 import { Card, MetricCard } from "@/components/ui/card"
 import MetricChart from "@/components/charts/metric-chart"
 import { fmtCurrency, fmtNumber } from "@/lib/utils/format"
@@ -34,15 +41,19 @@ export default async function ClientPacingPage({ params }: Props) {
   const year = now.getFullYear()
   const month = now.getMonth() + 1
 
-  // Fetch consolidated spend (Meta + Google Ads) for current month + historical
-  const [currentMonthSpend, historicalSpend] = await Promise.all([
+  // Fetch consolidated spend (Meta + Google Ads) plus manual additional-spend
+  // entries for current month + historical, all in parallel.
+  const [currentMonthSpend, historicalSpend, additionalEntries] = await Promise.all([
     fetchConsolidatedSpend(params.id, monthStart(), today()),
     fetchConsolidatedSpend(params.id, daysAgo(90), today()),
+    fetchAllAdditionalSpend(params.id),
     new Promise((r) => setTimeout(r, 1000)),
   ])
 
-  const dailySpend = consolidateDailySpend(currentMonthSpend)
-  const historicalDaily = consolidateDailySpend(historicalSpend)
+  const additionalCurrentDaily = expandAdditionalSpendDaily(additionalEntries, monthStart(), today())
+  const additionalHistoricalDaily = expandAdditionalSpendDaily(additionalEntries, daysAgo(90), today())
+  const dailySpend = mergeDailySpend(consolidateDailySpend(currentMonthSpend), additionalCurrentDaily)
+  const historicalDaily = mergeDailySpend(consolidateDailySpend(historicalSpend), additionalHistoricalDaily)
 
   // Calculate pacing
   const pacing = calculatePacing(
@@ -68,15 +79,27 @@ export default async function ClientPacingPage({ params }: Props) {
       {/* Budget editor */}
       <BudgetEditor clientId={params.id} currentBudget={monthlyBudget} currency={currency} />
 
+      {/* Additional (off-platform) spend */}
+      <AdditionalSpendManager
+        clientId={params.id}
+        currency={currency}
+        initialEntries={additionalEntries}
+      />
+
       {/* Pacing card */}
       <PacingCard pacing={pacing} currency={currency} />
 
       {/* Charts */}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <h2 className="mb-4 text-sm font-medium text-neutral-400">
-            Daily Spend (This Month)
-          </h2>
+          <div className="mb-4">
+            <h2 className="text-sm font-medium text-neutral-400">
+              Daily Spend (This Month)
+            </h2>
+            {additionalEntries.length > 0 && (
+              <p className="text-[11px] text-neutral-500">includes additional spend</p>
+            )}
+          </div>
           <MetricChart
             data={spendChartData}
             label="Spend"
@@ -88,9 +111,14 @@ export default async function ClientPacingPage({ params }: Props) {
         </Card>
 
         <Card>
-          <h2 className="mb-4 text-sm font-medium text-neutral-400">
-            Cumulative Spend
-          </h2>
+          <div className="mb-4">
+            <h2 className="text-sm font-medium text-neutral-400">
+              Cumulative Spend
+            </h2>
+            {additionalEntries.length > 0 && (
+              <p className="text-[11px] text-neutral-500">includes additional spend</p>
+            )}
+          </div>
           <MetricChart
             data={cumulativeSeries}
             label="Cumulative Spend"

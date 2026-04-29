@@ -171,6 +171,16 @@ export type DailySpendRow = {
   platform: AdPlatform
 }
 
+/** Manually-entered off-platform spend (TV, sponsorships, retainers, etc.). */
+export type AdditionalSpendEntry = {
+  id: string
+  client_id: string
+  start_date: string
+  end_date: string
+  amount: number
+  note: string | null
+}
+
 /** Determine which ad platforms a client has configured */
 export function getClientPlatforms(client: Client): AdPlatform[] {
   const platforms: AdPlatform[] = []
