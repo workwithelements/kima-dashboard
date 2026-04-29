@@ -30,14 +30,25 @@ export type AmplitudeSeriesPoint = {
   [seriesKey: string]: string | number
 }
 
+export type AmplitudeFetchError = {
+  /** HTTP status from Amplitude (0 when the call never reached the server) */
+  status: number
+  /** Short human-readable label, e.g. "Unauthorized", "No credentials" */
+  code: string
+  /** Optional verbose message from the upstream response or thrown error */
+  message?: string
+}
+
 export type NormalisedAmplitudeChart = {
   chartId: string
   xValues: string[]
   seriesLabels: string[]
   points: AmplitudeSeriesPoint[]
+  /** Present when the upstream call failed or returned no usable data. */
+  error?: AmplitudeFetchError
 }
 
-type AmplitudeCredentials = {
+export type AmplitudeCredentials = {
   apiKey: string
   secretKey: string
 }
@@ -59,41 +70,79 @@ async function getCredentials(clientId: string): Promise<AmplitudeCredentials | 
   }
 }
 
+function statusCode(status: number): string {
+  if (status === 401) return "Unauthorized"
+  if (status === 403) return "Forbidden"
+  if (status === 404) return "Not found"
+  if (status === 429) return "Rate limited"
+  if (status >= 500) return "Amplitude server error"
+  if (status === 0) return "Network error"
+  return `HTTP ${status}`
+}
+
 /**
- * Query a saved chart by its ID.
- *
- * Returns the raw Amplitude response — call `normaliseChart` to flatten it
- * into a recharts-friendly array.
+ * Low-level chart query. Returns either the raw Amplitude payload or a
+ * structured error so the caller can surface a useful message.
  */
 export async function fetchAmplitudeChart(
   clientId: string,
-  chartId: string
-): Promise<AmplitudeChartResponse | null> {
-  const creds = await getCredentials(clientId)
-  if (!creds) return null
-
-  const auth = Buffer.from(`${creds.apiKey}:${creds.secretKey}`).toString("base64")
-  const res = await fetch(`${AMPLITUDE_BASE}/chart/${chartId}/query`, {
-    headers: {
-      Authorization: `Basic ${auth}`,
-      Accept: "application/json",
-    },
-    // Amplitude rate-limits to 360 queries/hour per project, so cache briefly
-    // when this is hit from multiple components in the same render.
-    next: { revalidate: 60 },
-  })
-
-  if (!res.ok) {
-    console.error(
-      "[Amplitude] Chart query failed",
-      chartId,
-      res.status,
-      await res.text().catch(() => "")
-    )
-    return null
+  chartId: string,
+  credsOverride?: AmplitudeCredentials
+): Promise<
+  | { ok: true; data: AmplitudeChartResponse }
+  | { ok: false; error: AmplitudeFetchError }
+> {
+  const creds = credsOverride ?? (await getCredentials(clientId))
+  if (!creds) {
+    return {
+      ok: false,
+      error: {
+        status: 0,
+        code: "No credentials",
+        message: "Amplitude API key + secret aren't configured for this client.",
+      },
+    }
   }
 
-  return (await res.json()) as AmplitudeChartResponse
+  const auth = Buffer.from(`${creds.apiKey}:${creds.secretKey}`).toString("base64")
+
+  let res: Response
+  try {
+    res = await fetch(`${AMPLITUDE_BASE}/chart/${chartId}/query`, {
+      headers: {
+        Authorization: `Basic ${auth}`,
+        Accept: "application/json",
+      },
+      // Amplitude rate-limits to 360 queries/hour per project, so cache briefly
+      // when this is hit from multiple components in the same render.
+      next: { revalidate: 60 },
+    })
+  } catch (err) {
+    return {
+      ok: false,
+      error: {
+        status: 0,
+        code: "Network error",
+        message: err instanceof Error ? err.message : String(err),
+      },
+    }
+  }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "")
+    console.error("[Amplitude] Chart query failed", chartId, res.status, body)
+    return {
+      ok: false,
+      error: {
+        status: res.status,
+        code: statusCode(res.status),
+        message: body.slice(0, 500) || undefined,
+      },
+    }
+  }
+
+  const data = (await res.json()) as AmplitudeChartResponse
+  return { ok: true, data }
 }
 
 /**
@@ -108,7 +157,13 @@ export function normaliseChart(
   payload: AmplitudeChartResponse | null
 ): NormalisedAmplitudeChart {
   if (!payload?.data) {
-    return { chartId, xValues: [], seriesLabels: [], points: [] }
+    return {
+      chartId,
+      xValues: [],
+      seriesLabels: [],
+      points: [],
+      error: { status: 0, code: "Empty response", message: "Amplitude returned no data block." },
+    }
   }
 
   const xValues = payload.data.xValues ?? []
@@ -121,13 +176,12 @@ export function normaliseChart(
       const point = series[xIdx]
       // Amplitude wraps each y as [value] or [timestamp, value] depending on chart type
       const value = Array.isArray(point) ? point[point.length - 1] : point
-      const key = seriesLabels[sIdx] ? `series_${sIdx}` : `series_${sIdx}`
-      row[key] = typeof value === "number" ? value : 0
+      row[`series_${sIdx}`] = typeof value === "number" ? value : 0
     })
     return row
   })
 
-  return {
+  const result: NormalisedAmplitudeChart = {
     chartId,
     xValues,
     seriesLabels: seriesLabels.length > 0
@@ -135,15 +189,37 @@ export function normaliseChart(
       : rawSeries.map((_, i) => `Series ${i + 1}`),
     points,
   }
+
+  if (xValues.length === 0 || rawSeries.length === 0) {
+    result.error = {
+      status: 200,
+      code: "No series in response",
+      message:
+        "Amplitude returned 200 but no xValues/series. The chart may be a Funnel/" +
+        "Pathfinder type whose payload shape this normaliser doesn't support yet.",
+    }
+  }
+
+  return result
 }
 
 /**
- * Convenience: fetch and normalise in one call.
+ * Convenience: fetch and normalise in one call. Always returns a result; when
+ * the upstream call failed, `points` is empty and `error` is populated.
  */
 export async function fetchNormalisedAmplitudeChart(
   clientId: string,
   chartId: string
 ): Promise<NormalisedAmplitudeChart> {
   const raw = await fetchAmplitudeChart(clientId, chartId)
-  return normaliseChart(chartId, raw)
+  if (!raw.ok) {
+    return {
+      chartId,
+      xValues: [],
+      seriesLabels: [],
+      points: [],
+      error: raw.error,
+    }
+  }
+  return normaliseChart(chartId, raw.data)
 }
