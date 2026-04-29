@@ -57,6 +57,7 @@ export default async function DashboardPage({ searchParams }: Props) {
       landing_page_views: number
       adds_to_cart: number
       registrations_completed: number
+      trials_started: number
       checkouts_initiated: number
       purchases: number
       purchase_value: number
@@ -65,7 +66,7 @@ export default async function DashboardPage({ searchParams }: Props) {
       supabase
         .from("meta_daily_performance")
         .select(
-          "date, client_id, spend, impressions, reach, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, checkouts_initiated, purchases, purchase_value, app_installs"
+          "date, client_id, spend, impressions, reach, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, trials_started, checkouts_initiated, purchases, purchase_value, app_installs"
         )
         .gte("date", fromDate)
         .lte("date", toDate)
@@ -84,7 +85,7 @@ export default async function DashboardPage({ searchParams }: Props) {
           supabase
             .from("meta_daily_performance")
             .select(
-              "client_id, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, checkouts_initiated, purchases, app_installs"
+              "client_id, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, trials_started, checkouts_initiated, purchases, app_installs"
             )
             .gte("date", compRange.from)
             .lte("date", compRange.to)
@@ -120,6 +121,7 @@ export default async function DashboardPage({ searchParams }: Props) {
     "landing_page_views",
     "adds_to_cart",
     "registrations_completed",
+    "trials_started",
     "checkouts_initiated",
     "purchases",
     "app_installs",

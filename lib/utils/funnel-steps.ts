@@ -89,6 +89,15 @@ export const FUNNEL_STEP_DEFS: Record<string, FunnelStepDef> = {
     rateMultiplier: 100,
     costLabel: "Cost per Reg.",
   },
+  trials_started: {
+    field: "trialsStarted",
+    label: "Trials Started",
+    shortLabel: "Trial",
+    rateLabel: "Trial Rate",
+    rateDenominator: "landingPageViews",
+    rateMultiplier: 100,
+    costLabel: "Cost per Trial",
+  },
   app_installs: {
     field: "appInstalls",
     label: "App Installs",
@@ -117,11 +126,28 @@ export const FUNNEL_STEP_ORDER = [
   "checkouts_initiated",
   "purchases",
   "registrations_completed",
+  "trials_started",
   "app_installs",
   "mobile_app_registrations",
 ] as const
 
 export type FunnelStepKey = (typeof FUNNEL_STEP_ORDER)[number]
+
+/**
+ * Amplitude-backed funnel steps are persisted with this prefix to distinguish
+ * them from `meta_daily_performance` columns. The suffix is the saved chart's
+ * Amplitude chart ID (e.g. `amplitude:wdgzgtg`). Their values come from the
+ * Amplitude Dashboard REST API at render-time, not from the DB rows.
+ */
+export const AMPLITUDE_STEP_PREFIX = "amplitude:"
+
+export function isAmplitudeStep(key: string): boolean {
+  return key.startsWith(AMPLITUDE_STEP_PREFIX)
+}
+
+export function amplitudeChartId(key: string): string {
+  return key.slice(AMPLITUDE_STEP_PREFIX.length)
+}
 
 /**
  * Calculate the count, rate, and cost-per values for a funnel step.

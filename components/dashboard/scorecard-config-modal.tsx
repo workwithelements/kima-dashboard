@@ -4,6 +4,9 @@ import { useState, useEffect, useCallback, useMemo } from "react"
 import {
   FUNNEL_STEP_DEFS,
   FUNNEL_STEP_ORDER,
+  AMPLITUDE_STEP_PREFIX,
+  isAmplitudeStep,
+  amplitudeChartId,
   type FunnelStepKey,
 } from "@/lib/utils/funnel-steps"
 import {
@@ -66,6 +69,42 @@ export default function ScorecardConfigModal({
     initialViews.map(makeDraft)
   )
   const [deletedIds, setDeletedIds] = useState<string[]>([])
+  const [amplitudeCharts, setAmplitudeCharts] = useState<
+    Array<{ chart_id: string; title: string | null }>
+  >([])
+
+  // Pull saved Amplitude charts so they show up as available funnel steps.
+  useEffect(() => {
+    let cancelled = false
+    fetch(`/api/clients/${clientId}/amplitude`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return
+        setAmplitudeCharts(
+          Array.isArray(data.charts)
+            ? data.charts.map((c: { chart_id: string; title: string | null }) => ({
+                chart_id: c.chart_id,
+                title: c.title,
+              }))
+            : []
+        )
+      })
+      .catch(() => {
+        /* ignore — amplitude is optional */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [clientId])
+
+  const amplitudeStepLabel = useCallback(
+    (key: string) => {
+      const id = amplitudeChartId(key)
+      const found = amplitudeCharts.find((c) => c.chart_id === id)
+      return found?.title?.trim() || `Amplitude: ${id}`
+    },
+    [amplitudeCharts]
+  )
   const [activeId, setActiveId] = useState<string>(() => {
     const requested = initialActiveViewId
       ? drafts.find((d) => d.id === initialActiveViewId)?.id
@@ -306,6 +345,12 @@ export default function ScorecardConfigModal({
   const available = active
     ? FUNNEL_STEP_ORDER.filter((k) => !active.funnel_steps.includes(k))
     : []
+  const availableAmplitude = active
+    ? amplitudeCharts.filter(
+        (c) =>
+          !active.funnel_steps.includes(`${AMPLITUDE_STEP_PREFIX}${c.chart_id}`)
+      )
+    : []
 
   const linkedSet = new Set(active?.linked_campaign_ids ?? [])
   const deactivatedLinked = active
@@ -425,8 +470,13 @@ export default function ScorecardConfigModal({
                   ) : (
                     <div className="space-y-1">
                       {active.funnel_steps.map((key, i) => {
-                        const def = FUNNEL_STEP_DEFS[key]
-                        if (!def) return null
+                        const isAmp = isAmplitudeStep(key)
+                        const def = isAmp ? null : FUNNEL_STEP_DEFS[key]
+                        if (!isAmp && !def) return null
+                        const label = isAmp ? amplitudeStepLabel(key) : def!.label
+                        const subLabel = isAmp
+                          ? "Amplitude · count only"
+                          : `${def!.rateLabel} · ${def!.costLabel}`
                         const isKey = active.key_action === key
                         return (
                           <div
@@ -454,9 +504,9 @@ export default function ScorecardConfigModal({
                               </button>
                             </div>
                             <div className="flex-1">
-                              <span className="text-sm">{def.label}</span>
+                              <span className="text-sm">{label}</span>
                               <span className="ml-2 text-[10px] text-neutral-500">
-                                {def.rateLabel} · {def.costLabel}
+                                {subLabel}
                               </span>
                             </div>
                             <button
@@ -508,6 +558,38 @@ export default function ScorecardConfigModal({
                               <span className="text-sm">{def.label}</span>
                               <span className="ml-2 text-[10px] text-neutral-500">
                                 {def.rateLabel} · {def.costLabel}
+                              </span>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {availableAmplitude.length > 0 && (
+                  <div className="mb-4">
+                    <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-neutral-500">
+                      Amplitude ({availableAmplitude.length})
+                    </h3>
+                    <div className="space-y-1">
+                      {availableAmplitude.map((c) => {
+                        const key = `${AMPLITUDE_STEP_PREFIX}${c.chart_id}`
+                        return (
+                          <button
+                            key={key}
+                            onClick={() => addStep(key)}
+                            className="flex w-full items-center gap-2 rounded-lg border border-neutral-800 px-3 py-2 text-left transition hover:border-neutral-700 hover:bg-neutral-800/50"
+                          >
+                            <svg className="h-3.5 w-3.5 text-brand-lime" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                            </svg>
+                            <div className="flex-1">
+                              <span className="text-sm">
+                                {c.title?.trim() || `Amplitude: ${c.chart_id}`}
+                              </span>
+                              <span className="ml-2 text-[10px] text-neutral-500">
+                                Count only · no rate
                               </span>
                             </div>
                           </button>

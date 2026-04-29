@@ -11,7 +11,7 @@ import {
   Legend,
 } from "recharts"
 import { fmtDateShort, fmtPercent } from "@/lib/utils/format"
-import { FUNNEL_STEP_DEFS } from "@/lib/utils/funnel-steps"
+import { FUNNEL_STEP_DEFS, isAmplitudeStep } from "@/lib/utils/funnel-steps"
 import type { FunnelSeriesDef } from "./funnel-chart"
 
 type Props = {
@@ -37,10 +37,13 @@ const RATE_COLORS = [
 
 export default function ConversionRatesChart({
   data,
-  series,
+  series: rawSeries,
   dailyTotals,
   funnelStepKeys,
 }: Props) {
+  // Amplitude-backed steps don't have a sensible rate denominator within the
+  // Meta funnel, so they don't appear on the rates chart at all.
+  const series = rawSeries.filter((s) => !isAmplitudeStep(s.key))
   if (series.length === 0 || data.length === 0) return null
 
   // Build rate data: for each day, compute rate for each funnel step

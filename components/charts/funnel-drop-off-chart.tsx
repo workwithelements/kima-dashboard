@@ -2,7 +2,7 @@
 
 import { useMemo } from "react"
 import type { AggregatedMetrics } from "@/lib/utils/types"
-import { calculateFunnelStep, FUNNEL_STEP_DEFS } from "@/lib/utils/funnel-steps"
+import { calculateFunnelStep, FUNNEL_STEP_DEFS, isAmplitudeStep } from "@/lib/utils/funnel-steps"
 import { fmtNumber } from "@/lib/utils/format"
 import { getFunnelColor } from "./funnel-chart"
 
@@ -27,6 +27,9 @@ export default function FunnelDropOffChart({ metrics, funnelSteps }: Props) {
       { label: "Impressions", count: metrics.impressions, color: "#a3a3a3" },
     ]
     for (let i = 0; i < funnelSteps.length; i++) {
+      // Amplitude-backed steps have no AggregatedMetrics field, so they're
+      // excluded from the funnel-drop-off cascade.
+      if (isAmplitudeStep(funnelSteps[i])) continue
       const def = FUNNEL_STEP_DEFS[funnelSteps[i]]
       if (!def) continue
       const vals = calculateFunnelStep(funnelSteps[i], metrics)

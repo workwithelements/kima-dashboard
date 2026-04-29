@@ -34,7 +34,7 @@ export async function fetchAllRows<T>(
 
 /** Columns available in meta_daily_performance */
 const PERF_COLUMNS =
-  "date, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, spend, impressions, reach, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, checkouts_initiated, purchases, purchase_value, app_installs, mobile_app_registrations, video_plays, video_3s_views, video_p25, video_p50, video_p75, video_p95, video_p100"
+  "date, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, spend, impressions, reach, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, trials_started, checkouts_initiated, purchases, purchase_value, app_installs, mobile_app_registrations, video_plays, video_3s_views, video_p25, video_p50, video_p75, video_p95, video_p100"
 
 export type ClientData = {
   client: Client
