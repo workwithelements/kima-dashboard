@@ -2,15 +2,15 @@ import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient } from "@/lib/supabase/server"
 import { requireAuth, safeError } from "@/lib/auth/authorize"
 
-type AmplitudeChartRow = {
+type AmplitudeEventRow = {
   id: string
-  chart_id: string
-  title: string | null
+  event_name: string
+  display_title: string | null
   position: number
 }
 
 /**
- * GET /api/clients/[clientId]/amplitude — get Amplitude settings + saved charts
+ * GET /api/clients/[clientId]/amplitude — get Amplitude settings + tracked events
  */
 export async function GET(
   _request: NextRequest,
@@ -28,9 +28,9 @@ export async function GET(
 
   if (error) return safeError(error)
 
-  const { data: charts } = await db
-    .from("amplitude_charts")
-    .select("id, chart_id, title, position")
+  const { data: events } = await db
+    .from("amplitude_events")
+    .select("id, event_name, display_title, position")
     .eq("client_id", params.clientId)
     .order("position", { ascending: true })
 
@@ -43,19 +43,19 @@ export async function GET(
     api_key_preview: client.amplitude_api_key
       ? `${client.amplitude_api_key.slice(0, 6)}…`
       : "",
-    charts: (charts ?? []) as AmplitudeChartRow[],
+    events: (events ?? []) as AmplitudeEventRow[],
   })
 }
 
 /**
- * PUT /api/clients/[clientId]/amplitude — update Amplitude settings + chart list
+ * PUT /api/clients/[clientId]/amplitude — update settings + tracked event list
  *
  * Body: {
  *   enabled: boolean,
  *   org?: string,
  *   api_key?: string,         // only update when provided (omit to keep existing)
  *   secret_key?: string,      // only update when provided (omit to keep existing)
- *   charts?: Array<{ chart_id: string; title?: string }>,
+ *   events?: Array<{ event_name: string; display_title?: string }>,
  * }
  */
 export async function PUT(
@@ -66,12 +66,12 @@ export async function PUT(
   if (authError) return authError
 
   const body = await request.json()
-  const { enabled, org, api_key, secret_key, charts } = body as {
+  const { enabled, org, api_key, secret_key, events } = body as {
     enabled: boolean
     org?: string
     api_key?: string
     secret_key?: string
-    charts?: Array<{ chart_id: string; title?: string }>
+    events?: Array<{ event_name: string; display_title?: string }>
   }
 
   const db = createServiceClient()
@@ -99,19 +99,21 @@ export async function PUT(
     if (updateError) return safeError(updateError)
   }
 
-  if (Array.isArray(charts)) {
-    await db.from("amplitude_charts").delete().eq("client_id", params.clientId)
-    const cleaned = charts
-      .map((c, i) => ({
+  // Replace event list when provided. Existing rows are deleted first so the
+  // UI is the source of truth — same pattern as the previous saved-charts list.
+  if (Array.isArray(events)) {
+    await db.from("amplitude_events").delete().eq("client_id", params.clientId)
+    const cleaned = events
+      .map((e, i) => ({
         client_id: params.clientId,
-        chart_id: (c.chart_id || "").trim(),
-        title: c.title?.trim() || null,
+        event_name: (e.event_name || "").trim(),
+        display_title: e.display_title?.trim() || null,
         position: i,
       }))
-      .filter((c) => c.chart_id.length > 0)
+      .filter((e) => e.event_name.length > 0)
     if (cleaned.length > 0) {
       const { error: insertError } = await db
-        .from("amplitude_charts")
+        .from("amplitude_events")
         .insert(cleaned)
       if (insertError) return safeError(insertError)
     }
@@ -123,9 +125,9 @@ export async function PUT(
     .eq("id", params.clientId)
     .single()
 
-  const { data: chartRows } = await db
-    .from("amplitude_charts")
-    .select("id, chart_id, title, position")
+  const { data: eventRows } = await db
+    .from("amplitude_events")
+    .select("id, event_name, display_title, position")
     .eq("client_id", params.clientId)
     .order("position", { ascending: true })
 
@@ -136,6 +138,6 @@ export async function PUT(
     api_key_preview: client?.amplitude_api_key
       ? `${client.amplitude_api_key.slice(0, 6)}…`
       : "",
-    charts: (chartRows ?? []) as AmplitudeChartRow[],
+    events: (eventRows ?? []) as AmplitudeEventRow[],
   })
 }

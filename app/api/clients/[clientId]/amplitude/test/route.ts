@@ -2,22 +2,23 @@ import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient } from "@/lib/supabase/server"
 import { requireAuth, safeError } from "@/lib/auth/authorize"
 import {
-  fetchAmplitudeChart,
+  fetchAmplitudeSegmentation,
+  collapseSegmentation,
   type AmplitudeCredentials,
 } from "@/lib/data/fetch-amplitude-data"
 
 /**
  * POST /api/clients/[clientId]/amplitude/test
  *
- * Hits Amplitude's Dashboard REST API with the client's stored credentials
- * (or credentials supplied in the request body for pre-save validation) and
- * reports the actual HTTP status + body so misconfigured keys/region/charts
- * can be diagnosed without grepping server logs.
+ * Calls /events/segmentation with the client's stored credentials (or
+ * credentials supplied in the request body) over the last 30 days for a
+ * single tracked event. Reports HTTP status, total count, and last few daily
+ * values so the user can see whether the event name actually returns data.
  *
- * Body: { api_key?: string, secret_key?: string, chart_id?: string }
+ * Body: { api_key?: string, secret_key?: string, event_name?: string }
  *   - When api_key/secret_key are present, they override the stored values
  *     (lets the user verify before saving).
- *   - chart_id defaults to the first saved chart on the client.
+ *   - event_name defaults to the first tracked event on the client.
  */
 export async function POST(
   request: NextRequest,
@@ -29,7 +30,7 @@ export async function POST(
   const body = (await request.json().catch(() => ({}))) as {
     api_key?: string
     secret_key?: string
-    chart_id?: string
+    event_name?: string
   }
 
   const db = createServiceClient()
@@ -56,49 +57,66 @@ export async function POST(
   if (!creds) {
     return NextResponse.json({
       ok: false,
-      reason: "No credentials configured. Save your Amplitude API key + secret first, or pass them in the request body.",
+      reason:
+        "No credentials configured. Save your Amplitude API key + secret first, or pass them in the request body.",
     })
   }
 
-  // Resolve chart ID — body overrides; otherwise pick the first saved chart.
-  let chartId = body.chart_id?.trim()
-  if (!chartId) {
-    const { data: charts } = await db
-      .from("amplitude_charts")
-      .select("chart_id")
+  // Resolve event name — body overrides; otherwise pick the first tracked event.
+  let eventName = body.event_name?.trim()
+  if (!eventName) {
+    const { data: rows } = await db
+      .from("amplitude_events")
+      .select("event_name")
       .eq("client_id", params.clientId)
       .order("position", { ascending: true })
       .limit(1)
-    chartId = charts?.[0]?.chart_id
+    eventName = rows?.[0]?.event_name
   }
-  if (!chartId) {
+  if (!eventName) {
     return NextResponse.json({
       ok: false,
-      reason: "No saved charts to test against. Add a chart ID first.",
+      reason: "No tracked events to test against. Add an event name first.",
     })
   }
 
-  const result = await fetchAmplitudeChart(params.clientId, chartId, creds)
+  // Last 30 days window.
+  const today = new Date()
+  const start = new Date(today)
+  start.setUTCDate(today.getUTCDate() - 30)
+  const iso = (d: Date) => d.toISOString().slice(0, 10)
+  const from = iso(start)
+  const to = iso(today)
+
+  const result = await fetchAmplitudeSegmentation(
+    params.clientId,
+    eventName,
+    from,
+    to,
+    creds
+  )
   if (!result.ok) {
     return NextResponse.json({
       ok: false,
-      chart_id: chartId,
+      event_name: eventName,
+      window: { from, to },
       status: result.error.status,
       code: result.error.code,
       reason: result.error.message,
     })
   }
 
-  // Report the shape of the successful response so the user can see whether
-  // the chart returned actual data or just an empty payload.
-  const data = result.data?.data ?? {}
-  const xValues = (data as { xValues?: unknown[] }).xValues ?? []
-  const series = (data as { series?: unknown[] }).series ?? []
+  const collapsed = collapseSegmentation(eventName, result.data)
+  const lastDates = Object.keys(collapsed.byDate).sort().slice(-5)
+  const samplePoints = lastDates.map((d) => ({ date: d, value: collapsed.byDate[d] }))
+
   return NextResponse.json({
     ok: true,
-    chart_id: chartId,
-    x_value_count: xValues.length,
-    series_count: series.length,
-    sample_x: xValues.slice(0, 3),
+    event_name: eventName,
+    window: { from, to },
+    total: collapsed.total,
+    days_with_data: Object.values(collapsed.byDate).filter((v) => v > 0).length,
+    sample_points: samplePoints,
+    warning: collapsed.error?.code,
   })
 }

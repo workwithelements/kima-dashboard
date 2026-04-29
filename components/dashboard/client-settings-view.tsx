@@ -102,8 +102,8 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
   const [amplitudeSecretKey, setAmplitudeSecretKey] = useState("")
   const [amplitudeApiKeyPreview, setAmplitudeApiKeyPreview] = useState("")
   const [amplitudeHasCredentials, setAmplitudeHasCredentials] = useState(false)
-  const [amplitudeCharts, setAmplitudeCharts] = useState<
-    Array<{ chart_id: string; title: string }>
+  const [amplitudeEvents, setAmplitudeEvents] = useState<
+    Array<{ event_name: string; display_title: string }>
   >([])
   const [amplitudeLoading, setAmplitudeLoading] = useState(true)
   const [amplitudeSaving, setAmplitudeSaving] = useState(false)
@@ -113,13 +113,15 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
     | null
     | {
         ok: boolean
-        chart_id?: string
+        event_name?: string
+        window?: { from: string; to: string }
         status?: number
         code?: string
         reason?: string
-        x_value_count?: number
-        series_count?: number
-        sample_x?: string[]
+        total?: number
+        days_with_data?: number
+        sample_points?: Array<{ date: string; value: number }>
+        warning?: string
       }
   >(null)
 
@@ -203,12 +205,14 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
             setAmplitudeOrg(data.org ?? "")
             setAmplitudeHasCredentials(data.has_credentials ?? false)
             setAmplitudeApiKeyPreview(data.api_key_preview ?? "")
-            setAmplitudeCharts(
-              Array.isArray(data.charts)
-                ? data.charts.map((c: { chart_id: string; title: string | null }) => ({
-                    chart_id: c.chart_id,
-                    title: c.title ?? "",
-                  }))
+            setAmplitudeEvents(
+              Array.isArray(data.events)
+                ? data.events.map(
+                    (e: { event_name: string; display_title: string | null }) => ({
+                      event_name: e.event_name,
+                      display_title: e.display_title ?? "",
+                    })
+                  )
                 : []
             )
           }
@@ -449,7 +453,7 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
       const body: Record<string, unknown> = {
         enabled: amplitudeEnabled,
         org: amplitudeOrg,
-        charts: amplitudeCharts.filter((c) => c.chart_id.trim().length > 0),
+        events: amplitudeEvents.filter((e) => e.event_name.trim().length > 0),
       }
       // Only send credential fields when the user typed something — empty
       // strings would clobber stored values via the PUT semantics.
@@ -484,8 +488,8 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
       const body: Record<string, unknown> = {}
       if (amplitudeApiKey.trim()) body.api_key = amplitudeApiKey.trim()
       if (amplitudeSecretKey.trim()) body.secret_key = amplitudeSecretKey.trim()
-      if (amplitudeCharts[0]?.chart_id.trim()) {
-        body.chart_id = amplitudeCharts[0].chart_id.trim()
+      if (amplitudeEvents[0]?.event_name.trim()) {
+        body.event_name = amplitudeEvents[0].event_name.trim()
       }
       const res = await fetch(`/api/clients/${clientId}/amplitude/test`, {
         method: "POST",
@@ -1392,8 +1396,9 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
             Amplitude Integration
           </h2>
           <p className="mt-1 text-[11px] text-neutral-500">
-            Pull saved Amplitude charts (e.g. <code className="text-neutral-400">app.amplitude.com/analytics/leafe/chart/wdgzgtg</code>)
-            straight into the client dashboard. Each Amplitude project has its own API key + secret key.
+            Track Amplitude events as funnel steps on the client dashboard. We
+            query Amplitude&apos;s <code className="text-neutral-400">/events/segmentation</code>{" "}
+            API directly, so values stay aligned with the dashboard date range.
           </p>
         </div>
 
@@ -1408,7 +1413,7 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
               <div>
                 <p className="text-xs font-medium text-neutral-300">Enable Amplitude data</p>
                 <p className="text-[11px] text-neutral-500">
-                  Renders saved Amplitude charts on the client dashboard
+                  Adds tracked Amplitude events as selectable funnel steps
                 </p>
               </div>
               <button
@@ -1483,59 +1488,61 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
                   </p>
                 </div>
 
-                {/* Saved charts */}
+                {/* Tracked events */}
                 <div className="rounded-lg border border-neutral-800 bg-neutral-950/50 p-3">
                   <div className="mb-2 flex items-center justify-between">
                     <p className="text-[11px] font-medium text-neutral-400">
-                      Saved charts ({amplitudeCharts.length})
+                      Tracked events ({amplitudeEvents.length})
                     </p>
                     <button
                       onClick={() =>
-                        setAmplitudeCharts((rows) => [
+                        setAmplitudeEvents((rows) => [
                           ...rows,
-                          { chart_id: "", title: "" },
+                          { event_name: "", display_title: "" },
                         ])
                       }
                       className="text-[11px] text-brand-lime hover:underline"
                     >
-                      + Add chart
+                      + Add event
                     </button>
                   </div>
                   <p className="mb-3 text-[10px] text-neutral-500">
-                    Paste the chart ID from the URL — for{" "}
-                    <code className="text-neutral-400">
-                      app.amplitude.com/analytics/leafe/chart/wdgzgtg/edit/...
-                    </code>{" "}
-                    use <code className="text-neutral-400">wdgzgtg</code>.
+                    Paste the event name exactly as it appears in your Amplitude
+                    taxonomy (case + spaces matter). Each event becomes a
+                    selectable funnel step.
                   </p>
-                  {amplitudeCharts.length === 0 && (
+                  {amplitudeEvents.length === 0 && (
                     <p className="text-[10px] text-neutral-600">
-                      No charts yet. Add one to surface it on the dashboard.
+                      No events yet. Add one to surface it on the dashboard.
                     </p>
                   )}
                   <div className="space-y-2">
-                    {amplitudeCharts.map((row, i) => (
+                    {amplitudeEvents.map((row, i) => (
                       <div key={i} className="flex items-center gap-2">
                         <input
                           type="text"
-                          value={row.chart_id}
+                          value={row.event_name}
                           onChange={(e) =>
-                            setAmplitudeCharts((rows) =>
+                            setAmplitudeEvents((rows) =>
                               rows.map((r, idx) =>
-                                idx === i ? { ...r, chart_id: e.target.value } : r
+                                idx === i
+                                  ? { ...r, event_name: e.target.value }
+                                  : r
                               )
                             )
                           }
-                          placeholder="chart id (e.g. wdgzgtg)"
-                          className="w-32 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-[11px] outline-none focus:border-brand-lime"
+                          placeholder="event name (e.g. Trial Started)"
+                          className="w-48 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-[11px] outline-none focus:border-brand-lime"
                         />
                         <input
                           type="text"
-                          value={row.title}
+                          value={row.display_title}
                           onChange={(e) =>
-                            setAmplitudeCharts((rows) =>
+                            setAmplitudeEvents((rows) =>
                               rows.map((r, idx) =>
-                                idx === i ? { ...r, title: e.target.value } : r
+                                idx === i
+                                  ? { ...r, display_title: e.target.value }
+                                  : r
                               )
                             )
                           }
@@ -1544,12 +1551,12 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
                         />
                         <button
                           onClick={() =>
-                            setAmplitudeCharts((rows) =>
+                            setAmplitudeEvents((rows) =>
                               rows.filter((_, idx) => idx !== i)
                             )
                           }
                           className="text-[11px] text-neutral-500 hover:text-red-400"
-                          aria-label="Remove chart"
+                          aria-label="Remove event"
                         >
                           ✕
                         </button>
@@ -1572,21 +1579,30 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
                 {amplitudeTestResult.ok ? (
                   <>
                     <p className="font-medium">
-                      Connection OK ({amplitudeTestResult.chart_id})
+                      Connection OK ({amplitudeTestResult.event_name})
                     </p>
                     <p className="mt-0.5 text-[10px] text-green-400/80">
-                      {amplitudeTestResult.x_value_count ?? 0} x-values ·{" "}
-                      {amplitudeTestResult.series_count ?? 0} series
-                      {amplitudeTestResult.sample_x &&
-                      amplitudeTestResult.sample_x.length > 0
-                        ? ` · sample: ${amplitudeTestResult.sample_x.join(", ")}`
-                        : ""}
+                      {amplitudeTestResult.window?.from} →{" "}
+                      {amplitudeTestResult.window?.to} · total{" "}
+                      {amplitudeTestResult.total ?? 0} ·{" "}
+                      {amplitudeTestResult.days_with_data ?? 0} day
+                      {amplitudeTestResult.days_with_data === 1 ? "" : "s"} with
+                      data
                     </p>
-                    {amplitudeTestResult.x_value_count === 0 && (
+                    {amplitudeTestResult.sample_points &&
+                      amplitudeTestResult.sample_points.length > 0 && (
+                        <p className="mt-0.5 break-all font-mono text-[10px] text-green-400/80">
+                          last:{" "}
+                          {amplitudeTestResult.sample_points
+                            .map((p) => `${p.date}=${p.value}`)
+                            .join(", ")}
+                        </p>
+                      )}
+                    {(amplitudeTestResult.total ?? 0) === 0 && (
                       <p className="mt-1 text-[10px] text-amber-300">
-                        Auth worked, but the chart returned no data points. The
-                        chart may be a Funnel/Pathfinder type whose payload shape
-                        differs from event-segmentation charts.
+                        Auth worked, but the event returned 0 over the last 30
+                        days. Check the spelling/casing of the event name
+                        against your Amplitude taxonomy.
                       </p>
                     )}
                   </>
