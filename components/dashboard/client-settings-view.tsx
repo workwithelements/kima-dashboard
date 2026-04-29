@@ -108,6 +108,20 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
   const [amplitudeLoading, setAmplitudeLoading] = useState(true)
   const [amplitudeSaving, setAmplitudeSaving] = useState(false)
   const [amplitudeSaved, setAmplitudeSaved] = useState(false)
+  const [amplitudeTesting, setAmplitudeTesting] = useState(false)
+  const [amplitudeTestResult, setAmplitudeTestResult] = useState<
+    | null
+    | {
+        ok: boolean
+        chart_id?: string
+        status?: number
+        code?: string
+        reason?: string
+        x_value_count?: number
+        series_count?: number
+        sample_x?: string[]
+      }
+  >(null)
 
   /* ── Creative tags state ── */
   const [tags, setTags] = useState<Tag[]>([])
@@ -458,6 +472,35 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
       }
     } catch { /* ignore */ }
     setAmplitudeSaving(false)
+  }
+
+  /* ── Test Amplitude connection ── */
+  async function handleTestAmplitude() {
+    setAmplitudeTesting(true)
+    setAmplitudeTestResult(null)
+    try {
+      // If the user typed new credentials but hasn't saved yet, send them
+      // along so they can validate before persisting.
+      const body: Record<string, unknown> = {}
+      if (amplitudeApiKey.trim()) body.api_key = amplitudeApiKey.trim()
+      if (amplitudeSecretKey.trim()) body.secret_key = amplitudeSecretKey.trim()
+      if (amplitudeCharts[0]?.chart_id.trim()) {
+        body.chart_id = amplitudeCharts[0].chart_id.trim()
+      }
+      const res = await fetch(`/api/clients/${clientId}/amplitude/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      setAmplitudeTestResult(data)
+    } catch (e) {
+      setAmplitudeTestResult({
+        ok: false,
+        reason: e instanceof Error ? e.message : "Test request failed",
+      })
+    }
+    setAmplitudeTesting(false)
   }
 
   /* ── Save Marketing Impact config ── */
@@ -1517,10 +1560,71 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
               </>
             )}
 
-            {/* Save */}
+            {/* Test connection result */}
+            {amplitudeEnabled && amplitudeTestResult && (
+              <div
+                className={`rounded-lg border px-3 py-2 text-[11px] ${
+                  amplitudeTestResult.ok
+                    ? "border-green-900/50 bg-green-950/30 text-green-300"
+                    : "border-red-900/50 bg-red-950/30 text-red-300"
+                }`}
+              >
+                {amplitudeTestResult.ok ? (
+                  <>
+                    <p className="font-medium">
+                      Connection OK ({amplitudeTestResult.chart_id})
+                    </p>
+                    <p className="mt-0.5 text-[10px] text-green-400/80">
+                      {amplitudeTestResult.x_value_count ?? 0} x-values ·{" "}
+                      {amplitudeTestResult.series_count ?? 0} series
+                      {amplitudeTestResult.sample_x &&
+                      amplitudeTestResult.sample_x.length > 0
+                        ? ` · sample: ${amplitudeTestResult.sample_x.join(", ")}`
+                        : ""}
+                    </p>
+                    {amplitudeTestResult.x_value_count === 0 && (
+                      <p className="mt-1 text-[10px] text-amber-300">
+                        Auth worked, but the chart returned no data points. The
+                        chart may be a Funnel/Pathfinder type whose payload shape
+                        differs from event-segmentation charts.
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p className="font-medium">
+                      {amplitudeTestResult.code ?? "Failed"}
+                      {amplitudeTestResult.status
+                        ? ` (HTTP ${amplitudeTestResult.status})`
+                        : ""}
+                    </p>
+                    {amplitudeTestResult.reason && (
+                      <p className="mt-0.5 break-all text-[10px] text-red-400/80">
+                        {amplitudeTestResult.reason}
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Save + Test */}
             <div className="flex items-center justify-end gap-3 border-t border-neutral-800 pt-4">
               {amplitudeSaved && (
                 <span className="text-xs font-medium text-green-400">Saved</span>
+              )}
+              {amplitudeEnabled && (
+                <button
+                  onClick={handleTestAmplitude}
+                  disabled={
+                    amplitudeTesting ||
+                    (!amplitudeHasCredentials &&
+                      (!amplitudeApiKey.trim() || !amplitudeSecretKey.trim()))
+                  }
+                  className="rounded-lg border border-neutral-700 px-4 py-2 text-xs font-medium text-neutral-300 transition hover:border-neutral-600 hover:text-white disabled:opacity-50"
+                >
+                  {amplitudeTesting ? "Testing..." : "Test connection"}
+                </button>
               )}
               <button
                 onClick={handleSaveAmplitude}

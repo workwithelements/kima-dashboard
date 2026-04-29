@@ -724,6 +724,9 @@ export default function ClientPerformanceView({
   const [amplitudeData, setAmplitudeData] = useState<
     Record<string, Record<string, number>>
   >({})
+  const [amplitudeErrors, setAmplitudeErrors] = useState<
+    Record<string, { code: string; status: number; message?: string }>
+  >({})
 
   // Load chart titles once per client.
   useEffect(() => {
@@ -754,20 +757,37 @@ export default function ClientPerformanceView({
   useEffect(() => {
     if (amplitudeStepKeys.length === 0) {
       setAmplitudeData({})
+      setAmplitudeErrors({})
       return
     }
     let cancelled = false
-    Promise.all(
+    type ChartFetch = {
+      key: string
+      byDate: Record<string, number>
+      error?: { code: string; status: number; message?: string }
+    }
+    Promise.all<ChartFetch>(
       amplitudeStepKeys.map(async (key) => {
         const id = amplitudeChartId(key)
         try {
           const res = await fetch(
             `/api/clients/${client.id}/amplitude/chart/${id}`
           )
-          if (!res.ok) return [key, {} as Record<string, number>] as const
+          if (!res.ok) {
+            return {
+              key,
+              byDate: {},
+              error: {
+                code: `Proxy ${res.status}`,
+                status: res.status,
+                message: await res.text().catch(() => undefined),
+              },
+            }
+          }
           const payload = (await res.json()) as {
             xValues?: string[]
             points?: Array<Record<string, number | string>>
+            error?: { code: string; status: number; message?: string }
           }
           const byDate: Record<string, number> = {}
           for (const point of payload.points ?? []) {
@@ -779,16 +799,32 @@ export default function ClientPerformanceView({
             }
             byDate[date] = (byDate[date] || 0) + total
           }
-          return [key, byDate] as const
-        } catch {
-          return [key, {} as Record<string, number>] as const
+          return { key, byDate, error: payload.error }
+        } catch (e) {
+          return {
+            key,
+            byDate: {},
+            error: {
+              code: "Network error",
+              status: 0,
+              message: e instanceof Error ? e.message : undefined,
+            },
+          }
         }
       })
     ).then((entries) => {
       if (cancelled) return
-      const next: Record<string, Record<string, number>> = {}
-      for (const [key, data] of entries) next[key] = data
-      setAmplitudeData(next)
+      const nextData: Record<string, Record<string, number>> = {}
+      const nextErrors: Record<
+        string,
+        { code: string; status: number; message?: string }
+      > = {}
+      for (const { key, byDate, error } of entries) {
+        nextData[key] = byDate
+        if (error) nextErrors[key] = error
+      }
+      setAmplitudeData(nextData)
+      setAmplitudeErrors(nextErrors)
     })
     return () => {
       cancelled = true
@@ -1571,6 +1607,25 @@ export default function ClientPerformanceView({
               </button>
             )}
           </div>
+          {Object.keys(amplitudeErrors).length > 0 && (
+            <div className="mb-3 rounded-lg border border-amber-900/50 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-300">
+              <p className="font-medium">
+                Amplitude data unavailable for{" "}
+                {Object.keys(amplitudeErrors).length} chart
+                {Object.keys(amplitudeErrors).length === 1 ? "" : "s"}
+              </p>
+              <ul className="mt-1 space-y-0.5 text-[10px] text-amber-300/80">
+                {Object.entries(amplitudeErrors).map(([key, err]) => (
+                  <li key={key} className="break-all">
+                    <span className="font-mono">{amplitudeChartId(key)}</span>:{" "}
+                    {err.code}
+                    {err.status ? ` (${err.status})` : ""}
+                    {err.message ? ` — ${err.message.slice(0, 200)}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
             {funnelSteps.map((stepKey, stepIdx) => {
               const resolvedCpaStep = activeCpaStep || keyAction || funnelSteps[funnelSteps.length - 1]
