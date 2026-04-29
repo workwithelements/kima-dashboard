@@ -12,6 +12,9 @@ import {
   fetchGoogleAdsData,
   fetchConsolidatedSpend,
   consolidateDailySpend,
+  fetchAllAdditionalSpend,
+  expandAdditionalSpendDaily,
+  mergeDailySpend,
 } from "@/lib/data/fetch-client-data"
 import { fetchShopifyData } from "@/lib/data/fetch-shopify-data"
 import { getPresetRange, getComparisonRange, daysAgo, monthStart, today } from "@/lib/utils/dates"
@@ -100,6 +103,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     historicalSpend,
     shopifyData,
     shopifyCompData,
+    additionalEntries,
   ] = await Promise.all([
     fetchClientData(client.id, range.from, range.to, compRange?.from, compRange?.to),
     fetchCreativeData(client.id, range.from, range.to),
@@ -130,6 +134,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     compRange
       ? fetchShopifyData(client.id, compRange.from, compRange.to)
       : Promise.resolve({ orders: [], attribution: [] }),
+    fetchAllAdditionalSpend(client.id),
   ])
 
   const funnelSteps = (scorecardConfigRes.data?.funnel_steps as string[]) || null
@@ -149,8 +154,10 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     created_at: a.created_at,
   }))
 
-  const dailySpend = consolidateDailySpend(currentMonthSpend)
-  const historicalDaily = consolidateDailySpend(historicalSpend)
+  const additionalCurrentDaily = expandAdditionalSpendDaily(additionalEntries, monthStart(), today())
+  const additionalHistoricalDaily = expandAdditionalSpendDaily(additionalEntries, daysAgo(90), today())
+  const dailySpend = mergeDailySpend(consolidateDailySpend(currentMonthSpend), additionalCurrentDaily)
+  const historicalDaily = mergeDailySpend(consolidateDailySpend(historicalSpend), additionalHistoricalDaily)
 
   const pacing = calculatePacing(
     dailySpend,
@@ -199,6 +206,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
       pacing={pacing}
       monthlyBudget={client.monthly_budget || null}
       currentMonthDailySpend={dailySpend}
+      additionalSpendEntries={additionalEntries}
     />
   )
 }
