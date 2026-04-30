@@ -112,6 +112,39 @@ export default function CreativeTestsView({
     [conformingTests]
   )
 
+  // Diagnostics for the empty state — only consider non-analysed tests
+  const pendingTests = useMemo(
+    () => tests.filter((t) => t.status !== "analysed"),
+    [tests]
+  )
+  const pendingConformingCount = useMemo(
+    () =>
+      pendingTests.filter(
+        (t) =>
+          t.variant_ad_ids.length > 0 &&
+          t.variant_ad_ids.every((adId) => {
+            const name = adNames[adId]
+            return name && isConformingAdName(name, namingConfig)
+          })
+      ).length,
+    [pendingTests, adNames, namingConfig]
+  )
+  const pendingNonConformingCount = pendingTests.length - pendingConformingCount
+
+  const sampleNonConformingNames = useMemo(() => {
+    const names = new Set<string>()
+    for (const test of pendingTests) {
+      for (const adId of test.variant_ad_ids) {
+        const name = adNames[adId]
+        if (name && !isConformingAdName(name, namingConfig)) {
+          names.add(name)
+          if (names.size >= 5) return Array.from(names)
+        }
+      }
+    }
+    return Array.from(names)
+  }, [pendingTests, adNames, namingConfig])
+
   // Group current tests by concept name (across adsets)
   const conceptGroups = useMemo(() => {
     const map = new Map<string, ConceptGroup>()
@@ -216,12 +249,49 @@ export default function CreativeTestsView({
       {tab === "current" && (
         <>
           {conceptGroups.length === 0 && (
-            <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-12 text-center">
-              <div className="text-neutral-500">
-                {config?.enabled
-                  ? "No active creative tests. Tests appear when ads with conforming names have recent spend."
-                  : "Creative test scanning is not enabled for this client. Enable it in Settings."}
-              </div>
+            <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-8">
+              {!config?.enabled ? (
+                <p className="text-center text-neutral-500">
+                  Creative test scanning is not enabled for this client. Enable it in Settings.
+                </p>
+              ) : pendingTests.length === 0 ? (
+                <div className="text-center text-sm">
+                  <p className="text-neutral-300 mb-2">No tests detected yet.</p>
+                  <p className="text-xs text-neutral-500">
+                    Tests are detected after the daily Meta sync. New launches typically
+                    appear within 24h of the next sync run.
+                  </p>
+                </div>
+              ) : (
+                <div className="text-sm space-y-3">
+                  <p className="text-neutral-300">No active tests right now.</p>
+                  {pendingConformingCount > 0 && (
+                    <p className="text-xs text-neutral-500">
+                      {pendingConformingCount} conforming test{pendingConformingCount !== 1 ? "s" : ""} detected,
+                      but no variant has spent in the last 14 days. They&apos;ll re-appear here
+                      once a variant ad spends again.
+                    </p>
+                  )}
+                  {pendingNonConformingCount > 0 && (
+                    <div>
+                      <p className="text-xs text-neutral-500 mb-2">
+                        {pendingNonConformingCount} test{pendingNonConformingCount !== 1 ? "s" : ""} skipped
+                        because of non-conforming variant names — names need {namingConfig ? "to match" : "≥4 underscore-delimited parts with a non-empty conceptName per"} the configured naming convention.
+                      </p>
+                      {sampleNonConformingNames.length > 0 && (
+                        <div className="rounded-lg bg-neutral-800/50 px-3 py-2 text-[11px] text-neutral-400">
+                          <p className="text-neutral-500 mb-1">Sample non-conforming names:</p>
+                          <ul className="space-y-0.5 font-mono">
+                            {sampleNonConformingNames.map((n) => (
+                              <li key={n} className="truncate">{n}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
