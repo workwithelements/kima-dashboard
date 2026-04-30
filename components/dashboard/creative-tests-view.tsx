@@ -19,6 +19,8 @@ type Props = {
   thumbnails: Record<string, string>
   currency: string
   keyAction: string
+  /** True when a key action is configured anywhere (test config OR scorecard) */
+  hasKeyAction: boolean
   clientId: string
   adNames: Record<string, string>
   namingConfig?: NamingConfig
@@ -61,6 +63,7 @@ export default function CreativeTestsView({
   thumbnails,
   currency,
   keyAction,
+  hasKeyAction,
   clientId,
   adNames,
   namingConfig,
@@ -98,13 +101,13 @@ export default function CreativeTestsView({
     )
   }, [tests, adNames, namingConfig])
 
-  // Split into current (active, not yet analysed) and completed (analysed)
+  // Split into current (not yet analysed) and completed (analysed). We trust
+  // kima-sync's status here — a "monitoring" test should surface as soon as
+  // it's detected, even before any variant has spent. New launches need time
+  // to accumulate spend; gating on recent spend made them invisible.
   const currentTests = useMemo(() =>
-    conformingTests.filter((t) =>
-      t.status !== "analysed" &&
-      t.variant_ad_ids.some((adId) => (recentAdSpend[adId] || 0) > 0)
-    ),
-    [conformingTests, recentAdSpend]
+    conformingTests.filter((t) => t.status !== "analysed"),
+    [conformingTests]
   )
 
   const completedTests = useMemo(() =>
@@ -112,24 +115,13 @@ export default function CreativeTestsView({
     [conformingTests]
   )
 
-  // Diagnostics for the empty state — only consider non-analysed tests
+  // Diagnostics for the empty state — only consider non-analysed tests.
+  // When the empty state triggers we know every pending test failed the
+  // conforming check, so pendingTests.length is the non-conforming count.
   const pendingTests = useMemo(
     () => tests.filter((t) => t.status !== "analysed"),
     [tests]
   )
-  const pendingConformingCount = useMemo(
-    () =>
-      pendingTests.filter(
-        (t) =>
-          t.variant_ad_ids.length > 0 &&
-          t.variant_ad_ids.every((adId) => {
-            const name = adNames[adId]
-            return name && isConformingAdName(name, namingConfig)
-          })
-      ).length,
-    [pendingTests, adNames, namingConfig]
-  )
-  const pendingNonConformingCount = pendingTests.length - pendingConformingCount
 
   const sampleNonConformingNames = useMemo(() => {
     const names = new Set<string>()
@@ -236,12 +228,13 @@ export default function CreativeTestsView({
         </div>
       </div>
 
-      {/* Key action requirement check — warn if no test_key_action is set on the config */}
-      {config && !config.test_key_action && (
+      {/* Warn only when no key action is configured anywhere — the dashboard
+          falls back to client_scorecard_config.key_action, matching kima-sync. */}
+      {!hasKeyAction && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-400">
-          No test optimisation event set. Go to Settings &gt; Creative Tests and choose
-          the conversion event tests should be measured against (e.g. Purchases, Add to Carts,
-          Registrations).
+          No test optimisation event set. Go to Settings and set the scorecard&apos;s
+          Key Action (e.g. Purchases, Add to Cart, Registration) — or override it
+          per-test via Settings &gt; Creative Tests.
         </div>
       )}
 
@@ -263,31 +256,24 @@ export default function CreativeTestsView({
                   </p>
                 </div>
               ) : (
-                <div className="text-sm space-y-3">
-                  <p className="text-neutral-300">No active tests right now.</p>
-                  {pendingConformingCount > 0 && (
-                    <p className="text-xs text-neutral-500">
-                      {pendingConformingCount} conforming test{pendingConformingCount !== 1 ? "s" : ""} detected,
-                      but no variant has spent in the last 14 days. They&apos;ll re-appear here
-                      once a variant ad spends again.
-                    </p>
-                  )}
-                  {pendingNonConformingCount > 0 && (
-                    <div>
-                      <p className="text-xs text-neutral-500 mb-2">
-                        {pendingNonConformingCount} test{pendingNonConformingCount !== 1 ? "s" : ""} skipped
-                        because of non-conforming variant names — names need {namingConfig ? "to match" : "≥4 underscore-delimited parts with a non-empty conceptName per"} the configured naming convention.
-                      </p>
-                      {sampleNonConformingNames.length > 0 && (
-                        <div className="rounded-lg bg-neutral-800/50 px-3 py-2 text-[11px] text-neutral-400">
-                          <p className="text-neutral-500 mb-1">Sample non-conforming names:</p>
-                          <ul className="space-y-0.5 font-mono">
-                            {sampleNonConformingNames.map((n) => (
-                              <li key={n} className="truncate">{n}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
+                <div className="text-sm">
+                  <p className="text-neutral-300 mb-2">
+                    {pendingTests.length} test{pendingTests.length !== 1 ? "s" : ""} detected,
+                    but variant ad names don&apos;t match the naming convention.
+                  </p>
+                  <p className="text-xs text-neutral-500 mb-3">
+                    Names need {namingConfig
+                      ? "to match the configured positions in Settings > Naming Config"
+                      : "at least 4 underscore-delimited parts with a non-empty conceptName at index 3"}.
+                  </p>
+                  {sampleNonConformingNames.length > 0 && (
+                    <div className="rounded-lg bg-neutral-800/50 px-3 py-2 text-[11px] text-neutral-400">
+                      <p className="text-neutral-500 mb-1">Sample non-conforming names:</p>
+                      <ul className="space-y-0.5 font-mono">
+                        {sampleNonConformingNames.map((n) => (
+                          <li key={n} className="truncate">{n}</li>
+                        ))}
+                      </ul>
                     </div>
                   )}
                 </div>

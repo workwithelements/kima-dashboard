@@ -78,6 +78,10 @@ export type CreativeTestsData = {
   thumbnails: Record<string, string>
   currency: string
   keyAction: string
+  /** True when either creative_test_config.test_key_action OR
+   *  client_scorecard_config.key_action is explicitly set. False means we
+   *  fell back to the "purchases" default and the operator should set one. */
+  hasKeyAction: boolean
   /** ad_id → ad_name for all variant ads */
   adNames: Record<string, string>
   /** Client naming convention config */
@@ -151,7 +155,9 @@ async function _fetchCreativeTestsInner(
   const tests: CreativeTest[] = testsResp.data ?? []
   const config: CreativeTestConfig | null = configResp.data ?? null
   // Use the test-specific key action if set, otherwise fall back to scorecard
-  const keyAction = config?.test_key_action || scorecardResp.data?.key_action || "purchases"
+  const scorecardKeyAction = scorecardResp.data?.key_action ?? null
+  const hasKeyAction = !!(config?.test_key_action || scorecardKeyAction)
+  const keyAction = config?.test_key_action || scorecardKeyAction || "purchases"
 
   // Build naming config
   let namingConfig: NamingConfig | undefined
@@ -318,6 +324,7 @@ async function _fetchCreativeTestsInner(
     thumbnails,
     currency: clientResp.data.currency_code ?? "GBP",
     keyAction,
+    hasKeyAction,
     adNames,
     namingConfig,
     adsetRanks,
