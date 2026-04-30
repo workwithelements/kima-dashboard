@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Budget Lines — preview</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: { sans: ["Inter", "system-ui", "sans-serif"] },
+            colors: {
+              brand: {
+                lime: "#CDFF00",
+                pink: "#FF69B4",
+                navy: "#1A1A4E",
+                lavender: "#C8B8F0",
+              },
+            },
+          },
+        },
+      };
+    </script>
+    <link
+      rel="stylesheet"
+      href="https://rsms.me/inter/inter.css"
+    />
+    <style>
+      body {
+        font-family: "Inter", system-ui, sans-serif;
+      }
+      /* Diagonal stripe pattern used for the top-up portion. The CSS variable
+         --c is set per-line so the stripes pick up the line's hue. */
+      .topup-fill {
+        background-image: repeating-linear-gradient(
+          135deg,
+          var(--c) 0,
+          var(--c) 6px,
+          color-mix(in srgb, var(--c) 55%, transparent) 6px,
+          color-mix(in srgb, var(--c) 55%, transparent) 12px
+        );
+      }
+      /* Make the native checkbox look like a proper toggle switch. */
+      .switch {
+        appearance: none;
+        width: 30px;
+        height: 16px;
+        border-radius: 999px;
+        background: #404040;
+        position: relative;
+        cursor: pointer;
+        transition: background 120ms ease;
+        flex-shrink: 0;
+      }
+      .switch::after {
+        content: "";
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+        background: #fafafa;
+        transition: left 120ms ease;
+      }
+      .switch:checked {
+        background: var(--c, #cdff00);
+      }
+      .switch:checked::after {
+        left: 16px;
+      }
+      .tabular-nums {
+        font-variant-numeric: tabular-nums;
+      }
+    </style>
+  </head>
+  <body class="min-h-screen bg-neutral-950 text-neutral-200">
+    <div class="mx-auto max-w-5xl px-6 py-10">
+      <header class="mb-6">
+        <p class="text-[11px] uppercase tracking-wider text-neutral-500">
+          Preview · not yet wired up
+        </p>
+        <h1 class="mt-1 text-2xl font-semibold text-white">
+          Budget Lines
+        </h1>
+        <p class="mt-2 max-w-2xl text-sm text-neutral-400">
+          Three pieces of feedback are addressed here:
+          <span class="text-neutral-300">(1) each line has its own budget</span>,
+          <span class="text-neutral-300">(2) toggling lines on/off recalculates pacing & projection beneath</span>,
+          and <span class="text-neutral-300">(3) top-ups appear as a striped portion inside their line's colour</span>.
+          Toggle the switches and edit the numbers — everything below recalculates live.
+        </p>
+      </header>
+
+      <!-- Budget Lines panel -->
+      <section
+        class="rounded-xl border border-neutral-800 bg-neutral-900 p-5"
+      >
+        <div class="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h2 class="text-sm font-medium text-white">Budget Lines</h2>
+            <p class="mt-1 text-xs text-neutral-500">
+              Each line has a monthly budget and can be toggled into the
+              pacing view. Top-ups are one-off additions to a line's budget
+              (e.g. Black-Friday push).
+            </p>
+          </div>
+          <button
+            class="rounded-md bg-brand-lime px-3 py-1.5 text-xs font-medium text-neutral-900 transition hover:bg-brand-lime/90"
+          >
+            + Add line
+          </button>
+        </div>
+
+        <ul id="lines" class="divide-y divide-neutral-800"></ul>
+      </section>
+
+      <!-- Pacing card -->
+      <section
+        class="mt-6 rounded-xl border border-neutral-800 bg-neutral-900 p-5"
+      >
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <h3 class="text-sm font-medium text-neutral-300">Budget Pacing</h3>
+            <span
+              id="scope-pill"
+              class="rounded-full border border-neutral-700 px-2 py-0.5 text-[10px] uppercase tracking-wider text-neutral-400"
+            ></span>
+          </div>
+          <span id="status-pill" class="text-xs font-medium"></span>
+        </div>
+
+        <div class="mt-4 grid grid-cols-2 gap-4">
+          <div>
+            <p
+              class="text-[10px] uppercase tracking-wider text-neutral-500"
+            >
+              Monthly Budget
+            </p>
+            <p
+              id="total-budget"
+              class="mt-0.5 text-lg font-semibold tabular-nums text-white"
+            ></p>
+            <p id="topup-line" class="mt-0.5 text-[11px] text-neutral-500"></p>
+          </div>
+          <div>
+            <p
+              class="text-[10px] uppercase tracking-wider text-neutral-500"
+            >
+              Spent to Date
+            </p>
+            <p
+              id="total-spent"
+              class="mt-0.5 text-lg font-semibold tabular-nums text-white"
+            ></p>
+            <p id="spent-pct" class="mt-0.5 text-[11px] text-neutral-500"></p>
+          </div>
+        </div>
+
+        <!-- Stacked progress bar — one segment per active line, top-up shown as
+             striped portion of that line's segment. -->
+        <div class="mt-4">
+          <div
+            id="bar"
+            class="relative flex h-3 w-full overflow-hidden rounded-full bg-neutral-800"
+          ></div>
+          <div
+            id="bar-legend"
+            class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px]"
+          ></div>
+        </div>
+
+        <div
+          class="mt-4 grid grid-cols-3 gap-3 border-t border-neutral-800 pt-4"
+        >
+          <div>
+            <p
+              class="text-[10px] uppercase tracking-wider text-neutral-500"
+            >
+              Projected
+            </p>
+            <p
+              id="projected"
+              class="mt-0.5 text-sm font-medium tabular-nums text-neutral-200"
+            ></p>
+          </div>
+          <div>
+            <p
+              class="text-[10px] uppercase tracking-wider text-neutral-500"
+            >
+              Pacing
+            </p>
+            <p
+              id="pacing"
+              class="mt-0.5 text-sm font-medium tabular-nums"
+            ></p>
+          </div>
+          <div>
+            <p
+              class="text-[10px] uppercase tracking-wider text-neutral-500"
+            >
+              Ideal Daily
+            </p>
+            <p
+              id="ideal-daily"
+              class="mt-0.5 text-sm font-medium tabular-nums text-neutral-200"
+            ></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Per-line projections — same shape as the main bar but scoped to
+           one line, so the user can see what each line's pacing looks like
+           in isolation. -->
+      <section class="mt-6">
+        <h3 class="mb-3 text-sm font-medium text-neutral-300">
+          Per-line projections
+        </h3>
+        <ul id="line-projections" class="space-y-3"></ul>
+      </section>
+
+      <footer class="mt-10 text-[11px] text-neutral-600">
+        Preview built from feedback dated 2026-04-30. Numbers, days elapsed,
+        and projection logic are illustrative — final implementation will use
+        the real pacing engine (50% momentum / 30% day-of-month / 20% DoW).
+      </footer>
+    </div>
+
+    <script>
+      // ---------- Mock data ----------
+      // Day 18 of a 30-day month (matches the engine's monthProgress shape).
+      const DAYS_ELAPSED = 18;
+      const DAYS_TOTAL = 30;
+      const CURRENCY = "GBP";
+
+      // Each line has its own budget (feedback #1) and an optional top-up
+      // entry that sits *inside* the same line's colour (feedback #3).
+      const lines = [
+        {
+          id: "meta",
+          name: "Meta Ads",
+          color: "#CDFF00",
+          enabled: true,
+          budget: 12000,
+          spent: 7800,
+          topup: { amount: 1500, note: "Black-Friday push" },
+        },
+        {
+          id: "google",
+          name: "Google Ads",
+          color: "#FF69B4",
+          enabled: true,
+          budget: 6000,
+          spent: 3100,
+          topup: null,
+        },
+        {
+          id: "influencer",
+          name: "Influencer",
+          color: "#C8B8F0",
+          enabled: true,
+          budget: 3000,
+          spent: 1900,
+          topup: { amount: 500, note: "Extra creator" },
+        },
+        {
+          id: "tv",
+          name: "TV / OOH",
+          color: "#7DD3FC",
+          enabled: false,
+          budget: 8000,
+          spent: 4200,
+          topup: null,
+        },
+      ];
+
+      // ---------- Helpers ----------
+      const fmt = (n) =>
+        new Intl.NumberFormat("en-GB", {
+          style: "currency",
+          currency: CURRENCY,
+          maximumFractionDigits: 0,
+        }).format(Math.round(n));
+
+      const pct = (n, d = 1) =>
+        d === 0 ? `${n.toFixed(0)}%` : `${n.toFixed(d)}%`;
+
+      // Simple linear projection: avg daily spent * days in month.
+      // Real implementation will use the weighted blend in lib/utils/pacing.ts.
+      function project(spent, daysElapsed, daysTotal) {
+        if (daysElapsed === 0) return 0;
+        return (spent / daysElapsed) * daysTotal;
+      }
+
+      function statusFor(pacingPct) {
+        if (pacingPct === null) return { label: "no budget", color: "text-neutral-400", icon: "—" };
+        if (pacingPct > 115 || pacingPct < 85)
+          return { label: pacingPct > 115 ? "over" : "under", color: "text-red-400", icon: "▲" };
+        if (pacingPct > 105 || pacingPct < 95)
+          return {
+            label: pacingPct > 105 ? "slightly over" : "slightly under",
+            color: "text-amber-400",
+            icon: "•",
+          };
+        return { label: "on track", color: "text-green-400", icon: "✓" };
+      }
+
+      // ---------- Render: budget lines ----------
+      function renderLines() {
+        const ul = document.getElementById("lines");
+        ul.innerHTML = "";
+        lines.forEach((line) => {
+          const li = document.createElement("li");
+          li.className = "py-3";
+          li.innerHTML = `
+            <div class="flex items-center gap-3">
+              <input
+                type="checkbox"
+                class="switch"
+                ${line.enabled ? "checked" : ""}
+                style="--c: ${line.color}"
+                data-toggle="${line.id}"
+                aria-label="Include ${line.name} in pacing"
+              />
+              <span
+                class="h-2.5 w-2.5 shrink-0 rounded-full"
+                style="background:${line.color}"
+              ></span>
+              <span class="min-w-0 flex-1 text-sm font-medium text-white">${line.name}</span>
+
+              <label class="flex items-center gap-1.5 text-xs text-neutral-400">
+                <span class="text-[10px] uppercase tracking-wider">Budget</span>
+                <span class="text-neutral-500">${CURRENCY}</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="100"
+                  value="${line.budget}"
+                  data-budget="${line.id}"
+                  class="w-24 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm tabular-nums text-white focus:border-brand-lime focus:outline-none"
+                />
+              </label>
+
+              <span class="hidden text-xs text-neutral-500 sm:inline">
+                spent <span class="tabular-nums text-neutral-300">${fmt(line.spent)}</span>
+              </span>
+            </div>
+            ${
+              line.topup
+                ? `
+                  <div class="mt-2 ml-9 flex items-center gap-2 text-[11px] text-neutral-400">
+                    <span
+                      class="topup-fill h-2 w-6 rounded-sm"
+                      style="--c:${line.color}"
+                      aria-hidden="true"
+                    ></span>
+                    <span>
+                      Top-up
+                      <span class="tabular-nums text-neutral-200">${fmt(line.topup.amount)}</span>
+                      <span class="text-neutral-500">· ${line.topup.note}</span>
+                    </span>
+                    <button class="ml-1 text-neutral-500 transition hover:text-white" title="Edit top-up">edit</button>
+                  </div>
+                `
+                : `
+                  <button class="mt-2 ml-9 text-[11px] text-neutral-500 transition hover:text-neutral-200">
+                    + Add top-up
+                  </button>
+                `
+            }
+          `;
+          ul.appendChild(li);
+        });
+
+        // Wire toggles
+        ul.querySelectorAll("input[data-toggle]").forEach((el) =>
+          el.addEventListener("change", (e) => {
+            const id = e.target.getAttribute("data-toggle");
+            const line = lines.find((l) => l.id === id);
+            line.enabled = e.target.checked;
+            renderPacing();
+            renderPerLineProjections();
+          })
+        );
+
+        // Wire budget edits
+        ul.querySelectorAll("input[data-budget]").forEach((el) =>
+          el.addEventListener("input", (e) => {
+            const id = e.target.getAttribute("data-budget");
+            const line = lines.find((l) => l.id === id);
+            line.budget = Number(e.target.value) || 0;
+            renderPacing();
+            renderPerLineProjections();
+          })
+        );
+      }
+
+      // ---------- Render: pacing card (active lines only) ----------
+      function renderPacing() {
+        const active = lines.filter((l) => l.enabled);
+        const totalBaseBudget = active.reduce((s, l) => s + l.budget, 0);
+        const totalTopup = active.reduce(
+          (s, l) => s + (l.topup?.amount || 0),
+          0
+        );
+        const totalBudget = totalBaseBudget + totalTopup;
+        const totalSpent = active.reduce((s, l) => s + l.spent, 0);
+        const projected = project(totalSpent, DAYS_ELAPSED, DAYS_TOTAL);
+        const pacingPct = totalBudget > 0 ? (projected / totalBudget) * 100 : null;
+        const status = statusFor(pacingPct);
+
+        // Header pills
+        document.getElementById("scope-pill").textContent =
+          active.length === lines.length
+            ? "all lines"
+            : `${active.length} of ${lines.length} lines`;
+        const statusEl = document.getElementById("status-pill");
+        statusEl.className = `text-xs font-medium ${status.color}`;
+        statusEl.textContent = `${status.icon} ${status.label}`;
+
+        // Totals
+        document.getElementById("total-budget").textContent = totalBudget
+          ? fmt(totalBudget)
+          : "Not set";
+        const topupLine = document.getElementById("topup-line");
+        if (totalTopup > 0) {
+          topupLine.innerHTML = `incl. <span class="tabular-nums text-neutral-300">${fmt(
+            totalTopup
+          )}</span> in top-ups`;
+        } else {
+          topupLine.textContent = "";
+        }
+
+        document.getElementById("total-spent").textContent = fmt(totalSpent);
+        document.getElementById("spent-pct").textContent = totalBudget
+          ? `${pct((totalSpent / totalBudget) * 100, 0)} of budget · day ${DAYS_ELAPSED}/${DAYS_TOTAL}`
+          : `day ${DAYS_ELAPSED}/${DAYS_TOTAL}`;
+
+        // Stacked bar — each active line takes a width = (line spent / total budget),
+        // and within that segment, any top-up portion uses the striped fill so it's
+        // visually a shade of the line's colour (feedback #3). The remainder is the
+        // line's solid colour.
+        const bar = document.getElementById("bar");
+        bar.innerHTML = "";
+        if (totalBudget === 0) {
+          bar.innerHTML = `<div class="absolute inset-0 grid place-items-center text-[10px] text-neutral-500">No budget set on active lines</div>`;
+        } else {
+          // We render bar as flex children, each sized as % of totalBudget.
+          // Spent portion = solid line colour; top-up share within the *spent*
+          // proportion shows as striped fill (proportional to the topup share
+          // of that line's total).
+          active.forEach((l) => {
+            const lineTotal = l.budget + (l.topup?.amount || 0);
+            const spentWidthPct = (l.spent / totalBudget) * 100;
+            // What share of *this line's* spend is attributed to its top-up?
+            // We display top-up as the trailing slice of the spent portion.
+            const topupShare = lineTotal > 0 ? (l.topup?.amount || 0) / lineTotal : 0;
+            const topupWidthPct = spentWidthPct * topupShare;
+            const baseWidthPct = spentWidthPct - topupWidthPct;
+
+            const seg = document.createElement("div");
+            seg.className = "relative flex h-full";
+            seg.style.width = `${spentWidthPct}%`;
+            seg.title = `${l.name}: ${fmt(l.spent)} spent`;
+
+            if (baseWidthPct > 0) {
+              const base = document.createElement("div");
+              base.className = "h-full";
+              base.style.background = l.color;
+              base.style.width = `${(baseWidthPct / spentWidthPct) * 100}%`;
+              seg.appendChild(base);
+            }
+            if (topupWidthPct > 0) {
+              const top = document.createElement("div");
+              top.className = "topup-fill h-full";
+              top.style.setProperty("--c", l.color);
+              top.style.width = `${(topupWidthPct / spentWidthPct) * 100}%`;
+              top.title = `${l.name} top-up share`;
+              seg.appendChild(top);
+            }
+            bar.appendChild(seg);
+          });
+
+          // Expected marker (linear pacing line).
+          const expectedPct = (DAYS_ELAPSED / DAYS_TOTAL) * 100;
+          const marker = document.createElement("div");
+          marker.className = "absolute inset-y-0 w-0.5 bg-white/50";
+          marker.style.left = `${expectedPct}%`;
+          marker.title = `Expected today: ${fmt(
+            (totalBudget * DAYS_ELAPSED) / DAYS_TOTAL
+          )}`;
+          bar.appendChild(marker);
+        }
+
+        // Legend (only for active lines)
+        const legend = document.getElementById("bar-legend");
+        legend.innerHTML = "";
+        active.forEach((l) => {
+          const wrap = document.createElement("span");
+          wrap.className = "inline-flex items-center gap-1.5 text-neutral-400";
+          wrap.innerHTML = `
+            <span class="h-2 w-2 rounded-sm" style="background:${l.color}"></span>
+            <span>${l.name}</span>
+            ${
+              l.topup
+                ? `<span class="topup-fill h-2 w-3 rounded-sm" style="--c:${l.color}" title="top-up"></span>`
+                : ""
+            }
+            <span class="text-neutral-500 tabular-nums">${fmt(l.spent)} / ${fmt(
+              l.budget + (l.topup?.amount || 0)
+            )}</span>
+          `;
+          legend.appendChild(wrap);
+        });
+        if (active.length === 0) {
+          legend.innerHTML = `<span class="text-neutral-500">No lines selected.</span>`;
+        }
+
+        // Projection numbers
+        document.getElementById("projected").textContent = fmt(projected);
+        const pacingEl = document.getElementById("pacing");
+        if (pacingPct === null) {
+          pacingEl.textContent = "—";
+          pacingEl.className = "mt-0.5 text-sm font-medium tabular-nums text-neutral-400";
+        } else {
+          pacingEl.textContent = pct(pacingPct, 1);
+          pacingEl.className = `mt-0.5 text-sm font-medium tabular-nums ${status.color}`;
+        }
+        document.getElementById("ideal-daily").textContent = totalBudget
+          ? fmt(totalBudget / DAYS_TOTAL)
+          : "—";
+      }
+
+      // ---------- Render: per-line projections ----------
+      function renderPerLineProjections() {
+        const ul = document.getElementById("line-projections");
+        ul.innerHTML = "";
+        lines.forEach((l) => {
+          const total = l.budget + (l.topup?.amount || 0);
+          const projected = project(l.spent, DAYS_ELAPSED, DAYS_TOTAL);
+          const pacingPct = total > 0 ? (projected / total) * 100 : null;
+          const status = statusFor(pacingPct);
+          const spentPct = total > 0 ? Math.min(100, (l.spent / total) * 100) : 0;
+          const topupShare = total > 0 ? (l.topup?.amount || 0) / total : 0;
+          const topupSpentPct = spentPct * topupShare;
+          const baseSpentPct = spentPct - topupSpentPct;
+          const expectedPct = (DAYS_ELAPSED / DAYS_TOTAL) * 100;
+
+          const li = document.createElement("li");
+          li.className = `rounded-lg border border-neutral-800 bg-neutral-900 p-3 ${
+            l.enabled ? "" : "opacity-40"
+          }`;
+          li.innerHTML = `
+            <div class="mb-2 flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <span class="h-2.5 w-2.5 rounded-full" style="background:${l.color}"></span>
+                <span class="text-sm font-medium text-white">${l.name}</span>
+                ${
+                  !l.enabled
+                    ? `<span class="rounded-full border border-neutral-700 px-2 py-0.5 text-[9px] uppercase tracking-wider text-neutral-500">excluded</span>`
+                    : ""
+                }
+              </div>
+              <div class="flex items-center gap-3 text-[11px]">
+                <span class="text-neutral-500">
+                  budget <span class="tabular-nums text-neutral-300">${fmt(total)}</span>
+                  ${
+                    l.topup
+                      ? `<span class="text-neutral-600">(incl. ${fmt(l.topup.amount)} top-up)</span>`
+                      : ""
+                  }
+                </span>
+                <span class="text-neutral-500">
+                  spent <span class="tabular-nums text-neutral-300">${fmt(l.spent)}</span>
+                </span>
+                <span class="${status.color} font-medium">
+                  ${status.icon} ${pacingPct === null ? "—" : pct(pacingPct, 0)}
+                </span>
+              </div>
+            </div>
+            <div class="relative h-2 w-full overflow-hidden rounded-full bg-neutral-800">
+              ${
+                baseSpentPct > 0
+                  ? `<div class="absolute inset-y-0 left-0" style="width:${baseSpentPct}%;background:${l.color}"></div>`
+                  : ""
+              }
+              ${
+                topupSpentPct > 0
+                  ? `<div class="topup-fill absolute inset-y-0" style="left:${baseSpentPct}%;width:${topupSpentPct}%;--c:${l.color}"></div>`
+                  : ""
+              }
+              <div class="absolute inset-y-0 w-0.5 bg-white/50" style="left:${expectedPct}%"></div>
+            </div>
+          `;
+          ul.appendChild(li);
+        });
+      }
+
+      // ---------- Boot ----------
+      renderLines();
+      renderPacing();
+      renderPerLineProjections();
+    </script>
+  </body>
+</html>
