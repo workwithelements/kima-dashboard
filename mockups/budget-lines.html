@@ -2,24 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Budget Lines · mockup</title>
+  <title>Budget Lines · mockup v2</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            'brand-lime': '#CDFF00',
-            line: {
-              meta:  '#3B82F6',
-              google:'#F59E0B',
-              extra: '#CDFF00',
-              tv:    '#EC4899',
-              other: '#A855F7',
-            },
-          },
-        },
-      },
+      theme: { extend: { colors: {
+        'brand-lime': '#CDFF00',
+        line: { app:'#3B82F6', web:'#8B5CF6', google:'#F59E0B', tv:'#EC4899', other:'#6B7280' },
+      }}}
     }
   </script>
   <style>
@@ -27,22 +17,23 @@
     .tabular { font-variant-numeric: tabular-nums; }
     .seg { transition: filter .15s ease; }
     .seg:hover { filter: brightness(1.15); }
+    .legend-chip { cursor: pointer; user-select: none; transition: opacity .15s ease; }
     .legend-chip[data-active="false"] { opacity: .35; }
-    .legend-chip { cursor: pointer; user-select: none; }
     .toggle-btn[data-active="true"] { background: #1f2937; color: white; }
     .toggle-btn[data-active="false"] { color: #9ca3af; }
+    .swatch { width: 18px; height: 18px; border-radius: 9999px; cursor: pointer; transition: transform .1s ease; }
+    .swatch[data-selected="true"] { box-shadow: 0 0 0 2px white inset, 0 0 0 3px rgba(255,255,255,0.2); transform: scale(1.05); }
+    .chart-line { transition: opacity .15s ease, stroke-width .15s ease; }
   </style>
 </head>
 <body class="bg-black text-white min-h-screen">
-
 <div class="mx-auto max-w-6xl p-6 space-y-6">
 
-  <!-- Mockup banner -->
   <div class="rounded-md border border-amber-900/50 bg-amber-950/20 px-4 py-2 text-xs text-amber-300">
-    Static mockup · numbers and chart are illustrative. Toggle the legend chips and chart views below.
+    Static mockup v2 · Rule-based budget lines, multi-line daily chart. Try the legend chips, the chart toggle, and the "Add line" form below.
   </div>
 
-  <!-- Monthly Budget header (existing component, shown for context) -->
+  <!-- Monthly budget -->
   <div class="flex items-center gap-2 px-1">
     <span class="text-xs font-medium text-neutral-400">Monthly Budget:</span>
     <span class="text-sm font-medium tabular text-white">£6,000.00</span>
@@ -51,100 +42,102 @@
     </button>
   </div>
 
-  <!-- Budget Lines card -->
+  <!-- BUDGET LINES card -->
   <section class="rounded-lg border border-neutral-800 bg-neutral-900/40 p-5">
     <div class="mb-4 flex items-start justify-between">
       <div>
         <h2 class="text-sm font-medium text-white">Budget Lines</h2>
-        <p class="mt-1 text-xs text-neutral-500">All marketing spend grouped by line. Auto lines are pulled from platform APIs; manual lines are entered by hand and split evenly across their date range.</p>
+        <p class="mt-1 text-xs text-neutral-500">A line is a labelled, coloured bucket. Each line can pull spend from a platform (filtered by campaign name) and / or have manual top-up entries. All lines roll up into pacing.</p>
       </div>
-      <button class="rounded-md bg-brand-lime px-3 py-1.5 text-xs font-medium text-neutral-900 hover:bg-brand-lime/90">+ Add line</button>
+      <button id="add-line-btn" class="rounded-md bg-brand-lime px-3 py-1.5 text-xs font-medium text-neutral-900 hover:bg-brand-lime/90">+ Add line</button>
     </div>
 
     <ul class="divide-y divide-neutral-800 text-sm">
-      <!-- Meta (auto) -->
+
+      <!-- Line 1: Meta · App -->
       <li class="flex items-center gap-3 py-3">
-        <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-line-meta"></span>
+        <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-line-app"></span>
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-baseline gap-x-2">
-            <span class="font-medium text-white">Meta</span>
-            <span class="rounded-full border border-neutral-700 px-1.5 py-px text-[10px] uppercase tracking-wide text-neutral-400">Auto · Meta API</span>
+            <span class="font-medium text-white">Meta · App</span>
+            <span class="rounded-full border border-neutral-700 bg-neutral-900 px-1.5 py-px text-[10px] text-neutral-400">Auto</span>
           </div>
-          <p class="text-xs text-neutral-500">Platform-fetched spend for the current month</p>
+          <p class="text-xs text-neutral-500">Meta API · campaign name <code class="rounded bg-neutral-800 px-1 text-neutral-300">starts with</code> <code class="rounded bg-neutral-800 px-1 text-neutral-300">APP_</code> · 9 campaigns matched</p>
         </div>
         <div class="text-right">
-          <div class="font-medium tabular text-white">£4,800.00</div>
-          <div class="text-[11px] text-neutral-500">73% of total</div>
+          <div class="font-medium tabular text-white">£2,800.00</div>
+          <div class="text-[11px] text-neutral-500">42% of total</div>
         </div>
-        <button class="ml-2 rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-white" title="Recolour">
-          <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M12 3v18M3 12h18"/></svg>
-        </button>
+        <div class="ml-2 flex items-center gap-1">
+          <button class="rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-white" title="Edit rule">
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+          </button>
+        </div>
       </li>
 
-      <!-- Google (auto) -->
-      <li class="flex items-center gap-3 py-3">
-        <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-line-google"></span>
-        <div class="min-w-0 flex-1">
-          <div class="flex flex-wrap items-baseline gap-x-2">
-            <span class="font-medium text-white">Google Ads</span>
-            <span class="rounded-full border border-neutral-700 px-1.5 py-px text-[10px] uppercase tracking-wide text-neutral-400">Auto · Google Ads API</span>
-          </div>
-          <p class="text-xs text-neutral-500">Platform-fetched spend for the current month</p>
-        </div>
-        <div class="text-right">
-          <div class="font-medium tabular text-white">£1,200.00</div>
-          <div class="text-[11px] text-neutral-500">18% of total</div>
-        </div>
-        <button class="ml-2 rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-white" title="Recolour">
-          <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg>
-        </button>
-      </li>
-
-      <!-- Meta extra (manual, 1 entry) -->
+      <!-- Line 2: Meta · Web (auto + manual top-up — the "extra meta" case) -->
       <li class="py-3">
         <div class="flex items-center gap-3">
-          <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-line-extra"></span>
+          <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-line-web"></span>
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-baseline gap-x-2">
-              <span class="font-medium text-white">Meta extra</span>
-              <span class="rounded-full border border-neutral-700 px-1.5 py-px text-[10px] uppercase tracking-wide text-neutral-400">Manual</span>
-              <span class="text-xs text-neutral-500">1 entry</span>
+              <span class="font-medium text-white">Meta · Web</span>
+              <span class="rounded-full border border-neutral-700 bg-neutral-900 px-1.5 py-px text-[10px] text-neutral-400">Auto + 1 top-up</span>
             </div>
-            <p class="text-xs text-neutral-500">Top-up beyond the standard Meta budget</p>
+            <p class="text-xs text-neutral-500">Meta API · campaign name <code class="rounded bg-neutral-800 px-1 text-neutral-300">starts with</code> <code class="rounded bg-neutral-800 px-1 text-neutral-300">WEB_</code> · 14 campaigns matched · plus manual top-ups</p>
           </div>
           <div class="text-right">
-            <div class="font-medium tabular text-white">£200.00</div>
-            <div class="text-[11px] text-neutral-500">3% of total</div>
+            <div class="font-medium tabular text-white">£2,200.00</div>
+            <div class="text-[11px] text-neutral-500">33% of total · <span class="text-line-web">+£200 top-up</span></div>
           </div>
           <div class="ml-2 flex items-center gap-1">
-            <button class="rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-white" title="Add entry">
+            <button class="rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-white" title="Add top-up">
               <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
             </button>
-            <button class="rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-white" title="Edit line">
+            <button class="rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-white" title="Edit rule">
               <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
             </button>
           </div>
         </div>
-        <!-- Entries within the line -->
         <ul class="mt-2 ml-5 space-y-1 border-l border-neutral-800 pl-3 text-xs text-neutral-400">
           <li class="flex items-center justify-between">
-            <span>29 Apr – 30 Apr · "boost weekend campaign"</span>
+            <span>29 Apr – 30 Apr · "weekend boost — extra meta budget"</span>
             <span class="tabular text-neutral-300">£200.00 <span class="text-neutral-600">(£100/day)</span></span>
           </li>
         </ul>
       </li>
 
-      <!-- TV (manual, 2 entries) -->
+      <!-- Line 3: Google -->
+      <li class="flex items-center gap-3 py-3">
+        <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-line-google"></span>
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-wrap items-baseline gap-x-2">
+            <span class="font-medium text-white">Google Ads</span>
+            <span class="rounded-full border border-neutral-700 bg-neutral-900 px-1.5 py-px text-[10px] text-neutral-400">Auto</span>
+          </div>
+          <p class="text-xs text-neutral-500">Google Ads API · all campaigns</p>
+        </div>
+        <div class="text-right">
+          <div class="font-medium tabular text-white">£1,200.00</div>
+          <div class="text-[11px] text-neutral-500">18% of total</div>
+        </div>
+        <div class="ml-2 flex items-center gap-1">
+          <button class="rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-white" title="Edit rule">
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+          </button>
+        </div>
+      </li>
+
+      <!-- Line 4: TV (manual only) -->
       <li class="py-3">
         <div class="flex items-center gap-3">
           <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-line-tv"></span>
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-baseline gap-x-2">
               <span class="font-medium text-white">TV</span>
-              <span class="rounded-full border border-neutral-700 px-1.5 py-px text-[10px] uppercase tracking-wide text-neutral-400">Manual</span>
-              <span class="text-xs text-neutral-500">2 entries</span>
+              <span class="rounded-full border border-neutral-700 bg-neutral-900 px-1.5 py-px text-[10px] text-neutral-400">Manual</span>
             </div>
-            <p class="text-xs text-neutral-500">Off-platform TV campaign</p>
+            <p class="text-xs text-neutral-500">Manual entries only · 2 entries</p>
           </div>
           <div class="text-right">
             <div class="font-medium tabular text-white">£400.00</div>
@@ -171,9 +164,86 @@
         </ul>
       </li>
     </ul>
+
+    <!-- Add line form (shown open by default in the mockup) -->
+    <div id="add-line-form" class="mt-4 rounded-md border border-neutral-800 bg-neutral-950 p-4">
+      <div class="mb-3 flex items-center justify-between">
+        <h3 class="text-sm font-medium text-white">New budget line</h3>
+        <button class="text-xs text-neutral-500 hover:text-white">Close</button>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-2">
+        <!-- left column -->
+        <div class="space-y-3">
+          <label class="block text-xs">
+            <span class="mb-1 block text-neutral-400">Name</span>
+            <input type="text" value="Meta · US" class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm text-white focus:border-brand-lime focus:outline-none">
+          </label>
+          <div>
+            <span class="mb-1 block text-xs text-neutral-400">Colour</span>
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span class="swatch" style="background:#3B82F6"></span>
+              <span class="swatch" style="background:#8B5CF6" data-selected="true"></span>
+              <span class="swatch" style="background:#F59E0B"></span>
+              <span class="swatch" style="background:#10B981"></span>
+              <span class="swatch" style="background:#EC4899"></span>
+              <span class="swatch" style="background:#CDFF00"></span>
+              <span class="swatch" style="background:#EF4444"></span>
+              <span class="swatch" style="background:#6366F1"></span>
+              <span class="swatch" style="background:#14B8A6"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- right column: source rule -->
+        <div class="space-y-3">
+          <div>
+            <span class="mb-1 block text-xs text-neutral-400">Source</span>
+            <div class="flex items-center gap-3 text-xs text-neutral-300">
+              <label class="inline-flex items-center gap-1.5"><input type="radio" name="source" checked> Auto from platform</label>
+              <label class="inline-flex items-center gap-1.5"><input type="radio" name="source"> Manual only</label>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <label class="block text-xs">
+              <span class="mb-1 block text-neutral-400">Platform</span>
+              <select class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm text-white">
+                <option>Meta</option><option>Google Ads</option>
+              </select>
+            </label>
+            <label class="block text-xs">
+              <span class="mb-1 block text-neutral-400">Filter mode</span>
+              <select class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm text-white">
+                <option>All campaigns</option>
+                <option selected>Campaigns matching…</option>
+              </select>
+            </label>
+            <label class="block text-xs">
+              <span class="mb-1 block text-neutral-400">Operator</span>
+              <select class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm text-white">
+                <option>starts with</option><option selected>contains</option><option>ends with</option><option>regex</option>
+              </select>
+            </label>
+            <label class="block text-xs">
+              <span class="mb-1 block text-neutral-400">Value</span>
+              <input type="text" value="_US_" class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm text-white focus:border-brand-lime focus:outline-none">
+            </label>
+          </div>
+          <div class="rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1.5 text-[11px] text-neutral-400">
+            <span class="text-neutral-200">Preview:</span> matches 6 campaigns this month · <span class="tabular text-white">£412.30</span>
+            <button class="ml-2 text-neutral-500 underline-offset-2 hover:text-white hover:underline">show campaigns</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-4 flex items-center gap-2">
+        <button class="rounded-md bg-brand-lime px-3 py-1.5 text-xs font-medium text-neutral-900 hover:bg-brand-lime/90">Create line</button>
+        <button class="rounded-md px-3 py-1.5 text-xs text-neutral-400 hover:text-white">Cancel</button>
+      </div>
+    </div>
   </section>
 
-  <!-- Pacing card -->
+  <!-- PACING card -->
   <section class="rounded-lg border border-neutral-800 bg-neutral-900/40 p-5">
     <div class="mb-4 flex items-center justify-between">
       <h2 class="text-sm font-medium text-white">Budget Pacing</h2>
@@ -190,16 +260,14 @@
       </div>
     </div>
 
-    <!-- Stacked pacing bar -->
+    <!-- Stacked pacing bar (segments shown as % of 110% of budget = £6,600) -->
     <div class="mt-5">
-      <div class="relative h-3 w-full overflow-hidden rounded-full bg-neutral-800/80" id="pacing-bar">
-        <!-- Segments: widths total 110% of budget = 100% of budget+10% over.
-             We render them as % of (1.1 * 6000) = 6600. -->
-        <div class="seg absolute inset-y-0 left-0 bg-line-meta"   style="width: 72.7273%" title="Meta · £4,800"></div>
-        <div class="seg absolute inset-y-0 bg-line-google"        style="left: 72.7273%; width: 18.1818%" title="Google · £1,200"></div>
-        <div class="seg absolute inset-y-0 bg-line-extra"         style="left: 90.9091%; width: 3.0303%"  title="Meta extra · £200"></div>
-        <div class="seg absolute inset-y-0 bg-line-tv"            style="left: 93.9394%; width: 6.0606%"  title="TV · £400"></div>
-        <!-- Budget cap marker at 100% of budget (= 6000/6600 = 90.9091%) -->
+      <div class="relative h-3 w-full overflow-hidden rounded-full bg-neutral-800/80">
+        <div class="seg absolute inset-y-0 left-0 bg-line-app"   data-line="app"    style="width: 42.4242%" title="Meta · App · £2,800"></div>
+        <div class="seg absolute inset-y-0 bg-line-web"          data-line="web"    style="left: 42.4242%; width: 33.3333%" title="Meta · Web · £2,200"></div>
+        <div class="seg absolute inset-y-0 bg-line-google"       data-line="google" style="left: 75.7575%; width: 18.1818%" title="Google · £1,200"></div>
+        <div class="seg absolute inset-y-0 bg-line-tv"           data-line="tv"     style="left: 93.9393%; width: 6.0606%"  title="TV · £400"></div>
+        <!-- 100%-of-budget marker (= 6000/6600 = 90.9091%) -->
         <div class="absolute inset-y-[-2px] w-px bg-white/80" style="left: 90.9091%"></div>
       </div>
       <div class="mt-1 flex justify-between text-[11px] text-neutral-500">
@@ -208,63 +276,46 @@
       </div>
     </div>
 
-    <!-- Legend (also doubles as filter chips) -->
+    <!-- Legend / filter chips -->
     <div class="mt-4 flex flex-wrap items-center gap-2 text-xs">
-      <span class="legend-chip flex items-center gap-1.5 rounded-full border border-neutral-700 bg-neutral-900 px-2 py-1" data-active="true">
-        <span class="h-2 w-2 rounded-full bg-line-meta"></span>
-        <span class="text-neutral-200">Meta</span>
-        <span class="tabular text-neutral-500">£4,800</span>
+      <span class="legend-chip flex items-center gap-1.5 rounded-full border border-neutral-700 bg-neutral-900 px-2 py-1" data-line="app" data-active="true">
+        <span class="h-2 w-2 rounded-full bg-line-app"></span><span class="text-neutral-200">Meta · App</span><span class="tabular text-neutral-500">£2,800</span>
       </span>
-      <span class="legend-chip flex items-center gap-1.5 rounded-full border border-neutral-700 bg-neutral-900 px-2 py-1" data-active="true">
-        <span class="h-2 w-2 rounded-full bg-line-google"></span>
-        <span class="text-neutral-200">Google Ads</span>
-        <span class="tabular text-neutral-500">£1,200</span>
+      <span class="legend-chip flex items-center gap-1.5 rounded-full border border-neutral-700 bg-neutral-900 px-2 py-1" data-line="web" data-active="true">
+        <span class="h-2 w-2 rounded-full bg-line-web"></span><span class="text-neutral-200">Meta · Web</span><span class="tabular text-neutral-500">£2,200</span>
       </span>
-      <span class="legend-chip flex items-center gap-1.5 rounded-full border border-neutral-700 bg-neutral-900 px-2 py-1" data-active="true">
-        <span class="h-2 w-2 rounded-full bg-line-extra"></span>
-        <span class="text-neutral-200">Meta extra</span>
-        <span class="tabular text-neutral-500">£200</span>
+      <span class="legend-chip flex items-center gap-1.5 rounded-full border border-neutral-700 bg-neutral-900 px-2 py-1" data-line="google" data-active="true">
+        <span class="h-2 w-2 rounded-full bg-line-google"></span><span class="text-neutral-200">Google Ads</span><span class="tabular text-neutral-500">£1,200</span>
       </span>
-      <span class="legend-chip flex items-center gap-1.5 rounded-full border border-neutral-700 bg-neutral-900 px-2 py-1" data-active="true">
-        <span class="h-2 w-2 rounded-full bg-line-tv"></span>
-        <span class="text-neutral-200">TV</span>
-        <span class="tabular text-neutral-500">£400</span>
+      <span class="legend-chip flex items-center gap-1.5 rounded-full border border-neutral-700 bg-neutral-900 px-2 py-1" data-line="tv" data-active="true">
+        <span class="h-2 w-2 rounded-full bg-line-tv"></span><span class="text-neutral-200">TV</span><span class="tabular text-neutral-500">£400</span>
       </span>
-      <span class="ml-auto text-[11px] text-neutral-500">Click to mute · same colours used in chart below</span>
+      <span class="ml-auto text-[11px] text-neutral-500">Click to mute · same colours used in chart</span>
     </div>
 
     <div class="mt-5 grid grid-cols-3 gap-4 border-t border-neutral-800 pt-4 text-sm">
-      <div>
-        <div class="text-[11px] uppercase tracking-wide text-neutral-500">Projected</div>
-        <div class="mt-1 font-semibold tabular">£6,827</div>
-      </div>
-      <div>
-        <div class="text-[11px] uppercase tracking-wide text-neutral-500">Pacing</div>
-        <div class="mt-1 font-semibold tabular text-amber-300">113.8%</div>
-      </div>
-      <div>
-        <div class="text-[11px] uppercase tracking-wide text-neutral-500">Ideal Daily</div>
-        <div class="mt-1 font-semibold tabular">£200.00</div>
-      </div>
+      <div><div class="text-[11px] uppercase tracking-wide text-neutral-500">Projected</div><div class="mt-1 font-semibold tabular">£6,827</div></div>
+      <div><div class="text-[11px] uppercase tracking-wide text-neutral-500">Pacing</div><div class="mt-1 font-semibold tabular text-amber-300">113.8%</div></div>
+      <div><div class="text-[11px] uppercase tracking-wide text-neutral-500">Ideal Daily</div><div class="mt-1 font-semibold tabular">£200.00</div></div>
     </div>
   </section>
 
-  <!-- Daily Spend chart -->
+  <!-- DAILY SPEND chart (multi-line, NOT stacked) -->
   <section class="rounded-lg border border-neutral-800 bg-neutral-900/40 p-5">
-    <div class="mb-3 flex items-center justify-between">
+    <div class="mb-3 flex items-end justify-between">
       <div>
         <h2 class="text-sm font-medium text-white">Daily Spend (This Month)</h2>
-        <p class="mt-1 text-[11px] text-neutral-500">Stacked view shows each line's contribution per day</p>
+        <p class="mt-1 text-[11px] text-neutral-500">One coloured line per budget line · click legend chips to hide individual lines</p>
       </div>
       <div class="inline-flex items-center gap-1 rounded-md border border-neutral-700 bg-neutral-900 p-0.5 text-xs">
-        <button class="toggle-btn rounded px-2.5 py-1" data-mode="total"   data-active="false">Total</button>
-        <button class="toggle-btn rounded px-2.5 py-1" data-mode="stacked" data-active="true">Stacked by line</button>
+        <button class="toggle-btn rounded px-2.5 py-1" data-mode="lines" data-active="true">By line</button>
+        <button class="toggle-btn rounded px-2.5 py-1" data-mode="total" data-active="false">Total</button>
+        <button class="toggle-btn rounded px-2.5 py-1" data-mode="both"  data-active="false">Both</button>
       </div>
     </div>
 
-    <!-- SVG chart. Two layers (one per mode). JS toggles visibility. -->
     <div class="relative h-[280px] w-full">
-      <svg viewBox="0 0 800 260" preserveAspectRatio="none" class="h-full w-full">
+      <svg viewBox="0 0 800 240" preserveAspectRatio="none" class="h-full w-full" id="daily-svg">
         <!-- gridlines -->
         <g stroke="#1f1f1f" stroke-width="1">
           <line x1="0" x2="800" y1="40"  y2="40"/>
@@ -273,100 +324,64 @@
           <line x1="0" x2="800" y1="220" y2="220"/>
         </g>
 
-        <!-- ===== Stacked area (default visible) ===== -->
-        <g id="layer-stacked">
-          <!-- Hand-tuned daily values across 30 columns (~26.6 px/day).
-               Stacking order from bottom: Meta, Google, Meta extra, TV. -->
-          <!-- Meta (blue): bulk of daily -->
-          <path d="M0 220
-                   L0 168 L27 168 L27 158 L53 158 L53 162 L80 162 L80 152 L107 152 L107 148
-                   L133 148 L133 154 L160 154 L160 144 L187 144 L187 138 L213 138 L213 142
-                   L240 142 L240 132 L267 132 L267 138 L293 138 L293 130 L320 130 L320 126
-                   L347 126 L347 134 L373 134 L373 122 L400 122 L400 116 L427 116 L427 124
-                   L453 124 L453 118 L480 118 L480 110 L507 110 L507 116 L533 116 L533 108
-                   L560 108 L560 100 L587 100 L587 106 L613 106 L613 96  L640 96  L640 90
-                   L667 90  L667 102 L693 102 L693 96  L720 96  L720 92  L747 92  L747 102
-                   L773 102 L773 110 L800 110
-                   L800 220 Z" fill="#3B82F6" opacity="0.85"/>
+        <!-- App line (blue) — Meta · App, gradual climb -->
+        <path class="chart-line" data-line="app" fill="none" stroke="#3B82F6" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"
+              d="M0 198 L27 196 L53 192 L80 188 L107 192 L133 184 L160 180 L187 176 L213 178 L240 172
+                 L267 168 L293 172 L320 164 L347 160 L373 156 L400 150 L427 154 L453 148 L480 144 L507 140
+                 L533 138 L560 130 L587 134 L613 128 L640 124 L667 120 L693 116 L720 118 L747 112 L773 108"/>
 
-          <!-- Google (amber): smaller stack -->
-          <path d="M0 168
-                   L27 158 L53 162 L80 152 L107 148 L133 154 L160 144 L187 138 L213 142
-                   L240 132 L267 138 L293 130 L320 126 L347 134 L373 122 L400 116 L427 124
-                   L453 118 L480 110 L507 116 L533 108 L560 100 L587 106 L613 96 L640 90
-                   L667 102 L693 96 L720 92 L747 102 L773 110 L800 110
-                   L800 100 L773 92 L747 84 L720 74 L693 78 L667 84 L640 72 L613 78 L587 88
-                   L560 82 L533 90 L507 98 L480 92 L453 100 L427 106 L400 98 L373 104 L347 116
-                   L320 108 L293 112 L267 120 L240 114 L213 124 L187 120 L160 126 L133 136
-                   L107 130 L80 134 L53 144 L27 140 L0 150 Z" fill="#F59E0B" opacity="0.85"/>
+        <!-- Web line (violet) — climb + spike on day 29-30 (manual top-up adds ~£100/day) -->
+        <path class="chart-line" data-line="web" fill="none" stroke="#8B5CF6" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"
+              d="M0 208 L27 204 L53 206 L80 200 L107 198 L133 196 L160 192 L187 188 L213 190 L240 184
+                 L267 186 L293 180 L320 178 L347 176 L373 170 L400 168 L427 172 L453 166 L480 162 L507 160
+                 L533 156 L560 152 L587 154 L613 148 L640 144 L667 142 L693 138 L720 140 L747 70 L773 60"/>
 
-          <!-- Meta extra (lime): only last 2 days -->
-          <rect x="747" y="62" width="26" height="22" fill="#CDFF00" opacity="0.9"/>
-          <rect x="773" y="92" width="27" height="18" fill="#CDFF00" opacity="0.9"/>
+        <!-- Google line (amber) — relatively flat -->
+        <path class="chart-line" data-line="google" fill="none" stroke="#F59E0B" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"
+              d="M0 212 L27 210 L53 214 L80 208 L107 210 L133 206 L160 208 L187 210 L213 204 L240 206
+                 L267 202 L293 206 L320 204 L347 200 L373 202 L400 198 L427 200 L453 196 L480 200 L507 194
+                 L533 198 L560 196 L587 198 L613 192 L640 196 L667 194 L693 190 L720 192 L747 188 L773 186"/>
 
-          <!-- TV (pink): days 1-7 and 20-22 -->
-          <rect x="0"   y="138" width="27" height="12" fill="#EC4899" opacity="0.9"/>
-          <rect x="27"  y="124" width="26" height="16" fill="#EC4899" opacity="0.9"/>
-          <rect x="53"  y="130" width="27" height="14" fill="#EC4899" opacity="0.9"/>
-          <rect x="80"  y="118" width="27" height="16" fill="#EC4899" opacity="0.9"/>
-          <rect x="107" y="114" width="26" height="16" fill="#EC4899" opacity="0.9"/>
-          <rect x="133" y="120" width="27" height="16" fill="#EC4899" opacity="0.9"/>
-          <rect x="160" y="110" width="27" height="16" fill="#EC4899" opacity="0.9"/>
-          <rect x="507" y="76"  width="26" height="22" fill="#EC4899" opacity="0.9"/>
-          <rect x="533" y="68"  width="27" height="22" fill="#EC4899" opacity="0.9"/>
-          <rect x="560" y="60"  width="27" height="22" fill="#EC4899" opacity="0.9"/>
-        </g>
+        <!-- TV line (pink) — only on days 1–7 and 20–22; zero elsewhere shown as flat at baseline -->
+        <path class="chart-line" data-line="tv" fill="none" stroke="#EC4899" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"
+              d="M0 218 L27 214 L53 216 L80 214 L107 218 L133 218 L160 220 L187 220 L213 220 L240 220
+                 L267 220 L293 220 L320 220 L347 220 L373 220 L400 220 L427 220 L453 220 L480 220 L507 200
+                 L533 196 L560 192 L587 220 L613 220 L640 220 L667 220 L693 220 L720 220 L747 220 L773 220"/>
 
-        <!-- ===== Total (single line) ===== -->
-        <g id="layer-total" style="display:none">
-          <path d="M0 138 L27 132 L53 144 L80 134 L107 130 L133 138 L160 126 L187 120 L213 124
-                   L240 114 L267 120 L293 112 L320 108 L347 116 L373 104 L400 98 L427 106
-                   L453 100 L480 92 L507 76 L533 68 L560 60 L587 88 L613 78 L640 72 L667 84
-                   L693 78 L720 74 L747 62 L773 92"
-                fill="none" stroke="#CDFF00" stroke-width="2"/>
-          <!-- Soft area under -->
-          <path d="M0 138 L27 132 L53 144 L80 134 L107 130 L133 138 L160 126 L187 120 L213 124
-                   L240 114 L267 120 L293 112 L320 108 L347 116 L373 104 L400 98 L427 106
-                   L453 100 L480 92 L507 76 L533 68 L560 60 L587 88 L613 78 L640 72 L667 84
-                   L693 78 L720 74 L747 62 L773 92 L773 220 L0 220 Z"
-                fill="#CDFF00" opacity="0.08"/>
-        </g>
+        <!-- Total line (white, hidden by default) -->
+        <path class="chart-line" data-line="total" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" style="display:none"
+              d="M0 154 L27 148 L53 152 L80 142 L107 142 L133 132 L160 132 L187 130 L213 130 L240 122
+                 L267 118 L293 116 L320 110 L347 100 L373 94  L400 86  L427 96  L453 84  L480 80  L507 60
+                 L533 54  L560 44  L587 92  L613 86  L640 84  L667 80  L693 74  L720 76  L747 14  L773 2"/>
       </svg>
 
       <!-- Y-axis labels overlay -->
       <div class="pointer-events-none absolute inset-y-0 left-0 flex flex-col justify-between py-1 pl-1 text-[10px] text-neutral-500 tabular">
-        <span>£500</span>
-        <span>£375</span>
-        <span>£250</span>
-        <span>£125</span>
-        <span>£0</span>
+        <span>£250</span><span>£190</span><span>£125</span><span>£65</span><span>£0</span>
       </div>
     </div>
 
-    <!-- X axis -->
     <div class="mt-1 flex justify-between text-[10px] text-neutral-500 tabular">
       <span>1 Apr</span><span>8 Apr</span><span>15 Apr</span><span>22 Apr</span><span>29 Apr</span>
     </div>
   </section>
 
-  <!-- Cumulative chart (single line — no toggle needed; just show ideal line + total) -->
+  <!-- CUMULATIVE chart -->
   <section class="rounded-lg border border-neutral-800 bg-neutral-900/40 p-5">
     <div class="mb-3 flex items-end justify-between">
       <div>
         <h2 class="text-sm font-medium text-white">Cumulative Spend</h2>
-        <p class="mt-1 text-[11px] text-neutral-500">All lines combined vs. ideal pace</p>
+        <p class="mt-1 text-[11px] text-neutral-500">Total across all lines vs. ideal pace</p>
       </div>
     </div>
-    <div class="relative h-[220px] w-full">
+    <div class="relative h-[200px] w-full">
       <svg viewBox="0 0 800 200" preserveAspectRatio="none" class="h-full w-full">
         <g stroke="#1f1f1f" stroke-width="1">
           <line x1="0" x2="800" y1="50"  y2="50"/>
           <line x1="0" x2="800" y1="100" y2="100"/>
           <line x1="0" x2="800" y1="150" y2="150"/>
         </g>
-        <!-- Ideal line (dashed) -->
         <line x1="0" y1="200" x2="773" y2="32" stroke="#52525b" stroke-width="1.5" stroke-dasharray="4 4"/>
-        <!-- Actual cumulative -->
         <path d="M0 196 L27 192 L53 188 L80 182 L107 178 L133 174 L160 168 L187 162 L213 158
                  L240 152 L267 148 L293 144 L320 140 L347 134 L373 128 L400 122 L427 118
                  L453 112 L480 104 L507 92  L533 80  L560 66  L587 60  L613 54  L640 48
@@ -382,35 +397,49 @@
 </div>
 
 <script>
-  // Legend chip muting: clicking toggles a line off in the bar + chart.
-  const lineKeys = { Meta: 'meta', 'Google Ads': 'google', 'Meta extra': 'extra', TV: 'tv' };
+  // Legend chip muting
+  const muted = new Set()
   document.querySelectorAll('.legend-chip').forEach((chip) => {
     chip.addEventListener('click', () => {
-      const next = chip.dataset.active === 'true' ? 'false' : 'true'
-      chip.dataset.active = next
-      const label = chip.querySelector('span:nth-child(2)').textContent.trim()
-      const key = lineKeys[label]
-      // Mute matching segments and chart layers
-      document.querySelectorAll('.seg').forEach((s) => {
-        if (s.classList.contains('bg-line-' + key)) s.style.opacity = next === 'true' ? '' : '0.15'
-      })
-      document.querySelectorAll('#layer-stacked [fill="' + colorFor(key) + '"]').forEach((el) => {
-        el.style.opacity = next === 'true' ? '' : '0.1'
-      })
+      const key = chip.dataset.line
+      const active = chip.dataset.active !== 'true' ? true : false
+      chip.dataset.active = active ? 'true' : 'false'
+      if (active) muted.delete(key); else muted.add(key)
+      // Mute pacing segments
+      document.querySelectorAll('.seg[data-line="' + key + '"]').forEach((s) => s.style.opacity = active ? '' : '0.15')
+      // Mute chart lines
+      document.querySelectorAll('.chart-line[data-line="' + key + '"]').forEach((p) => p.style.opacity = active ? '' : '0.1')
     })
   })
-  function colorFor(key) {
-    return { meta: '#3B82F6', google: '#F59E0B', extra: '#CDFF00', tv: '#EC4899' }[key]
-  }
 
-  // Chart toggle
+  // Chart mode toggle (lines / total / both)
+  function applyMode(mode) {
+    const lineEls = document.querySelectorAll('.chart-line:not([data-line="total"])')
+    const totalEl = document.querySelector('.chart-line[data-line="total"]')
+    if (mode === 'lines') {
+      lineEls.forEach((l) => l.style.display = '')
+      totalEl.style.display = 'none'
+    } else if (mode === 'total') {
+      lineEls.forEach((l) => l.style.display = 'none')
+      totalEl.style.display = ''
+    } else {
+      lineEls.forEach((l) => { l.style.display = ''; l.setAttribute('stroke-width', '1.2') })
+      totalEl.style.display = ''
+    }
+  }
   document.querySelectorAll('.toggle-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.toggle-btn').forEach((b) => b.dataset.active = 'false')
       btn.dataset.active = 'true'
-      const mode = btn.dataset.mode
-      document.getElementById('layer-stacked').style.display = mode === 'stacked' ? '' : 'none'
-      document.getElementById('layer-total').style.display = mode === 'total' ? '' : 'none'
+      applyMode(btn.dataset.mode)
+    })
+  })
+
+  // Colour swatch selection in Add line form
+  document.querySelectorAll('.swatch').forEach((s) => {
+    s.addEventListener('click', () => {
+      document.querySelectorAll('.swatch').forEach((x) => x.dataset.selected = 'false')
+      s.dataset.selected = 'true'
     })
   })
 </script>
