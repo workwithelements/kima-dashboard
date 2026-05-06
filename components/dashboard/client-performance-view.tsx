@@ -1974,54 +1974,19 @@ export default function ClientPerformanceView({
 
       {/* "All" platforms summary — key metric conversions + CPA */}
       {isAll && (
-        <>
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <MetricCard
-              label="Spend"
-              value={fmtCurrency(metrics.spend, currency)}
-              delta={delta(metrics.spend, compMetrics.spend)}
-            />
-            <MetricCard
-              label="Impressions"
-              value={fmtNumber(metrics.impressions)}
-              delta={delta(metrics.impressions, compMetrics.impressions)}
-            />
-            <MetricCard
-              label="CPM"
-              value={fmtCurrency(derived.cpm, currency)}
-              delta={delta(derived.cpm, compDerived.cpm)}
-              invertDelta
-            />
-            <MetricCard
-              label="Purchases"
-              value={fmtNumber(allTotalKeyCount)}
-              subValue={`Meta: ${fmtNumber(allMetaKeyCount)} · Google: ${fmtNumber(allGoogleKeyCount)}`}
-              delta={delta(metrics.purchases, compMetrics.purchases)}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <MetricCard
-              label="CPA"
-              value={allCpa > 0 ? fmtCurrency(allCpa, currency) : "\u2014"}
-              invertDelta
-            />
-            <MetricCard
-              label="Revenue"
-              value={fmtCurrency(metrics.revenue, currency)}
-              delta={delta(metrics.revenue, compMetrics.revenue)}
-            />
-            <MetricCard
-              label="AOV"
-              value={fmtCurrency(derived.aov, currency)}
-              delta={delta(derived.aov, compDerived.aov)}
-            />
-            <MetricCard
-              label="ROAS"
-              value={derived.roas.toFixed(2) + "x"}
-              delta={delta(derived.roas, compDerived.roas)}
-            />
-          </div>
-        </>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <MetricCard
+            label="Purchases"
+            value={fmtNumber(allTotalKeyCount)}
+            subValue={`Meta: ${fmtNumber(allMetaKeyCount)} · Google: ${fmtNumber(allGoogleKeyCount)}`}
+            delta={delta(metrics.purchases, compMetrics.purchases)}
+          />
+          <MetricCard
+            label="CPA"
+            value={allCpa > 0 ? fmtCurrency(allCpa, currency) : "\u2014"}
+            invertDelta
+          />
+        </div>
       )}
 
       {/* Charts — Daily Spend + Spend Breakdown side by side */}
