@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pacing redesign — mockup</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background:#0a0a0a; color:#fff; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .tab { @apply rounded-full border border-neutral-800 px-3 py-1 text-xs text-neutral-400 hover:text-white cursor-pointer transition; }
+    .tab.active { @apply border-lime-300 bg-lime-300/10 text-lime-300; }
+    .card { @apply rounded-xl border border-neutral-800 bg-neutral-900 p-5; }
+    .label { @apply text-[10px] uppercase tracking-wider text-neutral-500; }
+  </style>
+</head>
+<body class="p-8 max-w-[1400px] mx-auto space-y-6">
+
+  <!-- Page header -->
+  <header class="space-y-2">
+    <p class="text-[11px] uppercase tracking-wider text-neutral-500">Mockup · static · for feedback only</p>
+    <h1 class="text-xl font-semibold">Pacing — Acme Corp</h1>
+  </header>
+
+  <!-- Monthly budget header -->
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="text-xs text-neutral-400">Monthly Budget:</span>
+    <span class="text-sm font-medium tabular-nums">$104,000</span>
+    <button class="rounded p-1 text-neutral-500 hover:bg-neutral-800" title="Edit budget">✎</button>
+    <span class="ml-3 text-[11px] text-neutral-500">
+      Allocated: <span class="tabular-nums">$96,000</span>
+      · Unallocated: <span class="text-amber-400 tabular-nums">$8,000</span>
+    </span>
+  </div>
+
+  <!-- Filter chips -->
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="tab active">All</span>
+    <span class="tab">Meta · $60k</span>
+    <span class="tab">Google · $36k</span>
+    <span class="tab">App · $40k</span>
+    <span class="tab">Web · $56k</span>
+    <span class="tab">UK · $70k</span>
+    <span class="tab">US · $26k</span>
+    <button class="ml-1 text-[11px] text-neutral-500 hover:text-white">+ Edit splits</button>
+  </div>
+
+  <!-- Total pacing -->
+  <div class="card">
+    <div class="flex items-center justify-between">
+      <h3 class="text-sm font-medium text-neutral-300">Total Budget Pacing</h3>
+      <span class="text-xs text-red-400">● Under-pacing</span>
+    </div>
+    <div class="mt-4 grid grid-cols-2 gap-4">
+      <div>
+        <p class="label">Monthly Budget</p>
+        <p class="mt-0.5 text-lg font-semibold tabular-nums">$104,000</p>
+      </div>
+      <div>
+        <p class="label">Spent to Date</p>
+        <p class="mt-0.5 text-lg font-semibold tabular-nums">$6,408.87</p>
+      </div>
+    </div>
+    <div class="mt-4 relative h-3 w-full overflow-hidden rounded-full bg-neutral-800">
+      <div class="absolute inset-y-0 left-0 rounded-full bg-red-500" style="width:6.16%"></div>
+      <div class="absolute inset-y-0 w-0.5 bg-white/40" style="left:22.58%" title="Expected: $23,484"></div>
+    </div>
+    <div class="mt-1.5 flex justify-between text-[10px] text-neutral-500">
+      <span>6% of budget</span>
+      <span>Day 7/31</span>
+    </div>
+    <div class="mt-4 grid grid-cols-3 gap-3 border-t border-neutral-800 pt-4">
+      <div>
+        <p class="label">Projected</p>
+        <p class="mt-0.5 text-sm font-medium tabular-nums">$30,283</p>
+      </div>
+      <div>
+        <p class="label">Pacing</p>
+        <p class="mt-0.5 text-sm font-medium tabular-nums text-red-400">29.1%</p>
+      </div>
+      <div>
+        <p class="label">Ideal Daily</p>
+        <p class="mt-0.5 text-sm font-medium tabular-nums">$3,354.84</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- By-split mini cards -->
+  <section>
+    <div class="mb-3 flex items-center justify-between">
+      <h3 class="text-xs uppercase tracking-wider text-neutral-500">By split</h3>
+      <button class="text-[11px] text-neutral-500 hover:text-white">+ Edit splits</button>
+    </div>
+    <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+
+      <!-- Meta -->
+      <div class="card !p-4">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-medium">Meta</span>
+          <span class="text-[11px] text-amber-400">● Slightly under</span>
+        </div>
+        <p class="mt-2 text-lg font-semibold tabular-nums">$3,820</p>
+        <p class="text-[11px] text-neutral-500">of $60,000 (6.4%)</p>
+        <div class="mt-2 h-1.5 w-full rounded-full bg-neutral-800">
+          <div class="h-full rounded-full bg-amber-500" style="width:6.4%"></div>
+        </div>
+        <p class="mt-2 text-[11px] text-neutral-500">Pacing <span class="text-amber-400 tabular-nums">85.2%</span></p>
+      </div>
+
+      <!-- Google -->
+      <div class="card !p-4">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-medium">Google</span>
+          <span class="text-[11px] text-red-400">● Under-pacing</span>
+        </div>
+        <p class="mt-2 text-lg font-semibold tabular-nums">$2,588</p>
+        <p class="text-[11px] text-neutral-500">of $36,000 (7.2%)</p>
+        <div class="mt-2 h-1.5 w-full rounded-full bg-neutral-800">
+          <div class="h-full rounded-full bg-red-500" style="width:7.2%"></div>
+        </div>
+        <p class="mt-2 text-[11px] text-neutral-500">Pacing <span class="text-red-400 tabular-nums">31.8%</span></p>
+      </div>
+
+      <!-- App -->
+      <div class="card !p-4">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-medium">App
+            <span class="block text-[10px] font-normal text-neutral-500">campaign contains "app"</span>
+          </span>
+          <span class="text-[11px] text-green-400">● On track</span>
+        </div>
+        <p class="mt-2 text-lg font-semibold tabular-nums">$3,100</p>
+        <p class="text-[11px] text-neutral-500">of $40,000 (7.8%)</p>
+        <div class="mt-2 h-1.5 w-full rounded-full bg-neutral-800">
+          <div class="h-full rounded-full bg-green-500" style="width:7.8%"></div>
+        </div>
+        <p class="mt-2 text-[11px] text-neutral-500">Pacing <span class="text-green-400 tabular-nums">98.4%</span></p>
+      </div>
+
+      <!-- Web -->
+      <div class="card !p-4">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-medium">Web
+            <span class="block text-[10px] font-normal text-neutral-500">campaign contains "web"</span>
+          </span>
+          <span class="text-[11px] text-red-400">● Under-pacing</span>
+        </div>
+        <p class="mt-2 text-lg font-semibold tabular-nums">$3,308</p>
+        <p class="text-[11px] text-neutral-500">of $56,000 (5.9%)</p>
+        <div class="mt-2 h-1.5 w-full rounded-full bg-neutral-800">
+          <div class="h-full rounded-full bg-red-500" style="width:5.9%"></div>
+        </div>
+        <p class="mt-2 text-[11px] text-neutral-500">Pacing <span class="text-red-400 tabular-nums">22.1%</span></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Test & additional spend (tagged) -->
+  <div class="card">
+    <div class="mb-4 flex items-start justify-between gap-4">
+      <div>
+        <h2 class="text-sm font-medium">Test &amp; Additional Spend</h2>
+        <p class="mt-1 text-xs text-neutral-500">
+          Digital test spend, layered into platform pacing. Tag each entry to its platform (and optional split).
+        </p>
+      </div>
+      <button class="rounded-md bg-lime-300 px-3 py-1.5 text-xs font-medium text-neutral-900 hover:bg-lime-300/90">
+        + Add entry
+      </button>
+    </div>
+    <ul class="divide-y divide-neutral-800 text-sm">
+      <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-3">
+        <span class="font-medium tabular-nums">$1,000.00</span>
+        <span class="text-xs text-neutral-400">7 May – 10 May</span>
+        <span class="text-[11px] text-neutral-500">(4 days · $250/day)</span>
+        <span class="ml-2 rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] text-blue-300">Meta</span>
+        <span class="rounded-full bg-neutral-800 px-2 py-0.5 text-[11px] text-neutral-300">App</span>
+        <span class="ml-auto text-xs text-neutral-500">creative test</span>
+      </li>
+      <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-3">
+        <span class="font-medium tabular-nums">$500.00</span>
+        <span class="text-xs text-neutral-400">5 May</span>
+        <span class="ml-2 rounded-full bg-yellow-500/15 px-2 py-0.5 text-[11px] text-yellow-300">Google</span>
+        <span class="ml-auto text-xs text-neutral-500">brand keyword test</span>
+      </li>
+      <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-3 opacity-70">
+        <span class="font-medium tabular-nums">$2,500.00</span>
+        <span class="text-xs text-neutral-400">1 May – 31 May</span>
+        <span class="text-[11px] text-neutral-500">(31 days · $80.65/day)</span>
+        <span class="ml-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-300">
+          Untagged · click to fix
+        </span>
+        <span class="ml-auto text-xs text-neutral-500">retainer (legacy)</span>
+      </li>
+    </ul>
+  </div>
+
+  <!-- Edit splits modal preview (inline for review) -->
+  <div class="card">
+    <div class="mb-3 flex items-center justify-between">
+      <h2 class="text-sm font-medium">Edit splits — modal preview</h2>
+      <span class="text-[11px] text-neutral-500">Allocated $96,000 of $104,000 · <span class="text-amber-400">$8,000 unallocated</span></span>
+    </div>
+    <div class="space-y-2 text-sm">
+      <div class="grid grid-cols-12 items-center gap-2 text-[11px] uppercase tracking-wider text-neutral-500">
+        <div class="col-span-3">Name</div>
+        <div class="col-span-6">Match rule</div>
+        <div class="col-span-2 text-right">Allocation</div>
+        <div class="col-span-1"></div>
+      </div>
+      <div class="grid grid-cols-12 items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950 p-2">
+        <input class="col-span-3 rounded bg-neutral-900 px-2 py-1 text-sm" value="Meta" />
+        <div class="col-span-6 flex flex-wrap items-center gap-1">
+          <span class="rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] text-blue-300">platform = meta</span>
+        </div>
+        <input class="col-span-2 rounded bg-neutral-900 px-2 py-1 text-right text-sm tabular-nums" value="60000" />
+        <button class="col-span-1 text-neutral-500 hover:text-red-400">×</button>
+      </div>
+      <div class="grid grid-cols-12 items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950 p-2">
+        <input class="col-span-3 rounded bg-neutral-900 px-2 py-1 text-sm" value="App" />
+        <div class="col-span-6 flex flex-wrap items-center gap-1">
+          <span class="rounded-full bg-neutral-800 px-2 py-0.5 text-[11px] text-neutral-300">campaign contains "app"</span>
+          <button class="text-[11px] text-neutral-500 hover:text-white">+ rule</button>
+        </div>
+        <input class="col-span-2 rounded bg-neutral-900 px-2 py-1 text-right text-sm tabular-nums" value="40000" />
+        <button class="col-span-1 text-neutral-500 hover:text-red-400">×</button>
+      </div>
+      <div class="grid grid-cols-12 items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950 p-2">
+        <input class="col-span-3 rounded bg-neutral-900 px-2 py-1 text-sm" value="UK" />
+        <div class="col-span-6 flex flex-wrap items-center gap-1">
+          <span class="rounded-full bg-neutral-800 px-2 py-0.5 text-[11px] text-neutral-300">campaign contains "uk"</span>
+          <span class="rounded-full bg-neutral-800 px-2 py-0.5 text-[11px] text-neutral-300">or "gb"</span>
+          <button class="text-[11px] text-neutral-500 hover:text-white">+ rule</button>
+        </div>
+        <input class="col-span-2 rounded bg-neutral-900 px-2 py-1 text-right text-sm tabular-nums" value="70000" />
+        <button class="col-span-1 text-neutral-500 hover:text-red-400">×</button>
+      </div>
+      <div class="flex items-center justify-between pt-2">
+        <button class="text-[11px] text-neutral-400 hover:text-white">+ Add split</button>
+        <div class="flex items-center gap-2">
+          <button class="rounded-md px-3 py-1 text-xs text-neutral-400 hover:text-white">Cancel</button>
+          <button class="rounded-md bg-lime-300 px-3 py-1 text-xs font-medium text-neutral-900 hover:bg-lime-300/90">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="pt-6 text-[11px] text-neutral-600">
+    Mockup · numbers are illustrative · not connected to data.
+  </footer>
+</body>
+</html>
