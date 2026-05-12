@@ -5,10 +5,7 @@ import { Card, MetricCard } from "@/components/ui/card"
 import { fmtCurrency, fmtNumber } from "@/lib/utils/format"
 import {
   computeAdVolume,
-  buildTierTable,
   spendPerTestMultiplier,
-  PACKAGES,
-  NEST_BENCHMARKS,
   DEFAULT_TESTING_PCT,
   MIN_TESTING_PCT,
   MAX_TESTING_PCT,
@@ -17,7 +14,11 @@ import {
 type Props = {
   clientName: string
   currency: string
+  /** Projected monthly Meta spend (forward run-rate). */
   monthlySpend: number
+  dailyRunRate: number
+  runRateDays: number
+  /** Trailing-30-day CPA on the client's prioritised event (0 if none recorded). */
   cpa: number
   keyAction: string
   newCreativePerMonth: number
@@ -25,15 +26,15 @@ type Props = {
 }
 
 const KEY_ACTION_LABELS: Record<string, string> = {
-  purchases: "purchases",
-  unique_link_clicks: "link clicks",
-  landing_page_views: "landing page views",
-  adds_to_cart: "adds to cart",
-  checkouts_initiated: "checkouts initiated",
-  registrations_completed: "registrations",
-  trials_started: "trials started",
-  app_installs: "app installs",
-  mobile_app_registrations: "app registrations",
+  purchases: "purchase",
+  unique_link_clicks: "link click",
+  landing_page_views: "landing page view",
+  adds_to_cart: "add to cart",
+  checkouts_initiated: "checkout initiated",
+  registrations_completed: "registration",
+  trials_started: "trial started",
+  app_installs: "app install",
+  mobile_app_registrations: "app registration",
 }
 
 function roundTo(n: number, step: number) {
@@ -44,15 +45,19 @@ export default function AdVolumeCalculatorView({
   clientName,
   currency,
   monthlySpend,
+  dailyRunRate,
+  runRateDays,
   cpa,
   keyAction,
   newCreativePerMonth,
   activeAdsNow,
 }: Props) {
-  const hasData = monthlySpend > 0
-  const dataSpend = hasData ? Math.round(monthlySpend) : 150_000
-  const dataCpa = cpa > 0 ? Math.round(cpa * 100) / 100 : 25
+  const hasSpend = monthlySpend > 0
+  const hasCpa = cpa > 0
+  const dataSpend = hasSpend ? Math.round(monthlySpend) : 150_000
+  const dataCpa = hasCpa ? Math.round(cpa * 100) / 100 : 25
   const dataCreative = Math.max(0, Math.round(newCreativePerMonth))
+  const eventLabel = KEY_ACTION_LABELS[keyAction] || keyAction.replace(/_/g, " ")
 
   const [spend, setSpend] = useState(dataSpend)
   const [cpaInput, setCpaInput] = useState(dataCpa)
@@ -77,67 +82,52 @@ export default function AdVolumeCalculatorView({
     [spend, cpaInput, testingPct, current],
   )
 
-  const tiers = useMemo(
-    () => buildTierTable(spend, cpaInput, testingPct, current),
-    [spend, cpaInput, testingPct, current],
-  )
-
   const fillPct =
     result.adsToTestPerMonth > 0
       ? Math.min(100, Math.round((current / result.adsToTestPerMonth) * 100))
       : 0
 
   const cur = (n: number) => fmtCurrency(n, currency)
-  const keyActionLabel = KEY_ACTION_LABELS[keyAction] || keyAction.replace(/_/g, " ")
   const multiplier = spendPerTestMultiplier(cpaInput)
 
   return (
     <div className="space-y-6">
       {/* ── Header ── */}
-      <Card className="bg-neutral-900">
-        <p className="text-xs uppercase tracking-widest text-brand-lime">Meta Andromeda</p>
-        <h1 className="mt-2 text-2xl font-semibold">Ad Volume Calculator</h1>
+      <Card>
+        <h1 className="text-2xl font-semibold">Ad Volume Calculator</h1>
         <p className="mt-2 max-w-2xl text-sm text-neutral-400">
-          How many ads should {clientName} be running on Meta? In the Andromeda era creative is
-          training data for the algorithm — ring-fence a slice of spend for testing, feed it enough
-          diverse creative, and it finds winners that are otherwise invisible to your account.
-          Inputs are pre-filled from the last 30 days; adjust them and the outputs update live.
-        </p>
-        <p className="mt-3 text-xs text-neutral-600">
-          Model adapted from Nest Commerce&apos;s{" "}
-          <a
-            href="https://nestcommerce.co/resources/meta-ad-volume-calculator/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline hover:text-neutral-400"
-          >
-            Meta Ad Volume Calculator
-          </a>
-          .
+          How many ads should {clientName} be running on Meta each month? In Meta&apos;s current
+          algorithm (Andromeda) creative is the main lever — ring-fence a slice of spend for testing,
+          feed the algorithm enough fresh, varied creative, and it surfaces winners that are
+          otherwise invisible to the account. Inputs are pre-filled from recent data; adjust them and
+          the outputs update live.
         </p>
       </Card>
 
-      {!hasData && (
+      {!hasSpend && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
-          No Meta spend in the last 30 days for this client — showing example values. Edit the
-          inputs below to model a scenario.
+          No recent Meta spend for this client — showing example values. Edit the inputs below to
+          model a scenario.
         </div>
       )}
 
       {/* ── Inputs ── */}
-      <Card className="bg-neutral-900">
-        <div className="mb-5 flex items-center justify-between gap-3">
+      <Card>
+        <div className="mb-5 flex items-start justify-between gap-3">
           <div>
             <h2 className="text-sm font-medium text-neutral-300">Your account</h2>
-            <p className="mt-0.5 text-xs text-neutral-500">
-              {hasData ? (
+            <p className="mt-0.5 text-xs leading-relaxed text-neutral-500">
+              {hasSpend ? (
                 <>
-                  Auto-filled from the last 30 days: {cur(monthlySpend)} spend, {cur(cpa)} CPA on{" "}
-                  {keyActionLabel}, {fmtNumber(dataCreative)} new creative,{" "}
-                  {fmtNumber(activeAdsNow)} ads delivering in the last 7 days.
+                  Spend projected from the last {runRateDays} days (≈{cur(dailyRunRate)}/day) ·{" "}
+                  {hasCpa
+                    ? <>CPA on {eventLabel}s over the last 30 days</>
+                    : <>CPA defaulted — no {eventLabel}s recorded in the last 30 days</>}{" "}
+                  · {fmtNumber(dataCreative)} new creatives launched in the last 30 days ·{" "}
+                  {fmtNumber(activeAdsNow)} ads delivering in the last 7 days
                 </>
               ) : (
-                <>Defaults shown — no recent Meta data to auto-fill from.</>
+                <>Defaults shown — no recent Meta data to pre-fill from.</>
               )}
             </p>
           </div>
@@ -151,7 +141,7 @@ export default function AdVolumeCalculatorView({
 
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           <SliderField
-            label="Monthly ad spend"
+            label="Expected monthly ad spend"
             value={spend}
             onChange={setSpend}
             min={10_000}
@@ -160,7 +150,7 @@ export default function AdVolumeCalculatorView({
             display={cur(spend)}
           />
           <SliderField
-            label={`Average CPA (${keyActionLabel})`}
+            label={`Average CPA (per ${eventLabel})`}
             value={cpaInput}
             onChange={setCpaInput}
             min={1}
@@ -190,7 +180,7 @@ export default function AdVolumeCalculatorView({
       </Card>
 
       {/* ── Headline result ── */}
-      <Card className="bg-neutral-900">
+      <Card>
         <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xs uppercase tracking-widest text-neutral-500">
@@ -201,9 +191,8 @@ export default function AdVolumeCalculatorView({
               <span className="text-2xl font-normal text-neutral-400">ads / month to test</span>
             </p>
             <p className="mt-2 text-sm text-neutral-400">
-              Recommended package:{" "}
-              <span className="font-medium text-white">{PACKAGES[result.pkg].label}</span> ·{" "}
               {fmtNumber(result.winnersLow)}–{fmtNumber(result.winnersHigh)} expected winners / month
+              (~10–20% of tested ads)
             </p>
           </div>
           <div className="lg:w-80">
@@ -252,7 +241,7 @@ export default function AdVolumeCalculatorView({
       </div>
 
       {/* ── Formula ── */}
-      <Card className="bg-neutral-900">
+      <Card>
         <h2 className="mb-3 text-sm font-medium text-neutral-300">How the number is built</h2>
         <div className="rounded-lg bg-neutral-950 px-4 py-3 font-mono text-xs leading-relaxed text-neutral-400">
           <div>
@@ -262,9 +251,7 @@ export default function AdVolumeCalculatorView({
           <div className="mt-1 text-neutral-500">
             = round( ( {cur(spend)} × {testingPct}% ) ÷ ( {cur(cpaInput)} × {multiplier} ) ) ={" "}
             {fmtNumber(Math.round(result.testingBudget / result.spendPerTestAd))}
-            {spend >= 50_000 && (
-              <> → floored to a minimum of 50 at ≥{cur(50_000)} spend</>
-            )}
+            {spend >= 50_000 && <> → floored to a minimum of 50 at ≥{cur(50_000)} spend</>}
           </div>
         </div>
         <p className="mt-3 text-xs text-neutral-600">
@@ -272,135 +259,6 @@ export default function AdVolumeCalculatorView({
           {fmtCurrency(100, currency)} CPA, ×7 up to {fmtCurrency(200, currency)}, ×5 above. From
           every batch, roughly 10–20% earn a place in scaling campaigns.
         </p>
-      </Card>
-
-      {/* ── Tier table ── */}
-      <div className="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900">
-        <div className="border-b border-neutral-800 px-5 py-4">
-          <h2 className="text-sm font-medium text-neutral-300">Volume by spend level</h2>
-          <p className="mt-0.5 text-xs text-neutral-500">
-            Recalculated at this account&apos;s CPA ({cur(cpaInput)}) and testing budget ({testingPct}%).
-          </p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-neutral-500">
-                <th className="px-5 py-3 font-medium">Monthly spend</th>
-                <th className="px-5 py-3 font-medium">Testing budget</th>
-                <th className="px-5 py-3 font-medium">Ads to test</th>
-                <th className="px-5 py-3 font-medium">Winners</th>
-                <th className="px-5 py-3 font-medium">Package</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tiers.map((t) => (
-                <tr
-                  key={t.spend}
-                  className={`border-t border-neutral-800 ${t.isCurrent ? "bg-brand-lime/[0.07]" : ""}`}
-                >
-                  <td className="px-5 py-3 font-medium text-white">
-                    {cur(t.spend)}
-                    {t.isTopTier && "+"}
-                    {t.isCurrent && (
-                      <span className="ml-2 rounded bg-brand-lime/20 px-1.5 py-0.5 text-[10px] font-medium uppercase text-brand-lime">
-                        This client
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-5 py-3 text-neutral-300">{cur(t.testingBudget)}</td>
-                  <td className="px-5 py-3 text-neutral-300">{fmtNumber(t.adsToTestPerMonth)}</td>
-                  <td className="px-5 py-3 text-neutral-300">
-                    {fmtNumber(t.winnersLow)}–{fmtNumber(t.winnersHigh)}
-                  </td>
-                  <td className="px-5 py-3">
-                    <span className="rounded bg-neutral-800 px-2 py-0.5 text-xs text-neutral-300">
-                      {PACKAGES[t.pkg].label}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* ── Impact ── */}
-      <Card className="bg-neutral-900">
-        <h2 className="text-sm font-medium text-neutral-300">What closing the gap looks like</h2>
-        <p className="mt-2 max-w-2xl text-sm text-neutral-400">
-          {result.onTrack ? (
-            <>
-              At {fmtNumber(result.adsToTestPerMonth)} ads/month this account is running the volume
-              Andromeda wants. The next levers are variance and velocity — keeping the creative
-              varied enough and the optimisation cycles fast enough to compound gains.
-            </>
-          ) : (
-            <>
-              This account is <span className="font-medium text-white">{fmtNumber(result.gap)} ads/month short</span> of
-              what Andromeda rewards at {cur(spend)} spend. When Nest clients closed this gap they
-              saw revenue and ROAS jump within the first optimisation cycle — on this spend that&apos;s
-              roughly <span className="font-medium text-white">{cur(result.estimatedMonthlyUplift)}</span> of
-              additional monthly return, driven by the algorithm finally having enough signal to find
-              winners it couldn&apos;t before.
-            </>
-          )}
-        </p>
-        <div className="mt-4 grid gap-4 sm:grid-cols-3">
-          <BenchmarkStat value={`+${NEST_BENCHMARKS.roasUpliftPct}%`} label="ROAS when ads per ad set are maxed" />
-          <BenchmarkStat value={`+${NEST_BENCHMARKS.revenueUpliftPct}%`} label="Revenue at higher volume & variance" />
-          <BenchmarkStat value={`+${NEST_BENCHMARKS.yoyLiftPct}%`} label="Performance lift YoY vs the market" />
-        </div>
-        <p className="mt-3 text-xs text-neutral-600">
-          Benchmarks are Nest Commerce&apos;s reported client results, not a forecast for this account.
-        </p>
-      </Card>
-
-      {/* ── Principles ── */}
-      <Card className="bg-neutral-900">
-        <h2 className="text-sm font-medium text-neutral-300">The principles</h2>
-        <p className="mt-1 text-xs text-neutral-500">
-          Built on how Meta&apos;s Andromeda system actually works — ads are evaluated at the
-          individual-user level, and the algorithm learns from diversity.
-        </p>
-        <div className="mt-4 grid gap-4 sm:grid-cols-3">
-          <Principle
-            title="Allocate 20–30% to creative testing"
-            body="This is the budget that finds your next winners. Without dedicated testing spend you're just scaling ads that are already fatiguing."
-          />
-          <Principle
-            title="Launch ads every 1–2 weeks"
-            body="Consistent velocity keeps the algorithm fed with fresh signals. Irregular launches cause performance troughs."
-          />
-          <Principle
-            title="Expect 10–20% of ads to scale"
-            body="From every batch of test ads a small set earn their place in scaling campaigns. Volume is how you find them."
-          />
-        </div>
-      </Card>
-
-      {/* ── Why volume wins ── */}
-      <Card className="bg-neutral-900">
-        <h2 className="text-sm font-medium text-neutral-300">Why creative volume wins</h2>
-        <p className="mt-1 text-xs text-neutral-500">Creative is training data for the algorithm.</p>
-        <div className="mt-4 grid gap-4 sm:grid-cols-3">
-          <WorldCard
-            eyebrow="Old world"
-            title="5 ads per ad set"
-            body="Advertisers controlled delivery through audiences, bids and placements. A handful of hero ads ran indefinitely."
-          />
-          <WorldCard
-            eyebrow="New world"
-            title="50+ ads per ad set as the baseline"
-            body="The platform decides delivery. Your job is to feed it the most diverse, high-volume creative possible. Volume = signal."
-          />
-          <WorldCard
-            eyebrow="The bottleneck"
-            title="Organisational speed"
-            body="The constraint isn't the platform — it's how fast you can produce and test creative."
-            highlight
-          />
-        </div>
       </Card>
     </div>
   )
@@ -457,50 +315,6 @@ function SliderField({
         className="mt-3 w-full accent-brand-lime"
       />
       <p className="mt-1.5 text-[11px] text-neutral-500">{display}</p>
-    </div>
-  )
-}
-
-function BenchmarkStat({ value, label }: { value: string; label: string }) {
-  return (
-    <div className="rounded-lg bg-neutral-950 px-4 py-3">
-      <p className="text-2xl font-semibold tabular-nums text-brand-lime">{value}</p>
-      <p className="mt-1 text-xs text-neutral-500">{label}</p>
-    </div>
-  )
-}
-
-function Principle({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="rounded-lg bg-neutral-950 px-4 py-4">
-      <h3 className="text-sm font-medium text-white">{title}</h3>
-      <p className="mt-1 text-xs leading-relaxed text-neutral-500">{body}</p>
-    </div>
-  )
-}
-
-function WorldCard({
-  eyebrow,
-  title,
-  body,
-  highlight,
-}: {
-  eyebrow: string
-  title: string
-  body: string
-  highlight?: boolean
-}) {
-  return (
-    <div
-      className={`rounded-lg px-4 py-4 ${
-        highlight ? "border border-brand-lime/30 bg-brand-lime/[0.06]" : "bg-neutral-950"
-      }`}
-    >
-      <p className={`text-[10px] font-medium uppercase tracking-wider ${highlight ? "text-brand-lime" : "text-neutral-500"}`}>
-        {eyebrow}
-      </p>
-      <h3 className="mt-1 text-sm font-medium text-white">{title}</h3>
-      <p className="mt-1 text-xs leading-relaxed text-neutral-500">{body}</p>
     </div>
   )
 }

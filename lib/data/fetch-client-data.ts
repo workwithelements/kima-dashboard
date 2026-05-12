@@ -806,11 +806,15 @@ export type AdVolumeData = {
   clientId: string
   clientName: string
   currency: string
-  /** Last-30-day Meta spend (treated as a monthly figure). */
+  /** Projected 30-day Meta spend at the current run-rate. */
   monthlySpend: number
-  /** Last-30-day CPA for the client's key action (0 if no conversions). */
+  /** Daily spend run-rate the projection is based on. */
+  dailyRunRate: number
+  /** How many recent days the run-rate is averaged over (7, or 30 as fallback). */
+  runRateDays: number
+  /** Trailing-30-day CPA for the client's prioritised event (0 if none recorded). */
   cpa: number
-  /** Key action used for the CPA calc (e.g. "purchases"). */
+  /** Event the CPA is measured on — the client's dashboard key action. */
   keyAction: string
   /** Distinct new creatives launched in the last 30 days. */
   newCreativePerMonth: number
@@ -831,9 +835,10 @@ const KEY_ACTION_COLUMN: Record<string, string> = {
 }
 
 /**
- * Data for the per-client ad-volume calculator: trailing-30-day Meta spend,
- * CPA on the client's key action, and how much new creative is actually going
- * in (distinct ad creation events in the last 30 days, with a fallback).
+ * Data for the per-client ad-volume calculator: projected monthly Meta spend
+ * (a forward run-rate, not last-30-day actuals), trailing-30-day CPA on the
+ * client's prioritised dashboard event, and how much new creative is actually
+ * going in (distinct ad creation events in the last 30 days, with a fallback).
  */
 export async function fetchAdVolumeData(clientId: string): Promise<AdVolumeData | null> {
   const supabase = createServiceClient()
@@ -849,7 +854,11 @@ export async function fetchAdVolumeData(clientId: string): Promise<AdVolumeData 
   const dateStr = (ms: number) => new Date(ms).toISOString().split("T")[0]
   const now = Date.now()
   const from30 = dateStr(now - 30 * dayMs)
-  const from7 = dateStr(now - 7 * dayMs)
+  // Run-rate window: the last 7 *complete* days (yesterday back 7 days) — today
+  // is partial so it's excluded.
+  const runRateStart = dateStr(now - 7 * dayMs)
+  const runRateEnd = dateStr(now - 1 * dayMs)
+  const active7From = dateStr(now - 7 * dayMs)
   const from90 = dateStr(now - 90 * dayMs)
   const to = dateStr(now)
 
@@ -885,19 +894,32 @@ export async function fetchAdVolumeData(clientId: string): Promise<AdVolumeData 
       .gte("created_time", new Date(now - 30 * dayMs).toISOString()),
   ])
 
-  let spend = 0
+  let trailing30Spend = 0
   let conversions = 0
+  let runRateWindowSpend = 0
   const active30 = new Set<string>()
   const active7 = new Set<string>()
   for (const r of perfRows) {
-    spend += r.spend || 0
+    trailing30Spend += r.spend || 0
     conversions += Number(r[convColumn]) || 0
+    if (r.date >= runRateStart && r.date <= runRateEnd) runRateWindowSpend += r.spend || 0
     if (r.ad_id) {
       active30.add(r.ad_id)
-      if (r.date >= from7) active7.add(r.ad_id)
+      if (r.date >= active7From) active7.add(r.ad_id)
     }
   }
-  const cpa = conversions > 0 ? spend / conversions : 0
+  const cpa = conversions > 0 ? trailing30Spend / conversions : 0
+
+  // Expected monthly spend = forward run-rate. Base it on the last 7 complete
+  // days; if there's no recent spend at all (paused / sparse), fall back to the
+  // trailing-30-day average so the figure is still meaningful.
+  let runRateDays = 7
+  let dailyRunRate = runRateWindowSpend / 7
+  if (dailyRunRate <= 0) {
+    runRateDays = 30
+    dailyRunRate = trailing30Spend / 30
+  }
+  const monthlySpend = dailyRunRate * 30
 
   // New creative: prefer creation events from meta_ad_metadata; if that table
   // is empty/unavailable, fall back to "ads delivering in the last 30d that
@@ -923,7 +945,9 @@ export async function fetchAdVolumeData(clientId: string): Promise<AdVolumeData 
     clientId: client.id as string,
     clientName: client.name as string,
     currency: ((client as { currency_code?: string | null }).currency_code) || "GBP",
-    monthlySpend: spend,
+    monthlySpend,
+    dailyRunRate,
+    runRateDays,
     cpa,
     keyAction,
     newCreativePerMonth,

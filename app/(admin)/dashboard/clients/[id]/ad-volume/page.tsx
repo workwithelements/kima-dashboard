@@ -20,6 +20,8 @@ export default async function AdVolumePage({ params }: Props) {
       clientName={data.clientName}
       currency={data.currency}
       monthlySpend={data.monthlySpend}
+      dailyRunRate={data.dailyRunRate}
+      runRateDays={data.runRateDays}
       cpa={data.cpa}
       keyAction={data.keyAction}
       newCreativePerMonth={data.newCreativePerMonth}
