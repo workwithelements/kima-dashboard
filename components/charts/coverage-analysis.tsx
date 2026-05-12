@@ -226,7 +226,7 @@ const STATUS_LABELS: Record<CoverageStatus, string> = {
 
 function CollapsibleSection({
   title,
-  defaultOpen = true,
+  defaultOpen = false,
   children,
 }: {
   title: string
@@ -440,7 +440,7 @@ function CoverageMatrix({
   }, [matrix])
 
   return (
-    <CollapsibleSection title="Job × Stage Matrix" defaultOpen={jobs.length <= 8}>
+    <CollapsibleSection title="Job × Stage Matrix">
       <div className="overflow-x-auto">
           <table className="w-full text-[11px]">
             <thead>
