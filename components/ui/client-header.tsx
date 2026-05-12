@@ -16,6 +16,7 @@ type Props = {
 const TABS = [
   { label: "Performance", href: "" },
   { label: "Creative Tests", href: "/tests", requiresTestConfig: true },
+  { label: "Ad Volume", href: "/ad-volume" },
   { label: "Budget & Pacing", href: "/pacing" },
   { label: "Reach Analysis", href: "/reach" },
   { label: "Marketing Impact", href: "/meta-impact", requiresMarketingImpact: true },

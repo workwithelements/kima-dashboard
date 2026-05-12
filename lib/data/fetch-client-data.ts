@@ -797,3 +797,136 @@ export function mergeDailySpend(
 
 // Re-export getClientPlatforms from types for backwards compat
 export { getClientPlatforms } from "@/lib/utils/types"
+
+// ──────────────────────────────────────────────────────────────────────────
+// Ad-volume calculator
+// ──────────────────────────────────────────────────────────────────────────
+
+export type AdVolumeData = {
+  clientId: string
+  clientName: string
+  currency: string
+  /** Last-30-day Meta spend (treated as a monthly figure). */
+  monthlySpend: number
+  /** Last-30-day CPA for the client's key action (0 if no conversions). */
+  cpa: number
+  /** Key action used for the CPA calc (e.g. "purchases"). */
+  keyAction: string
+  /** Distinct new creatives launched in the last 30 days. */
+  newCreativePerMonth: number
+  /** Distinct ads with delivery in the last 7 days (reference figure). */
+  activeAdsNow: number
+}
+
+const KEY_ACTION_COLUMN: Record<string, string> = {
+  unique_link_clicks: "unique_link_clicks",
+  landing_page_views: "landing_page_views",
+  adds_to_cart: "adds_to_cart",
+  checkouts_initiated: "checkouts_initiated",
+  registrations_completed: "registrations_completed",
+  trials_started: "trials_started",
+  app_installs: "app_installs",
+  mobile_app_registrations: "mobile_app_registrations",
+  purchases: "purchases",
+}
+
+/**
+ * Data for the per-client ad-volume calculator: trailing-30-day Meta spend,
+ * CPA on the client's key action, and how much new creative is actually going
+ * in (distinct ad creation events in the last 30 days, with a fallback).
+ */
+export async function fetchAdVolumeData(clientId: string): Promise<AdVolumeData | null> {
+  const supabase = createServiceClient()
+
+  const { data: client } = await supabase
+    .from("clients")
+    .select("id, name, currency_code")
+    .eq("id", clientId)
+    .single()
+  if (!client) return null
+
+  const dayMs = 86_400_000
+  const dateStr = (ms: number) => new Date(ms).toISOString().split("T")[0]
+  const now = Date.now()
+  const from30 = dateStr(now - 30 * dayMs)
+  const from7 = dateStr(now - 7 * dayMs)
+  const from90 = dateStr(now - 90 * dayMs)
+  const to = dateStr(now)
+
+  const { data: scorecard } = await supabase
+    .from("client_scorecard_config")
+    .select("key_action")
+    .eq("client_id", clientId)
+    .maybeSingle()
+  const keyAction = (scorecard?.key_action as string | undefined) || "purchases"
+  const convColumn = KEY_ACTION_COLUMN[keyAction] || "purchases"
+
+  const [perfRows, priorRows, metaRes] = await Promise.all([
+    fetchAllRows<{ date: string; ad_id: string; spend: number } & Record<string, number>>(() =>
+      supabase
+        .from("meta_daily_performance")
+        .select(`date, ad_id, spend, ${convColumn}`)
+        .eq("client_id", clientId)
+        .gte("date", from30)
+        .lte("date", to)
+    ),
+    fetchAllRows<{ ad_id: string }>(() =>
+      supabase
+        .from("meta_daily_performance")
+        .select("ad_id")
+        .eq("client_id", clientId)
+        .gte("date", from90)
+        .lt("date", from30)
+    ),
+    supabase
+      .from("meta_ad_metadata")
+      .select("ad_id, created_time")
+      .eq("client_id", clientId)
+      .gte("created_time", new Date(now - 30 * dayMs).toISOString()),
+  ])
+
+  let spend = 0
+  let conversions = 0
+  const active30 = new Set<string>()
+  const active7 = new Set<string>()
+  for (const r of perfRows) {
+    spend += r.spend || 0
+    conversions += Number(r[convColumn]) || 0
+    if (r.ad_id) {
+      active30.add(r.ad_id)
+      if (r.date >= from7) active7.add(r.ad_id)
+    }
+  }
+  const cpa = conversions > 0 ? spend / conversions : 0
+
+  // New creative: prefer creation events from meta_ad_metadata; if that table
+  // is empty/unavailable, fall back to "ads delivering in the last 30d that
+  // weren't delivering in the prior 60d".
+  const createdRecently = new Set<string>()
+  for (const r of metaRes.data || []) {
+    if (r.ad_id && r.created_time) createdRecently.add(r.ad_id)
+  }
+  let newCreativePerMonth: number
+  if (createdRecently.size > 0) {
+    newCreativePerMonth = createdRecently.size
+  } else {
+    const prior = new Set<string>()
+    for (const r of priorRows) if (r.ad_id) prior.add(r.ad_id)
+    let n = 0
+    active30.forEach((id) => {
+      if (!prior.has(id)) n++
+    })
+    newCreativePerMonth = n
+  }
+
+  return {
+    clientId: client.id as string,
+    clientName: client.name as string,
+    currency: ((client as { currency_code?: string | null }).currency_code) || "GBP",
+    monthlySpend: spend,
+    cpa,
+    keyAction,
+    newCreativePerMonth,
+    activeAdsNow: active7.size,
+  }
+}
