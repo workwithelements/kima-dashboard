@@ -207,6 +207,7 @@ export default async function DashboardPage({ searchParams }: Props) {
   // Preset label for subtitle
   const presetLabels: Record<string, string> = {
     today: "Today",
+    yesterday: "Yesterday",
     last_7d: "Last 7 days",
     last_30d: "Last 30 days",
     this_month: "Month to date",
