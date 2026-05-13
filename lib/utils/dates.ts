@@ -4,16 +4,21 @@
 
 import type { DateRange, ComparisonType } from "./types"
 
-/** Today in YYYY-MM-DD */
-export function today(): string {
-  return new Date().toISOString().split("T")[0]
+/** Format a Date's local components as YYYY-MM-DD (avoids UTC shift). */
+function formatLocal(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 }
 
-/** N days ago in YYYY-MM-DD */
+/** Today in YYYY-MM-DD (local timezone) */
+export function today(): string {
+  return formatLocal(new Date())
+}
+
+/** N days ago in YYYY-MM-DD (local timezone) */
 export function daysAgo(n: number): string {
   const d = new Date()
   d.setDate(d.getDate() - n)
-  return d.toISOString().split("T")[0]
+  return formatLocal(d)
 }
 
 /** First of current month */
@@ -53,6 +58,7 @@ export function dayOfMonth(dateStr: string): number {
 /** Date range presets */
 export type DatePreset =
   | "today"
+  | "yesterday"
   | "last_7d"
   | "last_30d"
   | "this_month"
@@ -67,6 +73,8 @@ export function getPresetRange(preset: DatePreset): DateRange {
   switch (preset) {
     case "today":
       return { from: today(), to: today() }
+    case "yesterday":
+      return { from: daysAgo(1), to: daysAgo(1) }
     case "last_7d":
       return { from: daysAgo(7), to: daysAgo(1) }
     case "last_30d":

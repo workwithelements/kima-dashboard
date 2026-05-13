@@ -5,6 +5,7 @@ import type { DatePreset } from "@/lib/utils/dates"
 
 const PRESETS: { value: DatePreset; label: string }[] = [
   { value: "today", label: "Today" },
+  { value: "yesterday", label: "Yesterday" },
   { value: "last_7d", label: "Last 7 days" },
   { value: "last_30d", label: "Last 30 days" },
   { value: "this_month", label: "Month to date" },
