@@ -78,6 +78,8 @@ export default function CreativeTestsView({
   const [analyzingId, setAnalyzingId] = useState<string | null>(null)
   const [showDismissed, setShowDismissed] = useState(false)
   const [dismissingConcept, setDismissingConcept] = useState<string | null>(null)
+  const [showAll, setShowAll] = useState(false)
+  const [showHiddenList, setShowHiddenList] = useState(false)
 
   const thresholds = {
     minDays: config?.min_days_live ?? 5,
@@ -92,15 +94,42 @@ export default function CreativeTestsView({
     keyAction === "landing_page_views" ? "LPVs" :
     "Purchases"
 
-  // Always filter to conforming tests (correct naming conventions only)
+  // Classify why a non-conforming test is hidden so the operator can
+  // tell whether the issue is a naming convention problem (fix the ad
+  // name) or unresolved ad names (kima-sync may not have a perf row
+  // for a brand-new ad yet).
+  type HideReason = "non-conforming" | "missing-name" | null
+  function hideReason(test: CreativeTest): HideReason {
+    if (test.variant_ad_ids.length === 0) return "missing-name"
+    let sawMissing = false
+    for (const adId of test.variant_ad_ids) {
+      const name = adNames[adId]
+      if (!name) {
+        sawMissing = true
+        continue
+      }
+      if (!isConformingAdName(name, namingConfig)) return "non-conforming"
+    }
+    return sawMissing ? "missing-name" : null
+  }
+
+  // When "Show all" is on, bypass the conformance filter so the
+  // operator can see every creative_tests row kima-sync wrote to the
+  // DB (useful for confirming whether something's missing because the
+  // sync didn't pick it up, or because the dashboard filtered it).
   const conformingTests = useMemo(() => {
-    return tests.filter((test) =>
-      test.variant_ad_ids.length > 0 &&
-      test.variant_ad_ids.every((adId) => {
-        const name = adNames[adId]
-        return name && isConformingAdName(name, namingConfig)
-      })
-    )
+    if (showAll) return tests
+    return tests.filter((test) => hideReason(test) === null)
+  }, [tests, adNames, namingConfig, showAll])
+
+  const hiddenTests = useMemo(() => {
+    const out: { test: CreativeTest; reason: HideReason }[] = []
+    for (const test of tests) {
+      if (test.status === "analysed" || test.dismissed_at) continue
+      const reason = hideReason(test)
+      if (reason !== null) out.push({ test, reason })
+    }
+    return out
   }, [tests, adNames, namingConfig])
 
   // Split into current (not yet analysed) and completed (analysed). We trust
@@ -123,27 +152,6 @@ export default function CreativeTestsView({
     [conformingTests]
   )
 
-  // Diagnostics for the empty state — only consider non-analysed, non-dismissed
-  // tests. When the empty state triggers we know every pending test failed the
-  // conforming check, so pendingTests.length is the non-conforming count.
-  const pendingTests = useMemo(
-    () => tests.filter((t) => t.status !== "analysed" && !t.dismissed_at),
-    [tests]
-  )
-
-  const sampleNonConformingNames = useMemo(() => {
-    const names = new Set<string>()
-    for (const test of pendingTests) {
-      for (const adId of test.variant_ad_ids) {
-        const name = adNames[adId]
-        if (name && !isConformingAdName(name, namingConfig)) {
-          names.add(name)
-          if (names.size >= 5) return Array.from(names)
-        }
-      }
-    }
-    return Array.from(names)
-  }, [pendingTests, adNames, namingConfig])
 
   function groupByConcept(testsToGroup: CreativeTest[]): ConceptGroup[] {
     const map = new Map<string, ConceptGroup>()
@@ -278,6 +286,61 @@ export default function CreativeTestsView({
         </div>
       )}
 
+      {/* Filter diagnostic — surfaces tests that kima-sync detected but
+          the dashboard hid, so the operator can tell apart "the sync
+          didn't see this" from "the dashboard filtered it". Only shown
+          on the Current tab. */}
+      {tab === "current" && hiddenTests.length > 0 && (
+        <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 px-4 py-3 text-xs">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-neutral-400">
+              <span className="text-neutral-200">{hiddenTests.length} test{hiddenTests.length === 1 ? "" : "s"} {showAll ? "non-conforming (shown)" : "filtered out"}</span>
+              {" "}— {hiddenTests.filter((h) => h.reason === "non-conforming").length} bad name,
+              {" "}{hiddenTests.filter((h) => h.reason === "missing-name").length} unresolved variant{hiddenTests.filter((h) => h.reason === "missing-name").length === 1 ? "" : "s"}.
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              <button
+                onClick={() => setShowHiddenList((v) => !v)}
+                className="text-neutral-400 hover:text-white"
+              >
+                {showHiddenList ? "Hide" : "Show"} list
+              </button>
+              <label className="flex items-center gap-1.5 text-neutral-400">
+                <input
+                  type="checkbox"
+                  checked={showAll}
+                  onChange={(e) => setShowAll(e.target.checked)}
+                  className="accent-brand-lime"
+                />
+                Show all (bypass filter)
+              </label>
+            </div>
+          </div>
+          {showHiddenList && (
+            <ul className="mt-3 max-h-64 space-y-1 overflow-y-auto font-mono text-[11px] text-neutral-400">
+              {hiddenTests.map(({ test, reason }) => {
+                const sampleAdId = test.variant_ad_ids[0]
+                const sampleName = sampleAdId ? adNames[sampleAdId] : null
+                return (
+                  <li key={test.id} className="flex items-baseline gap-2 truncate">
+                    <span className={reason === "missing-name" ? "text-amber-500" : "text-neutral-500"}>
+                      {reason === "missing-name" ? "?" : "×"}
+                    </span>
+                    <span className="truncate">{test.concept_name}</span>
+                    <span className="text-neutral-600 truncate">
+                      ({test.adset_name || test.adset_id})
+                    </span>
+                    {sampleName && (
+                      <span className="text-neutral-600 truncate ml-auto">{sampleName}</span>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+
       {/* ── CURRENT TESTS TAB ── */}
       {tab === "current" && (
         <>
@@ -287,35 +350,20 @@ export default function CreativeTestsView({
                 <p className="text-center text-neutral-500">
                   Creative test scanning is not enabled for this client. Enable it in Settings.
                 </p>
-              ) : pendingTests.length === 0 ? (
+              ) : hiddenTests.length > 0 ? (
+                <div className="text-center text-sm">
+                  <p className="text-neutral-300 mb-2">No tests pass the naming filter.</p>
+                  <p className="text-xs text-neutral-500">
+                    See the diagnostic banner above — check &quot;Show all&quot; to view them anyway.
+                  </p>
+                </div>
+              ) : (
                 <div className="text-center text-sm">
                   <p className="text-neutral-300 mb-2">No tests detected yet.</p>
                   <p className="text-xs text-neutral-500">
                     Tests are detected after the daily Meta sync. New launches typically
                     appear within 24h of the next sync run.
                   </p>
-                </div>
-              ) : (
-                <div className="text-sm">
-                  <p className="text-neutral-300 mb-2">
-                    {pendingTests.length} test{pendingTests.length !== 1 ? "s" : ""} detected,
-                    but variant ad names don&apos;t match the naming convention.
-                  </p>
-                  <p className="text-xs text-neutral-500 mb-3">
-                    Names need {namingConfig
-                      ? "to match the configured positions in Settings > Naming Config"
-                      : "at least 4 underscore-delimited parts with a non-empty conceptName at index 3"}.
-                  </p>
-                  {sampleNonConformingNames.length > 0 && (
-                    <div className="rounded-lg bg-neutral-800/50 px-3 py-2 text-[11px] text-neutral-400">
-                      <p className="text-neutral-500 mb-1">Sample non-conforming names:</p>
-                      <ul className="space-y-0.5 font-mono">
-                        {sampleNonConformingNames.map((n) => (
-                          <li key={n} className="truncate">{n}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
                 </div>
               )}
             </div>
