@@ -41,6 +41,12 @@ export type ClientData = {
   rows: Partial<MetaDailyRow>[]
   comparisonRows: Partial<MetaDailyRow>[]
   baselineReach: number
+  /** All-time spend & reach for the client, summed across every row in
+   *  meta_daily_performance. Used as the denominator/numerator for the
+   *  optional "Cost per Eyeball" funnel step so the metric stays stable
+   *  regardless of the selected date range. */
+  lifetimeSpend: number
+  lifetimeReach: number
   namingConfig?: NamingConfig
   /** ad_id → ISO created_time from meta_ad_metadata */
   createdDates?: Record<string, string>
@@ -105,9 +111,10 @@ async function _fetchClientDataInner(
   dayBefore.setDate(dayBefore.getDate() - 1)
   const baselineEndStr = dayBefore.toISOString().split("T")[0]
 
-  // Fetch primary range, comparison range, baseline reach, metadata, and naming config ALL in parallel
-  // Uses fetchAllRows to paginate past the PostgREST 1000-row default cap.
-  const [primaryRows, compRows, baselineRows, metadataResult, namingResult] = await Promise.all([
+  // Fetch primary range, comparison range, baseline reach, lifetime totals,
+  // metadata, and naming config ALL in parallel. Uses fetchAllRows to paginate
+  // past the PostgREST 1000-row default cap.
+  const [primaryRows, compRows, baselineRows, lifetimeRows, metadataResult, namingResult] = await Promise.all([
     fetchAllRows(() =>
       supabase
         .from("meta_daily_performance")
@@ -136,6 +143,13 @@ async function _fetchClientDataInner(
         .gte("date", baselineStartStr)
         .lte("date", baselineEndStr)
     ),
+    // Lifetime totals — no date filter. Powers Cost-per-Eyeball.
+    fetchAllRows<{ spend: number; reach: number }>(() =>
+      supabase
+        .from("meta_daily_performance")
+        .select("spend, reach")
+        .eq("client_id", clientId)
+    ),
     // Fetch RECENT ad metadata for test badge (last 6 days only)
     // Supabase PostgREST caps results at 1000 rows regardless of .limit(),
     // so we filter to recent ads to stay well under that cap.
@@ -155,6 +169,13 @@ async function _fetchClientDataInner(
   let baselineReach = 0
   for (const row of baselineRows) {
     baselineReach += row.reach || 0
+  }
+
+  let lifetimeSpend = 0
+  let lifetimeReach = 0
+  for (const row of lifetimeRows) {
+    lifetimeSpend += row.spend || 0
+    lifetimeReach += row.reach || 0
   }
 
   // Build created dates map
@@ -189,6 +210,8 @@ async function _fetchClientDataInner(
     rows: primaryRows as Partial<MetaDailyRow>[],
     comparisonRows: compRows as Partial<MetaDailyRow>[],
     baselineReach,
+    lifetimeSpend,
+    lifetimeReach,
     namingConfig,
     createdDates,
   }

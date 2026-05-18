@@ -40,6 +40,8 @@ type Props = {
   googleAdsRows?: Partial<GoogleAdsDailyRow>[]
   googleAdsComparisonRows?: Partial<GoogleAdsDailyRow>[]
   baselineReach: number
+  lifetimeSpend: number
+  lifetimeReach: number
   funnelSteps: string[] | null
   keyAction: string | null
   funnelViews: FunnelView[]
@@ -167,6 +169,8 @@ export default function ClientDashboard(props: Props) {
             to={props.to}
             compareType={props.compareType}
             baselineReach={props.baselineReach}
+            lifetimeSpend={props.lifetimeSpend}
+            lifetimeReach={props.lifetimeReach}
             funnelSteps={props.funnelSteps}
             keyAction={props.keyAction}
             funnelViews={props.funnelViews}

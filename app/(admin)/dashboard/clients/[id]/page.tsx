@@ -136,6 +136,8 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       fetchedTo={range.to}
       compareType={compareType}
       baselineReach={data.baselineReach}
+      lifetimeSpend={data.lifetimeSpend}
+      lifetimeReach={data.lifetimeReach}
       funnelSteps={funnelSteps}
       keyAction={keyAction}
       funnelViews={funnelViews}

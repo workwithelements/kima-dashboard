@@ -181,6 +181,8 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
       googleAdsRows={googleAdsRows}
       googleAdsComparisonRows={googleAdsComparisonRows}
       baselineReach={perfData?.baselineReach || 0}
+      lifetimeSpend={perfData?.lifetimeSpend || 0}
+      lifetimeReach={perfData?.lifetimeReach || 0}
       funnelSteps={funnelSteps}
       keyAction={keyAction}
       funnelViews={funnelViews}

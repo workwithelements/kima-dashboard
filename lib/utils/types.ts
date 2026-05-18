@@ -49,6 +49,15 @@ export type AggregatedMetrics = {
   revenue: number
   appInstalls: number
   mobileAppRegistrations: number
+  /** Period 2-sec video views — populated from meta_daily_performance.video_3s_views. */
+  video2SecViews: number
+  /** All-time cumulative reach for the client, summed across every day in
+   *  meta_daily_performance. Independent of the selected date range — used
+   *  as the denominator for "cost per eyeball" so the metric doesn't get
+   *  skewed when the operator narrows the window. */
+  lifetimeReach: number
+  /** All-time spend paired with lifetimeReach. */
+  lifetimeSpend: number
 }
 
 /** Client record from the clients table */
@@ -142,6 +151,7 @@ export const BASE_METRIC_FIELDS = [
   { value: "purchase_value", label: "Purchase Value (Revenue)" },
   { value: "app_installs", label: "App Installs" },
   { value: "mobile_app_registrations", label: "In-App Registrations" },
+  { value: "video_3s_views", label: "2-Sec Video Views" },
 ] as const
 
 export type BaseMetricField = (typeof BASE_METRIC_FIELDS)[number]["value"]

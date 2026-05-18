@@ -32,6 +32,10 @@ export function aggregateMetrics(rows: Partial<MetaDailyRow>[]): AggregatedMetri
       revenue: acc.revenue + (row.purchase_value || 0),
       appInstalls: acc.appInstalls + (row.app_installs || 0),
       mobileAppRegistrations: acc.mobileAppRegistrations + (row.mobile_app_registrations || 0),
+      video2SecViews: acc.video2SecViews + (row.video_3s_views || 0),
+      // Lifetime fields stay 0 — callers overlay them from a date-unbounded query.
+      lifetimeReach: 0,
+      lifetimeSpend: 0,
     }),
     {
       spend: 0,
@@ -47,6 +51,9 @@ export function aggregateMetrics(rows: Partial<MetaDailyRow>[]): AggregatedMetri
       revenue: 0,
       appInstalls: 0,
       mobileAppRegistrations: 0,
+      video2SecViews: 0,
+      lifetimeReach: 0,
+      lifetimeSpend: 0,
     }
   )
 }
@@ -68,6 +75,9 @@ export function aggregateGoogleAdsMetrics(rows: Partial<GoogleAdsDailyRow>[]): A
       revenue: acc.revenue + (row.conversion_value || 0),
       appInstalls: 0,
       mobileAppRegistrations: 0,
+      video2SecViews: 0,
+      lifetimeReach: 0,
+      lifetimeSpend: 0,
     }),
     {
       spend: 0,
@@ -83,6 +93,9 @@ export function aggregateGoogleAdsMetrics(rows: Partial<GoogleAdsDailyRow>[]): A
       revenue: 0,
       appInstalls: 0,
       mobileAppRegistrations: 0,
+      video2SecViews: 0,
+      lifetimeReach: 0,
+      lifetimeSpend: 0,
     }
   )
 }
