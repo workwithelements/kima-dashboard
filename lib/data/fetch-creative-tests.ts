@@ -89,6 +89,8 @@ export type CreativeTestsData = {
   namingConfig?: NamingConfig
   /** ad_id → rank within its ad set (by CPA) */
   adsetRanks: Record<string, AdsetRank>
+  /** ad_id → spend & conversions over the last 30 days (one row per variant). */
+  variantPerf: Record<string, { spend: number; conversions: number }>
   /** ad_id → total spend in last 14 days (0 = inactive) */
   recentAdSpend: Record<string, number>
 }
@@ -310,6 +312,15 @@ async function _fetchCreativeTestsInner(
 
   await Promise.all(fetchPromises)
 
+  // Per-variant spend/conversions (last 30d) for the breakdown view and
+  // for recomputing test totals — kima-sync's total_conversions doesn't
+  // always reflect the dashboard's configured key action, so we derive
+  // it here against the same column we display.
+  const variantPerf: Record<string, { spend: number; conversions: number }> = {}
+  adsetPerfMap.forEach((perf, adId) => {
+    variantPerf[adId] = { spend: perf.spend, conversions: perf.conversions }
+  })
+
   // Compute adset rankings (rank by CPA ascending, no-conversion ads last)
   const adsetRanks: Record<string, AdsetRank> = {}
   // Group perf data by adset
@@ -345,6 +356,7 @@ async function _fetchCreativeTestsInner(
     adNames,
     namingConfig,
     adsetRanks,
+    variantPerf,
     recentAdSpend,
   }
 }

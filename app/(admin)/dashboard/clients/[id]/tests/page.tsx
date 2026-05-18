@@ -25,6 +25,7 @@ export default async function CreativeTestsPage({ params }: Props) {
       adNames={data.adNames}
       namingConfig={data.namingConfig}
       adsetRanks={data.adsetRanks}
+      variantPerf={data.variantPerf}
       recentAdSpend={data.recentAdSpend}
     />
   )

@@ -25,6 +25,7 @@ type Props = {
   adNames: Record<string, string>
   namingConfig?: NamingConfig
   adsetRanks: Record<string, AdsetRank>
+  variantPerf: Record<string, { spend: number; conversions: number }>
   recentAdSpend: Record<string, number>
 }
 
@@ -56,6 +57,32 @@ function getResultConversions(r: CreativeTestResult, keyAction: string): number 
   }
 }
 
+function ThresholdBar({
+  current,
+  target,
+  label,
+}: {
+  current: number
+  target: number
+  label: string
+}) {
+  const pct = target > 0 ? Math.min(100, (current / target) * 100) : 0
+  const met = current >= target
+  return (
+    <div className="flex flex-col gap-1 min-w-[88px]">
+      <div className="h-1.5 w-full rounded-full bg-neutral-800 overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all ${met ? "bg-brand-lime" : "bg-neutral-500"}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className={`text-[10px] ${met ? "text-brand-lime" : "text-neutral-500"}`}>
+        {label}
+      </div>
+    </div>
+  )
+}
+
 export default function CreativeTestsView({
   tests,
   results,
@@ -68,6 +95,7 @@ export default function CreativeTestsView({
   adNames,
   namingConfig,
   adsetRanks,
+  variantPerf,
   recentAdSpend,
 }: Props) {
   const [tab, setTab] = useState<ViewTab>("current")
@@ -145,14 +173,36 @@ export default function CreativeTestsView({
     return Array.from(names)
   }, [pendingTests, adNames, namingConfig])
 
+  // Derive per-test totals from variant-level perf rather than the
+  // stored test.total_spend/total_conversions. kima-sync writes those
+  // against its own conversion column, which can disagree with the
+  // dashboard's configured key action (e.g. registrations vs purchases),
+  // leaving "0 / 10 regs" on the card even when the variants have
+  // actually converted.
+  function testTotals(test: CreativeTest): { spend: number; conversions: number } {
+    let spend = 0
+    let conversions = 0
+    for (const adId of test.variant_ad_ids) {
+      const p = variantPerf[adId]
+      if (!p) continue
+      spend += p.spend
+      conversions += p.conversions
+    }
+    return {
+      spend: spend || test.total_spend,
+      conversions: conversions || test.total_conversions,
+    }
+  }
+
   function groupByConcept(testsToGroup: CreativeTest[]): ConceptGroup[] {
     const map = new Map<string, ConceptGroup>()
     for (const test of testsToGroup) {
+      const t = testTotals(test)
       const existing = map.get(test.concept_name)
       if (existing) {
         existing.tests.push(test)
-        existing.totalSpend += test.total_spend
-        existing.totalConversions += test.total_conversions
+        existing.totalSpend += t.spend
+        existing.totalConversions += t.conversions
         existing.variantCount += test.variant_count
         existing.adsetCount += 1
         existing.allAdIds.push(...test.variant_ad_ids)
@@ -160,8 +210,8 @@ export default function CreativeTestsView({
         map.set(test.concept_name, {
           conceptName: test.concept_name,
           tests: [test],
-          totalSpend: test.total_spend,
-          totalConversions: test.total_conversions,
+          totalSpend: t.spend,
+          totalConversions: t.conversions,
           variantCount: test.variant_count,
           adsetCount: 1,
           allAdIds: [...test.variant_ad_ids],
@@ -428,65 +478,123 @@ export default function CreativeTestsView({
                     </svg>
                   </div>
 
-                  {/* Expanded: show per-adset breakdown */}
+                  {/* Expanded: show per-adset breakdown + per-variant rows */}
                   {isExpanded && (
                     <div className="border-t border-neutral-800">
-                      {group.tests.map((test) => (
-                        <div key={test.id} className="border-b border-neutral-800 last:border-b-0">
-                          <div className="flex items-center gap-4 px-4 py-3 bg-neutral-800/30">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-neutral-300">
-                                  {test.adset_name || test.adset_id}
-                                </span>
-                                {test.notion_page_url && (
-                                  <a
-                                    href={test.notion_page_url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-[10px] text-blue-400 hover:underline"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    Notion
-                                  </a>
-                                )}
+                      {group.tests.map((test) => {
+                        const t = testTotals(test)
+                        return (
+                          <div key={test.id} className="border-b border-neutral-800 last:border-b-0">
+                            <div className="flex items-center gap-4 px-4 py-3 bg-neutral-800/30">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium text-neutral-300">
+                                    {test.adset_name || test.adset_id}
+                                  </span>
+                                  {test.notion_page_url && (
+                                    <a
+                                      href={test.notion_page_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-[10px] text-blue-400 hover:underline"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      Notion
+                                    </a>
+                                  )}
+                                </div>
+                                <div className="text-xs text-neutral-500">
+                                  {test.variant_count} variants &middot; {test.days_live} days &middot; {fmtCurrency(t.spend, currency)} spend
+                                </div>
                               </div>
-                              <div className="text-xs text-neutral-500">
-                                {test.variant_count} variants &middot; {test.days_live} days &middot; {fmtCurrency(test.total_spend, currency)} spend
-                              </div>
+
+                              {/* Threshold progress or ready button */}
+                              {test.status === "ready" ? (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleRunAnalysis(test.id) }}
+                                  disabled={analyzingId === test.id}
+                                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                                    analyzingId === test.id
+                                      ? "bg-neutral-700 text-neutral-500 cursor-not-allowed"
+                                      : "bg-brand-lime text-black hover:bg-brand-lime/90"
+                                  }`}
+                                >
+                                  {analyzingId === test.id ? "Queued" : "Run Analysis"}
+                                </button>
+                              ) : (
+                                <div className="flex items-center gap-3">
+                                  <ThresholdBar
+                                    current={test.days_live}
+                                    target={thresholds.minDays}
+                                    label={`${test.days_live} / ${thresholds.minDays} days`}
+                                  />
+                                  <ThresholdBar
+                                    current={t.spend}
+                                    target={thresholds.minSpend}
+                                    label={`${fmtCurrency(t.spend, currency)} / ${fmtCurrency(thresholds.minSpend, currency)}`}
+                                  />
+                                  <ThresholdBar
+                                    current={t.conversions}
+                                    target={thresholds.minConversions}
+                                    label={`${fmtNumber(t.conversions)} / ${thresholds.minConversions} ${convLabel.toLowerCase()}`}
+                                  />
+                                </div>
+                              )}
+
+                              <span className={`rounded-full border px-2 py-0.5 text-xs font-medium capitalize ${
+                                test.status === "ready"
+                                  ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                                  : "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                              }`}>
+                                {test.status === "monitoring" ? "Active" : test.status}
+                              </span>
                             </div>
 
-                            {/* Progress or ready button */}
-                            {test.status === "ready" ? (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleRunAnalysis(test.id) }}
-                                disabled={analyzingId === test.id}
-                                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                                  analyzingId === test.id
-                                    ? "bg-neutral-700 text-neutral-500 cursor-not-allowed"
-                                    : "bg-brand-lime text-black hover:bg-brand-lime/90"
-                                }`}
-                              >
-                                {analyzingId === test.id ? "Queued" : "Run Analysis"}
-                              </button>
-                            ) : (
-                              <div className="flex items-center gap-3 text-xs text-neutral-500">
-                                <span>{test.days_live} / {thresholds.minDays} days</span>
-                                <span>{fmtCurrency(test.total_spend, currency)} / {fmtCurrency(thresholds.minSpend, currency)}</span>
-                                <span>{test.total_conversions} / {thresholds.minConversions} {convLabel.toLowerCase()}</span>
+                            {/* Per-variant rows (only when there's more than one variant) */}
+                            {test.variant_ad_ids.length > 1 && (
+                              <div className="bg-neutral-900/40">
+                                {test.variant_ad_ids.map((adId) => {
+                                  const perf = variantPerf[adId]
+                                  const spend = perf?.spend ?? 0
+                                  const convs = perf?.conversions ?? 0
+                                  const cpa = convs > 0 ? spend / convs : null
+                                  const rank = adsetRanks[adId]
+                                  const name = adNames[adId] || adId
+                                  // Use the variant's middle name-segments as a compact label
+                                  const shortLabel = name.split("_").slice(3, 5).join(" ") || name
+                                  return (
+                                    <div
+                                      key={adId}
+                                      className="flex items-center gap-3 px-4 py-2 border-t border-neutral-800/60 text-xs"
+                                    >
+                                      {thumbnails[adId] ? (
+                                        <img src={thumbnails[adId]} alt="" className="h-7 w-7 rounded object-cover shrink-0" />
+                                      ) : (
+                                        <div className="h-7 w-7 rounded bg-neutral-800 shrink-0" />
+                                      )}
+                                      <div className="min-w-0 flex-1 truncate text-neutral-300" title={name}>
+                                        {shortLabel}
+                                      </div>
+                                      <div className="text-right tabular-nums w-20 text-neutral-400">
+                                        {fmtCurrency(spend, currency)}
+                                      </div>
+                                      <div className="text-right tabular-nums w-12 text-neutral-400">
+                                        {fmtNumber(convs)}
+                                      </div>
+                                      <div className="text-right tabular-nums w-16 text-neutral-400">
+                                        {cpa != null ? fmtCurrency(cpa, currency) : "—"}
+                                      </div>
+                                      <div className="text-right tabular-nums w-12 text-neutral-500">
+                                        {rank ? `${rank.rank}/${rank.total}` : "—"}
+                                      </div>
+                                    </div>
+                                  )
+                                })}
                               </div>
                             )}
-
-                            <span className={`rounded-full border px-2 py-0.5 text-xs font-medium capitalize ${
-                              test.status === "ready"
-                                ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
-                                : "bg-blue-500/15 text-blue-400 border-blue-500/30"
-                            }`}>
-                              {test.status === "monitoring" ? "Active" : test.status}
-                            </span>
                           </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                 </div>
