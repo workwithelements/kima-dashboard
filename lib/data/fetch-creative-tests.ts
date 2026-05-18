@@ -216,15 +216,30 @@ async function _fetchCreativeTestsInner(
   }
 
   async function fetchNameBatch(chunk: string[]): Promise<void> {
-    const { data } = await supabase
-      .from("meta_daily_performance")
-      .select("ad_id, ad_name")
-      .in("ad_id", chunk)
-      .limit(chunk.length)
-    for (const row of data ?? []) {
-      if (row.ad_name && !adNames[row.ad_id]) {
-        adNames[row.ad_id] = row.ad_name
+    // meta_daily_performance has one row per (ad_id, date). Limiting the
+    // query to chunk.length capped total rows, not distinct ad_ids, so most
+    // ads ended up missing from `adNames` — which then made every conforming
+    // test get filtered out as "non-conforming". Paginate newest-first and
+    // stop as soon as every ad in the chunk has a name.
+    const needed = new Set(chunk)
+    const PAGE = 1000
+    let offset = 0
+    while (needed.size > 0) {
+      const { data } = await supabase
+        .from("meta_daily_performance")
+        .select("ad_id, ad_name")
+        .in("ad_id", chunk)
+        .order("date", { ascending: false })
+        .range(offset, offset + PAGE - 1)
+      if (!data || data.length === 0) break
+      for (const row of data) {
+        if (row.ad_name && needed.has(row.ad_id)) {
+          adNames[row.ad_id] = row.ad_name
+          needed.delete(row.ad_id)
+        }
       }
+      if (data.length < PAGE) break
+      offset += PAGE
     }
   }
 
