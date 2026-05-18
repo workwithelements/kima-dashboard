@@ -365,13 +365,22 @@ export function getDimensionValue(
 /**
  * Check whether an ad name follows the naming convention.
  *
- * Requires enough underscore-separated parts so that `conceptName` is a
- * genuinely extracted value rather than the fallback (where the entire name
- * is used as the concept).
+ * Requires:
+ *   - enough underscore-separated parts that `conceptName` is a real
+ *     extracted value (not the fallback that treats the whole name as
+ *     the concept)
+ *   - the launch-date slot is a 6–8-digit run (D[D]MMYYYY).
+ *     Without this, malformed names like
+ *       VID_HP_barely-time_FUNCTIONAL_…   (missing date)
+ *       IMG_Us vs. them - USP's_C_H_D_…   (old convention, no date)
+ *     leak into the tracker with whatever happens to sit at index 3
+ *     as the "concept" (e.g. FUNCTIONAL, H).
  *
- * With a client config the check uses the configured conceptName position;
- * without config the default position 3 is assumed (needs ≥ 4 parts).
+ * With a client config the launchDate position (when configured) is
+ * checked instead of position 2.
  */
+const LAUNCH_DATE_PATTERN = /^\d{6,8}$/
+
 export function isConformingAdName(
   adName: string,
   config?: NamingConfig
@@ -382,10 +391,26 @@ export function isConformingAdName(
 
   if (config && config.positions.length > 0) {
     const conceptPos = config.positions.find((p) => p.key === "conceptName")
-    if (!conceptPos) return parts.length >= 4
-    return parts.length > conceptPos.index && !!parts[conceptPos.index]
+    const conceptOK = conceptPos
+      ? parts.length > conceptPos.index && !!parts[conceptPos.index]
+      : parts.length >= 4
+
+    // Only enforce the date format when the client config explicitly
+    // assigns a launchDate position — otherwise we can't tell which
+    // slot is supposed to be the date.
+    const datePos = config.positions.find((p) => p.key === "launchDate")
+    const dateOK = datePos
+      ? parts.length > datePos.index && LAUNCH_DATE_PATTERN.test(parts[datePos.index] || "")
+      : true
+
+    return conceptOK && dateOK
   }
 
-  // Default: need ≥ 4 parts (positions 0-3, where 3 is conceptName)
-  return parts.length >= 4
+  // Default convention: ≥4 parts, non-empty concept at index 3,
+  // and a date-shaped value (D[D]MMYYYY → 6–8 digits) at index 2.
+  return (
+    parts.length >= 4 &&
+    !!parts[3] &&
+    LAUNCH_DATE_PATTERN.test(parts[2] || "")
+  )
 }
