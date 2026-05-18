@@ -6,8 +6,9 @@ import { requireAuth, safeError } from "@/lib/auth/authorize"
  * PATCH /api/creative-tests/[testId] — manual resolution for flagged/unmatched tests
  *
  * Body options:
- *   { notion_page_url: string }  — link a Notion card manually
- *   { dismiss: true }            — dismiss a flagged test
+ *   { notion_page_url: string }   — link a Notion card manually
+ *   { dismiss: true }             — clear flagged state (legacy "un-flag")
+ *   { dismissed: true | false }   — soft-hide / restore the test in the UI
  */
 export async function PATCH(
   request: NextRequest,
@@ -19,6 +20,21 @@ export async function PATCH(
   const body = await request.json()
   const db = createServiceClient()
   const now = new Date().toISOString()
+
+  if (typeof body.dismissed === "boolean") {
+    const { data, error } = await db
+      .from("creative_tests")
+      .update({
+        dismissed_at: body.dismissed ? now : null,
+        updated_at: now,
+      })
+      .eq("id", params.testId)
+      .select()
+      .single()
+
+    if (error) return safeError(error)
+    return NextResponse.json(data)
+  }
 
   if (body.notion_page_url) {
     // Extract page ID from URL if possible

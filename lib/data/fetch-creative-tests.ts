@@ -25,6 +25,7 @@ export type CreativeTest = {
   notion_page_url: string | null
   notion_matched: boolean
   flag_reason: string | null
+  dismissed_at: string | null
   created_at: string
   updated_at: string
 }
