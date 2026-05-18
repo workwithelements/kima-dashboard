@@ -723,6 +723,9 @@ export default function ClientPerformanceView({
   const [amplitudeData, setAmplitudeData] = useState<
     Record<string, Record<string, number>>
   >({})
+  const [amplitudeCompData, setAmplitudeCompData] = useState<
+    Record<string, Record<string, number>>
+  >({})
   const [amplitudeErrors, setAmplitudeErrors] = useState<
     Record<string, { code: string; status: number; message?: string }>
   >({})
@@ -819,6 +822,43 @@ export default function ClientPerformanceView({
       cancelled = true
     }
   }, [client.id, amplitudeStepKeys.join(","), from, to])
+
+  // Fetch comparison-range Amplitude counts so funnel cards can show WoW/period
+  // deltas for Amplitude-backed steps. Mirrors the primary effect above.
+  useEffect(() => {
+    if (amplitudeStepKeys.length === 0 || !clientCompRange) {
+      setAmplitudeCompData({})
+      return
+    }
+    const compFrom = clientCompRange.from
+    const compTo = clientCompRange.to
+    let cancelled = false
+    Promise.all(
+      amplitudeStepKeys.map(async (key) => {
+        const id = amplitudeEventId(key)
+        try {
+          const res = await fetch(
+            `/api/clients/${client.id}/amplitude/event/${id}?from=${compFrom}&to=${compTo}`
+          )
+          if (!res.ok) return { key, byDate: {} as Record<string, number> }
+          const payload = (await res.json()) as {
+            by_date?: Record<string, number>
+          }
+          return { key, byDate: payload.by_date ?? {} }
+        } catch {
+          return { key, byDate: {} as Record<string, number> }
+        }
+      })
+    ).then((entries) => {
+      if (cancelled) return
+      const next: Record<string, Record<string, number>> = {}
+      for (const { key, byDate } of entries) next[key] = byDate
+      setAmplitudeCompData(next)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [client.id, amplitudeStepKeys.join(","), clientCompRange?.from, clientCompRange?.to])
 
   // Build funnel chart series from configured steps (Meta only). Includes
   // amplitude-prefixed steps with synthesised labels.
@@ -1629,13 +1669,20 @@ export default function ClientPerformanceView({
                 const dailyCounts = amplitudeData[stepKey] ?? {}
                 const count = Object.values(dailyCounts).reduce((a, b) => a + b, 0)
                 const costPer = count > 0 ? metrics.spend / count : null
+                const compDailyCounts = amplitudeCompData[stepKey] ?? {}
+                const compCount = Object.values(compDailyCounts).reduce((a, b) => a + b, 0)
+                const compCostPer = compCount > 0 ? compMetrics.spend / compCount : null
                 return [
                   <button
                     key={`${stepKey}-count`}
                     onClick={() => setActiveCpaStep(stepKey)}
                     className={`rounded-xl text-left transition ${isActive ? "ring-1 ring-brand-lime/40" : "ring-1 ring-transparent hover:ring-neutral-700"}`}
                   >
-                    <MetricCard label={label} value={fmtNumber(count)} delta={null} />
+                    <MetricCard
+                      label={label}
+                      value={fmtNumber(count)}
+                      delta={hasComp && compCount > 0 ? delta(count, compCount) : null}
+                    />
                   </button>,
                   <MetricCard key={`${stepKey}-rate`} label="—" value="—" delta={null} />,
                   <button
@@ -1646,7 +1693,11 @@ export default function ClientPerformanceView({
                     <MetricCard
                       label={`Cost per ${label}`}
                       value={costPer !== null ? fmtCurrency(costPer, currency) : "—"}
-                      delta={null}
+                      delta={
+                        hasComp && costPer !== null && compCostPer !== null
+                          ? delta(costPer, compCostPer)
+                          : null
+                      }
                       invertDelta
                     />
                   </button>,
