@@ -30,11 +30,12 @@ export async function POST(request: NextRequest) {
 
   const db = createServiceClient()
 
-  // Find all ready tests
+  // Find all ready tests (skip operator-dismissed ones)
   const { data: readyTests, error: testsErr } = await db
     .from("creative_tests")
     .select("id, client_id, concept_name, adset_name, variant_ad_ids, notion_page_url")
     .eq("status", "ready")
+    .is("dismissed_at", null)
 
   if (testsErr || !readyTests || readyTests.length === 0) {
     return NextResponse.json({ message: "No ready tests found", queued: 0 })
@@ -82,16 +83,29 @@ export async function POST(request: NextRequest) {
 
   for (let i = 0; i < allAdIds.length; i += 300) {
     const chunk = allAdIds.slice(i, i + 300)
-    const { data } = await db
-      .from("meta_daily_performance")
-      .select("ad_id, ad_name")
-      .in("ad_id", chunk)
-      .limit(chunk.length)
-
-    for (const row of data ?? []) {
-      if (row.ad_name && !adNameMap[row.ad_id]) {
-        adNameMap[row.ad_id] = row.ad_name
+    // meta_daily_performance has one row per (ad_id, date) — capping at
+    // chunk.length truncates total rows, not distinct ad_ids, so most ad
+    // names go missing and conforming tests get filtered out. Paginate
+    // newest-first and stop once every ad in the chunk has a name.
+    const needed = new Set(chunk)
+    const PAGE = 1000
+    let offset = 0
+    while (needed.size > 0) {
+      const { data } = await db
+        .from("meta_daily_performance")
+        .select("ad_id, ad_name")
+        .in("ad_id", chunk)
+        .order("date", { ascending: false })
+        .range(offset, offset + PAGE - 1)
+      if (!data || data.length === 0) break
+      for (const row of data) {
+        if (row.ad_name && needed.has(row.ad_id)) {
+          adNameMap[row.ad_id] = row.ad_name
+          needed.delete(row.ad_id)
+        }
       }
+      if (data.length < PAGE) break
+      offset += PAGE
     }
   }
 

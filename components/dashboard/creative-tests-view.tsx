@@ -76,6 +76,8 @@ export default function CreativeTestsView({
   const [linkingId, setLinkingId] = useState<string | null>(null)
   const [notionUrl, setNotionUrl] = useState("")
   const [analyzingId, setAnalyzingId] = useState<string | null>(null)
+  const [showDismissed, setShowDismissed] = useState(false)
+  const [dismissingConcept, setDismissingConcept] = useState<string | null>(null)
 
   const thresholds = {
     minDays: config?.min_days_live ?? 5,
@@ -105,8 +107,14 @@ export default function CreativeTestsView({
   // kima-sync's status here — a "monitoring" test should surface as soon as
   // it's detected, even before any variant has spent. New launches need time
   // to accumulate spend; gating on recent spend made them invisible.
+  // Dismissed tests are hidden by default and reappear via the toggle.
   const currentTests = useMemo(() =>
-    conformingTests.filter((t) => t.status !== "analysed"),
+    conformingTests.filter((t) => t.status !== "analysed" && !t.dismissed_at),
+    [conformingTests]
+  )
+
+  const dismissedCurrentTests = useMemo(() =>
+    conformingTests.filter((t) => t.status !== "analysed" && t.dismissed_at),
     [conformingTests]
   )
 
@@ -115,11 +123,11 @@ export default function CreativeTestsView({
     [conformingTests]
   )
 
-  // Diagnostics for the empty state — only consider non-analysed tests.
-  // When the empty state triggers we know every pending test failed the
+  // Diagnostics for the empty state — only consider non-analysed, non-dismissed
+  // tests. When the empty state triggers we know every pending test failed the
   // conforming check, so pendingTests.length is the non-conforming count.
   const pendingTests = useMemo(
-    () => tests.filter((t) => t.status !== "analysed"),
+    () => tests.filter((t) => t.status !== "analysed" && !t.dismissed_at),
     [tests]
   )
 
@@ -137,10 +145,9 @@ export default function CreativeTestsView({
     return Array.from(names)
   }, [pendingTests, adNames, namingConfig])
 
-  // Group current tests by concept name (across adsets)
-  const conceptGroups = useMemo(() => {
+  function groupByConcept(testsToGroup: CreativeTest[]): ConceptGroup[] {
     const map = new Map<string, ConceptGroup>()
-    for (const test of currentTests) {
+    for (const test of testsToGroup) {
       const existing = map.get(test.concept_name)
       if (existing) {
         existing.tests.push(test)
@@ -162,7 +169,11 @@ export default function CreativeTestsView({
       }
     }
     return Array.from(map.values()).sort((a, b) => b.totalSpend - a.totalSpend)
-  }, [currentTests])
+  }
+
+  // Group current tests by concept name (across adsets)
+  const conceptGroups = useMemo(() => groupByConcept(currentTests), [currentTests])
+  const dismissedGroups = useMemo(() => groupByConcept(dismissedCurrentTests), [dismissedCurrentTests])
 
   async function handleLinkNotion(testId: string) {
     if (!notionUrl.trim()) return
@@ -187,6 +198,27 @@ export default function CreativeTestsView({
       })
     } catch (e) {
       console.error("Failed to queue analysis:", e)
+    }
+  }
+
+  async function handleSetDismissed(group: ConceptGroup, dismissed: boolean) {
+    if (dismissed && !window.confirm(
+      `Hide "${group.conceptName}" from creative tests? You can restore it from "Show dismissed".`
+    )) return
+
+    setDismissingConcept(group.conceptName)
+    try {
+      await Promise.all(group.tests.map((t) =>
+        fetch(`/api/creative-tests/${t.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dismissed }),
+        })
+      ))
+      window.location.reload()
+    } catch (e) {
+      console.error("Failed to update dismissed state:", e)
+      setDismissingConcept(null)
     }
   }
 
@@ -226,6 +258,14 @@ export default function CreativeTestsView({
             )}
           </button>
         </div>
+        {tab === "current" && dismissedGroups.length > 0 && (
+          <button
+            onClick={() => setShowDismissed((v) => !v)}
+            className="text-xs text-neutral-500 hover:text-white"
+          >
+            {showDismissed ? "Hide" : "Show"} dismissed ({dismissedGroups.length})
+          </button>
+        )}
       </div>
 
       {/* Warn only when no key action is configured anywhere — the dashboard
@@ -368,6 +408,16 @@ export default function CreativeTestsView({
                           Monitoring
                         </span>
                       )}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleSetDismissed(group, true) }}
+                        disabled={dismissingConcept === group.conceptName}
+                        title="Dismiss this test"
+                        className="rounded-md p-1 text-neutral-500 hover:bg-neutral-800 hover:text-red-400 transition disabled:opacity-50"
+                      >
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
                     </div>
 
                     <svg
@@ -443,6 +493,39 @@ export default function CreativeTestsView({
               )
             })}
           </div>
+
+          {showDismissed && dismissedGroups.length > 0 && (
+            <div className="mt-6 space-y-3">
+              <div className="text-xs uppercase tracking-wider text-neutral-500">
+                Dismissed
+              </div>
+              {dismissedGroups.map((group) => (
+                <div
+                  key={group.conceptName}
+                  className="flex items-center gap-4 rounded-xl border border-neutral-800 bg-neutral-900/50 p-4 opacity-60"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium truncate text-neutral-300">{group.conceptName}</span>
+                      <span className="shrink-0 rounded-full bg-neutral-800 px-2 py-0.5 text-xs text-neutral-500">
+                        {group.variantCount} variants
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-xs text-neutral-500 truncate">
+                      {group.tests.map((t) => t.adset_name || t.adset_id).join(", ")}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleSetDismissed(group, false)}
+                    disabled={dismissingConcept === group.conceptName}
+                    className="rounded-lg border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+                  >
+                    Restore
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       )}
 
