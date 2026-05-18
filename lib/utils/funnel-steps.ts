@@ -18,6 +18,13 @@ export type FunnelStepDef = {
   costLabel: string
   /** Decimal places for rate display (default 1) */
   rateDecimals?: number
+  /** Override the spend field used for the "cost per" calculation.
+   *  Defaults to `spend` (the period total). Used by lifetime metrics
+   *  like Cost-per-Eyeball that pair lifetime spend with lifetime reach. */
+  spendField?: keyof AggregatedMetrics
+  /** Skip the rate card. Used when a meaningful rate can't be derived
+   *  (e.g. lifetime metrics where the denominator is the same field). */
+  hideRate?: boolean
 }
 
 export type FunnelStepValues = {
@@ -116,6 +123,31 @@ export const FUNNEL_STEP_DEFS: Record<string, FunnelStepDef> = {
     rateMultiplier: 100,
     costLabel: "Cost per In-App Reg.",
   },
+  // Reuses meta_daily_performance.video_3s_views — Meta's `video_view`
+  // action is what most teams colloquially call a "2-second view".
+  video_2sec_views: {
+    field: "video2SecViews",
+    label: "2-Sec Video Views",
+    shortLabel: "2-Sec View",
+    rateLabel: "2-Sec View Rate",
+    rateDenominator: "impressions",
+    rateMultiplier: 100,
+    costLabel: "Cost per 2-Sec View",
+    rateDecimals: 2,
+  },
+  // Lifetime cumulative reach paired with lifetime spend so the metric
+  // doesn't drift when the operator changes the date range.
+  lifetime_eyeballs: {
+    field: "lifetimeReach",
+    label: "Eyeballs (Lifetime Reach)",
+    shortLabel: "Eyeball",
+    rateLabel: "",
+    rateDenominator: "lifetimeReach",
+    rateMultiplier: 1,
+    costLabel: "Cost per Eyeball",
+    spendField: "lifetimeSpend",
+    hideRate: true,
+  },
 }
 
 /** Ordered list of all available step keys for the config UI */
@@ -129,6 +161,8 @@ export const FUNNEL_STEP_ORDER = [
   "trials_started",
   "app_installs",
   "mobile_app_registrations",
+  "video_2sec_views",
+  "lifetime_eyeballs",
 ] as const
 
 export type FunnelStepKey = (typeof FUNNEL_STEP_ORDER)[number]
@@ -167,11 +201,11 @@ export function calculateFunnelStep(
   const count = data[def.field] || 0
   const denominatorField = prevStepField ?? def.rateDenominator
   const denominator = data[denominatorField] || 0
-  const spend = data.spend || 0
+  const spend = data[def.spendField ?? "spend"] || 0
 
   return {
     count,
-    rate: denominator > 0 ? (count / denominator) * def.rateMultiplier : null,
+    rate: def.hideRate || denominator <= 0 ? null : (count / denominator) * def.rateMultiplier,
     costPer: count > 0 ? spend / count : null,
   }
 }

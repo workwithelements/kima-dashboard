@@ -130,6 +130,11 @@ type Props = {
   fetchedTo?: string
   compareType: ComparisonType
   baselineReach?: number
+  /** All-time spend, used as numerator for Cost-per-Eyeball. */
+  lifetimeSpend?: number
+  /** All-time cumulative reach, used as denominator for Cost-per-Eyeball
+   *  so the metric stays stable across date selections. */
+  lifetimeReach?: number
   funnelSteps?: string[] | null
   /** Key action step for CPA chart denominator */
   keyAction?: string | null
@@ -188,6 +193,12 @@ function mergeMetrics(a: AggregatedMetrics, b: AggregatedMetrics): AggregatedMet
     revenue: a.revenue + b.revenue,
     appInstalls: a.appInstalls + b.appInstalls,
     mobileAppRegistrations: a.mobileAppRegistrations + b.mobileAppRegistrations,
+    video2SecViews: a.video2SecViews + b.video2SecViews,
+    // Lifetime fields are client-wide, not platform-wide — take the
+    // larger of the two so Meta's value isn't lost when merged with
+    // Google Ads (which doesn't have reach).
+    lifetimeReach: Math.max(a.lifetimeReach, b.lifetimeReach),
+    lifetimeSpend: a.lifetimeSpend + b.lifetimeSpend,
   }
 }
 
@@ -204,6 +215,8 @@ export default function ClientPerformanceView({
   fetchedTo,
   compareType,
   baselineReach = 0,
+  lifetimeSpend = 0,
+  lifetimeReach = 0,
   funnelSteps: initialSteps = null,
   keyAction: initialKeyAction = null,
   funnelViews: initialViews,
@@ -601,13 +614,17 @@ export default function ClientPerformanceView({
     return result
   }, [googleAdsComparisonRows, selectedGaCampaigns, gaCampaigns.length, selectedAdGroups, adGroups.length])
 
-  // Aggregated metrics based on selected platform
+  // Aggregated metrics based on selected platform. Lifetime fields are
+  // client-wide and date-range-independent, so we overlay them onto the
+  // result of the row-based aggregator (which leaves them at 0).
   const metrics = useMemo(() => {
-    if (isMeta) return aggregateMetrics(filteredRows)
-    if (isGoogleAds) return aggregateGoogleAdsMetrics(filteredGaRows)
-    // "all" — combine both
-    return mergeMetrics(aggregateMetrics(filteredRows), aggregateGoogleAdsMetrics(filteredGaRows))
-  }, [filteredRows, filteredGaRows, platform])
+    const base = isMeta
+      ? aggregateMetrics(filteredRows)
+      : isGoogleAds
+      ? aggregateGoogleAdsMetrics(filteredGaRows)
+      : mergeMetrics(aggregateMetrics(filteredRows), aggregateGoogleAdsMetrics(filteredGaRows))
+    return { ...base, lifetimeSpend, lifetimeReach }
+  }, [filteredRows, filteredGaRows, platform, lifetimeSpend, lifetimeReach])
 
   const derived = useMemo(() => deriveMetrics(metrics), [metrics])
 
@@ -637,10 +654,16 @@ export default function ClientPerformanceView({
   }, [client.monthly_budget, preset, filteredRows, filteredGaRows, isAll])
 
   const compMetrics = useMemo(() => {
-    if (isMeta) return aggregateMetrics(filteredCompRows)
-    if (isGoogleAds) return aggregateGoogleAdsMetrics(filteredGaCompRows)
-    return mergeMetrics(aggregateMetrics(filteredCompRows), aggregateGoogleAdsMetrics(filteredGaCompRows))
-  }, [filteredCompRows, filteredGaCompRows, platform])
+    const base = isMeta
+      ? aggregateMetrics(filteredCompRows)
+      : isGoogleAds
+      ? aggregateGoogleAdsMetrics(filteredGaCompRows)
+      : mergeMetrics(aggregateMetrics(filteredCompRows), aggregateGoogleAdsMetrics(filteredGaCompRows))
+    // Comparison period uses the same lifetime values — the metric is
+    // a stable lifetime stat, not a windowed total, so there's no delta
+    // between current and comparison for Cost-per-Eyeball.
+    return { ...base, lifetimeSpend, lifetimeReach }
+  }, [filteredCompRows, filteredGaCompRows, platform, lifetimeSpend, lifetimeReach])
 
   const compDerived = useMemo(() => deriveMetrics(compMetrics), [compMetrics])
 
@@ -1729,21 +1752,25 @@ export default function ClientPerformanceView({
                     delta={compVals ? delta(vals.count, compVals.count) : null}
                   />
                 </button>,
-                <button
-                  key={`${stepKey}-rate`}
-                  onClick={() => setActiveCpaStep(stepKey)}
-                  className={`rounded-xl text-left transition ${isActive ? "ring-1 ring-brand-lime/40" : "ring-1 ring-transparent hover:ring-neutral-700"}`}
-                >
-                  <MetricCard
-                    label={def.rateLabel}
-                    value={vals.rate !== null ? fmtPercent(vals.rate, rateDecimals) : "—"}
-                    delta={
-                      compVals && vals.rate !== null && compVals.rate !== null
-                        ? delta(vals.rate, compVals.rate)
-                        : null
-                    }
-                  />
-                </button>,
+                def.hideRate ? (
+                  <MetricCard key={`${stepKey}-rate`} label="—" value="—" delta={null} />
+                ) : (
+                  <button
+                    key={`${stepKey}-rate`}
+                    onClick={() => setActiveCpaStep(stepKey)}
+                    className={`rounded-xl text-left transition ${isActive ? "ring-1 ring-brand-lime/40" : "ring-1 ring-transparent hover:ring-neutral-700"}`}
+                  >
+                    <MetricCard
+                      label={def.rateLabel}
+                      value={vals.rate !== null ? fmtPercent(vals.rate, rateDecimals) : "—"}
+                      delta={
+                        compVals && vals.rate !== null && compVals.rate !== null
+                          ? delta(vals.rate, compVals.rate)
+                          : null
+                      }
+                    />
+                  </button>
+                ),
                 <button
                   key={`${stepKey}-cost`}
                   onClick={() => setActiveCpaStep(stepKey)}
