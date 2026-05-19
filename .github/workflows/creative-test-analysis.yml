@@ -29,6 +29,21 @@ jobs:
             exit 1
           fi
 
+      - name: Check tracked event firing
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${{ secrets.DASHBOARD_URL }}/api/cron/check-event-firing" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -1)
+          echo "Status: $HTTP_CODE"
+          echo "Response: $BODY"
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "::error::Event firing check returned $HTTP_CODE"
+            exit 1
+          fi
+
       - name: Checkout repo
         uses: actions/checkout@v4
 
