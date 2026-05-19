@@ -31,6 +31,7 @@ type Props = {
 export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo }: Props) {
   const [html, setHtml] = useState<string | null>(null)
   const [errored, setErrored] = useState(false)
+  const [errorReason, setErrorReason] = useState<string | null>(null)
   const [thumbErrored, setThumbErrored] = useState(false)
   const reqRef = useRef(0)
 
@@ -38,22 +39,32 @@ export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo 
     const reqId = ++reqRef.current
     setHtml(null)
     setErrored(false)
+    setErrorReason(null)
 
     fetch(`/api/ad-preview?ad_id=${encodeURIComponent(adId)}&format=${format}`)
       .then(async (res) => {
         if (reqId !== reqRef.current) return
+        const data = await res.json().catch(() => null)
         if (!res.ok) {
           setErrored(true)
+          const reason = summarizeAttempts(data) || `HTTP ${res.status}`
+          setErrorReason(reason)
+          console.warn("[AdPreview] failed", { adId, format, status: res.status, data })
           return
         }
-        const data = await res.json()
-        if (reqId !== reqRef.current) return
-        if (data?.html) setHtml(data.html as string)
-        else setErrored(true)
+        if (data?.html) {
+          setHtml(data.html as string)
+        } else {
+          setErrored(true)
+          setErrorReason("empty response")
+          console.warn("[AdPreview] empty response", { adId, format, data })
+        }
       })
-      .catch(() => {
+      .catch((e) => {
         if (reqId !== reqRef.current) return
         setErrored(true)
+        setErrorReason(e?.message || "network error")
+        console.warn("[AdPreview] threw", { adId, format, error: e })
       })
   }, [adId, format])
 
@@ -73,8 +84,8 @@ export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo 
   }
 
   // Loading or error → show the thumbnail as a fallback so the modal never
-  // looks broken. We don't surface a separate error state intentionally;
-  // the thumbnail is good enough until Meta returns something.
+  // looks broken. When errored, surface Meta's actual reason so the operator
+  // can act on it (token scope, format mismatch, archived creative, etc.).
   return (
     <div className={`relative w-full ${aspect} bg-neutral-800 flex items-center justify-center overflow-hidden`}>
       {fallbackThumbnailUrl && !thumbErrored ? (
@@ -87,8 +98,13 @@ export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo 
           onError={() => setThumbErrored(true)}
         />
       ) : (
-        <div className="text-neutral-600 text-sm">
-          {isVideo ? "🎬" : "🖼"} {errored ? "Preview unavailable" : "Loading preview…"}
+        <div className="px-6 text-center text-sm text-neutral-500">
+          <div className="mb-1 text-neutral-600">
+            {isVideo ? "🎬" : "🖼"} {errored ? "Preview unavailable" : "Loading preview…"}
+          </div>
+          {errored && errorReason && (
+            <div className="text-[10px] leading-snug text-neutral-600">{errorReason}</div>
+          )}
         </div>
       )}
       {isVideo && fallbackThumbnailUrl && !thumbErrored && (
@@ -100,8 +116,25 @@ export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo 
           </div>
         </div>
       )}
+      {errored && errorReason && fallbackThumbnailUrl && !thumbErrored && (
+        <div className="absolute bottom-2 left-2 right-2 rounded-md bg-black/70 px-2 py-1 text-[10px] text-neutral-300 backdrop-blur-sm">
+          {errorReason}
+        </div>
+      )}
     </div>
   )
+}
+
+/** Pull a human-readable summary out of the API's `attempts` array, falling
+ *  back to the generic error string. */
+function summarizeAttempts(data: any): string | null {
+  if (!data) return null
+  if (Array.isArray(data?.attempts) && data.attempts.length > 0) {
+    const last = data.attempts[data.attempts.length - 1]
+    if (last?.message) return `${last.via} ${last.status || ""}: ${last.message}`.trim()
+  }
+  if (typeof data?.error === "string") return data.error
+  return null
 }
 
 /** Pick the most appropriate ad_format for an ad based on which placement
