@@ -1507,11 +1507,18 @@ export default function ClientPerformanceView({
     })),
   ] : undefined
 
-  const handleDrillDown = isMeta && metaLevel !== "ad" ? (row: { id: string; name: string }) => {
-    setDrillPath(prev => [...prev, { level: metaLevel, id: row.id, name: row.name }])
-    setMetaLevel(metaLevel === "campaign" ? "adset" : "ad")
-    setPerfDimFilters({}) // reset naming convention filters on drill
-  } : undefined
+  const handleDrillDown = isMeta
+    ? metaLevel === "ad"
+      ? (row: { id: string; name: string }) => {
+          const match = enrichedAds.find((a) => a.adId === row.id)
+          if (match) setDetailAd(match)
+        }
+      : (row: { id: string; name: string }) => {
+          setDrillPath(prev => [...prev, { level: metaLevel, id: row.id, name: row.name }])
+          setMetaLevel(metaLevel === "campaign" ? "adset" : "ad")
+          setPerfDimFilters({})
+        }
+    : undefined
 
   return (
     <div className="space-y-6">
