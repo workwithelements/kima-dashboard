@@ -19,13 +19,25 @@ const VALID_FORMATS = new Set([
   "FACEBOOK_REELS_MOBILE",
 ])
 
+type GraphAttempt = {
+  via: "creative_id" | "ad_id"
+  id: string
+  status: number
+  ok: boolean
+  /** Meta's error message when not ok, or "empty data array" when ok-but-no-preview. */
+  message?: string
+}
+
 /**
  * GET /api/ad-preview?ad_id=<ad_id>&format=<MOBILE_FEED_STANDARD|...>
  *
  * Returns `{ html: string }` containing Meta's iframe blob for the requested
- * format, or `{ error }` on failure. The HTML is meant to be rendered with
- * <iframe srcDoc={html}> — that sidesteps Meta's X-Frame-Options header,
+ * format, or `{ error, attempts }` on failure. The HTML is meant to be rendered
+ * with <iframe srcDoc={html}> — that sidesteps Meta's X-Frame-Options header,
  * which blocks the preview URL from loading via <iframe src=...>.
+ *
+ * Strategy: try /{creative_id}/previews first (works for paused/archived ads
+ * too); if that errors or returns nothing, fall back to /{ad_id}/previews.
  *
  * Cached in meta_ad_creative_previews for CACHE_TTL_MS per (ad_id, format).
  * The access token is never sent to the browser.
@@ -62,7 +74,7 @@ export async function GET(request: NextRequest) {
     if (cached?.html) {
       return NextResponse.json({ html: cached.html, source: "stale-cache" })
     }
-    return NextResponse.json({ error: "preview unavailable" }, { status: 503 })
+    return NextResponse.json({ error: "META_ACCESS_TOKEN not set" }, { status: 503 })
   }
 
   const { data: meta } = await supabase
@@ -71,44 +83,60 @@ export async function GET(request: NextRequest) {
     .eq("ad_id", adId)
     .maybeSingle()
 
-  // Prefer the creative_id endpoint — it works even for paused ads. Fall back
-  // to the ad_id endpoint, which still returns previews for active ads.
-  const fetchId = meta?.creative_id || adId
+  const attempts: GraphAttempt[] = []
 
-  try {
-    const graphRes = await fetch(
-      `${META_GRAPH_URL}/${fetchId}/previews?ad_format=${format}&access_token=${accessToken}`,
-      { next: { revalidate: 0 } }
-    )
+  // Try creative_id first (if known), then ad_id.
+  const candidates: { via: "creative_id" | "ad_id"; id: string }[] = []
+  if (meta?.creative_id) candidates.push({ via: "creative_id", id: meta.creative_id })
+  candidates.push({ via: "ad_id", id: adId })
 
-    if (!graphRes.ok) {
-      if (cached?.html) {
-        return NextResponse.json({ html: cached.html, source: "stale-cache" })
+  for (const { via, id } of candidates) {
+    try {
+      const graphRes = await fetch(
+        `${META_GRAPH_URL}/${id}/previews?ad_format=${format}&access_token=${accessToken}`,
+        { next: { revalidate: 0 } }
+      )
+      const bodyText = await graphRes.text()
+      let parsed: any = null
+      try { parsed = JSON.parse(bodyText) } catch { /* keep null */ }
+
+      if (!graphRes.ok) {
+        const message = parsed?.error?.message || bodyText.slice(0, 240)
+        attempts.push({ via, id, status: graphRes.status, ok: false, message })
+        console.warn(`[ad-preview] ${via}=${id} format=${format} status=${graphRes.status} msg=${message}`)
+        continue
       }
-      return NextResponse.json({ error: "meta api error", status: graphRes.status }, { status: 502 })
-    }
 
-    const data = await graphRes.json()
-    const html = data?.data?.[0]?.body as string | undefined
-    if (!html) {
-      if (cached?.html) {
-        return NextResponse.json({ html: cached.html, source: "stale-cache" })
+      const html = parsed?.data?.[0]?.body as string | undefined
+      if (!html) {
+        attempts.push({ via, id, status: graphRes.status, ok: true, message: "empty data array" })
+        console.warn(`[ad-preview] ${via}=${id} format=${format} returned no preview body`)
+        continue
       }
-      return NextResponse.json({ error: "empty preview" }, { status: 502 })
-    }
 
-    // Fire-and-forget upsert. If the cache write fails, the request still
-    // succeeds — the user gets their preview either way.
-    supabase
-      .from("meta_ad_creative_previews")
-      .upsert({ ad_id: adId, format, html, fetched_at: new Date().toISOString() })
-      .then(() => {})
+      // Success — cache and return.
+      supabase
+        .from("meta_ad_creative_previews")
+        .upsert({ ad_id: adId, format, html, fetched_at: new Date().toISOString() })
+        .then(() => {})
 
-    return NextResponse.json({ html, source: "fresh" })
-  } catch {
-    if (cached?.html) {
-      return NextResponse.json({ html: cached.html, source: "stale-cache" })
+      return NextResponse.json({ html, source: "fresh", via })
+    } catch (e: any) {
+      const message = e?.message || "fetch threw"
+      attempts.push({ via, id, status: 0, ok: false, message })
+      console.warn(`[ad-preview] ${via}=${id} format=${format} threw: ${message}`)
     }
-    return NextResponse.json({ error: "fetch failed" }, { status: 502 })
   }
+
+  // Every attempt failed. Fall back to stale cache if we have one — even if
+  // it's older than CACHE_TTL_MS, showing the previous render beats showing
+  // nothing.
+  if (cached?.html) {
+    return NextResponse.json({ html: cached.html, source: "stale-cache", attempts })
+  }
+
+  return NextResponse.json(
+    { error: "preview unavailable", attempts, hint: "Check Meta API error messages above. Common causes: token lacks ads_read on this ad account; ad format not supported by this creative; creative archived." },
+    { status: 502 }
+  )
 }
