@@ -28,11 +28,16 @@ type GraphAttempt = {
   message?: string
 }
 
-/** A cached HTML row is from the old format (raw iframe wrapper, blocked by
- *  X-Frame-Options) if it starts with `<iframe`. Those are unusable — treat
- *  them as a cache miss so we refetch and store the rendered inner HTML. */
+/** A cached HTML row is unusable if it's from an older code path:
+ *   - Pre-#29: raw iframe wrapper, blocked by X-Frame-Options.
+ *   - Pre-#30: rendered HTML without the <base href> tag, so all relative
+ *     URLs 404 inside srcDoc and the iframe renders blank.
+ *  Treat either as a cache miss so we refetch and store a fresh, working
+ *  version. */
 function isLegacyCachedHtml(html: string): boolean {
-  return /^\s*<iframe/i.test(html)
+  if (/^\s*<iframe/i.test(html)) return true
+  if (!/<base\s+href=/i.test(html)) return true
+  return false
 }
 
 /**
