@@ -40,9 +40,7 @@ export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo 
     setErrorReason(null)
 
     // Format is purely a render-time concern — no need to refetch.
-    // `nocache=1` while we're still debugging the rendering — drops the
-    // server-side cache hit so we always see fresh normalizer output.
-    fetch(`/api/ad-preview?ad_id=${encodeURIComponent(adId)}&nocache=1`)
+    fetch(`/api/ad-preview?ad_id=${encodeURIComponent(adId)}`)
       .then(async (res) => {
         if (reqId !== reqRef.current) return
         const payload = await res.json().catch(() => null)
@@ -205,18 +203,9 @@ function MediaArea({ data, format }: { data: AdCreativeData; format: AdPreviewFo
   const isVideoCard = data.format === "single_video" || data.media?.type === "video"
 
   if (!videoUrl && !imageUrl) {
-    // Diagnostic placeholder: show the exact data the component received,
-    // so we can tell apart "API returned null" from "renderer bug" from
-    // "URL was set but failed to load".
     return (
-      <div className="aspect-[1.91/1] bg-neutral-200 p-3 overflow-auto text-[10px] font-mono text-neutral-700">
-        <div className="font-semibold mb-1">No media URL in data. Got:</div>
-        <pre className="whitespace-pre-wrap break-all">{JSON.stringify({
-          format: data.format,
-          media: data.media,
-          page: data.page,
-          childCount: data.children.length,
-        }, null, 2)}</pre>
+      <div className="aspect-[1.91/1] bg-neutral-200 flex items-center justify-center text-xs text-neutral-500">
+        No media
       </div>
     )
   }
