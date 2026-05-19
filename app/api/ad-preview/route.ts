@@ -22,6 +22,9 @@ const CREATIVE_FIELDS = [
   // v21.0 with `(#12) Old Instagram ID is deprecated`. We never used the
   // returned value, so dropping it is the simplest fix.
   "object_story_spec{page_id,link_data{message,name,description,link,caption,call_to_action,image_hash,picture,video_id,child_attachments{name,description,link,picture,image_hash,call_to_action,video_id}},video_data{title,message,call_to_action,image_hash,image_url,video_id,link_description},photo_data{url,caption,branded_content_shared_to_sponsor_status}}",
+  // Advantage+ Shopping (ASC) and other dynamic creatives put the actual
+  // media here instead of in object_story_spec.
+  "asset_feed_spec{bodies{text},titles{text},descriptions{text},link_urls{website_url,display_url},images{hash,url},videos{video_id,thumbnail_hash,thumbnail_url},call_to_action_types,ad_formats}",
 ].join(",")
 
 /** What the client gets back — structured, render-ready. */
@@ -167,7 +170,7 @@ export async function GET(request: NextRequest) {
         .upsert({ ad_id: adId, format: cacheKey, html: JSON.stringify(data), fetched_at: new Date().toISOString() })
         .then(() => {})
 
-      if (debug) return debugResponse(data)
+      if (debug) return debugResponse(data, { raw, via, page: pageInfo, videoUrlMap })
       return NextResponse.json({ data, source: "fresh", via })
     } catch (e: any) {
       const message = e?.message || "fetch threw"
@@ -201,8 +204,15 @@ function tryParseJson(text: string): AdCreativeData | null {
   }
 }
 
-function debugResponse(data: AdCreativeData) {
-  return new NextResponse(JSON.stringify(data, null, 2), {
+function debugResponse(
+  data: AdCreativeData,
+  extras?: { raw?: any; via?: string; page?: unknown; videoUrlMap?: Record<string, string> }
+) {
+  // When `extras` is present, include the raw Meta response so operators
+  // can see exactly what fields came back when the normalized output looks
+  // wrong. Cache-hit debugs only have `data` to show.
+  const payload = extras ? { data, ...extras } : data
+  return new NextResponse(JSON.stringify(payload, null, 2), {
     headers: { "Content-Type": "application/json; charset=utf-8" },
   })
 }
@@ -258,6 +268,10 @@ function collectVideoIds(raw: any): string[] {
   if (Array.isArray(children)) {
     for (const c of children) push(c?.video_id)
   }
+  const feedVideos = raw?.asset_feed_spec?.videos
+  if (Array.isArray(feedVideos)) {
+    for (const v of feedVideos) push(v?.video_id)
+  }
   return ids
 }
 
@@ -273,24 +287,40 @@ function normalizeCreative(
   const photoData = spec?.photo_data
   const children: any[] = Array.isArray(linkData?.child_attachments) ? linkData.child_attachments : []
 
+  // Advantage+ Shopping and other dynamic creatives put text + media inside
+  // asset_feed_spec as parallel arrays. Take the first variant for preview.
+  const feedSpec = raw?.asset_feed_spec
+  const feedBody = pickArrayText(feedSpec?.bodies)
+  const feedTitle = pickArrayText(feedSpec?.titles)
+  const feedDescription = pickArrayText(feedSpec?.descriptions)
+  const feedLinkUrl = feedSpec?.link_urls?.[0]?.website_url ?? null
+  const feedDisplayUrl = feedSpec?.link_urls?.[0]?.display_url ?? null
+  const feedFirstVideo = feedSpec?.videos?.[0]
+  const feedFirstImage = feedSpec?.images?.[0]
+  const feedCtaType = Array.isArray(feedSpec?.call_to_action_types) ? feedSpec.call_to_action_types[0] : null
+
   // Body — the long message above the media.
-  const body = linkData?.message ?? videoData?.message ?? raw?.body ?? photoData?.caption ?? null
+  const body = linkData?.message ?? videoData?.message ?? raw?.body ?? photoData?.caption ?? feedBody ?? null
 
   // Title — the headline beneath the media.
-  const title = linkData?.name ?? videoData?.title ?? raw?.title ?? raw?.name ?? null
+  const title = linkData?.name ?? videoData?.title ?? raw?.title ?? raw?.name ?? feedTitle ?? null
 
-  const description = linkData?.description ?? videoData?.link_description ?? null
-  const linkUrl = linkData?.link ?? raw?.link_url ?? null
-  const linkDomain = linkUrl ? extractDomain(linkUrl) : (linkData?.caption ?? null)
+  const description = linkData?.description ?? videoData?.link_description ?? feedDescription ?? null
+  const linkUrl = linkData?.link ?? raw?.link_url ?? feedLinkUrl ?? null
+  const linkDomain = linkUrl
+    ? extractDomain(linkUrl)
+    : (feedDisplayUrl ? extractDomain(feedDisplayUrl) ?? feedDisplayUrl.toUpperCase() : (linkData?.caption ?? null))
 
   const ctaType =
     linkData?.call_to_action?.type ??
     videoData?.call_to_action?.type ??
     raw?.call_to_action_type ??
+    feedCtaType ??
     null
   const cta = { type: ctaType, label: ctaLabel(ctaType) }
 
-  // Media: prefer video over image. Detect carousel.
+  // Media: prefer video over image. Detect carousel. Fall through to
+  // asset_feed_spec when object_story_spec yields nothing.
   let format: AdCreativeData["format"] = "unknown"
   let media: AdCreativeData["media"] = null
 
@@ -312,6 +342,22 @@ function normalizeCreative(
       type: "image",
       imageUrl: linkData?.picture ?? raw?.image_url ?? photoData?.url ?? null,
       thumbnailUrl: raw?.thumbnail_url ?? null,
+      videoUrl: null,
+    }
+  } else if (feedFirstVideo?.video_id) {
+    format = "single_video"
+    media = {
+      type: "video",
+      videoUrl: videoUrlMap[feedFirstVideo.video_id] ?? null,
+      thumbnailUrl: feedFirstVideo?.thumbnail_url ?? null,
+      imageUrl: null,
+    }
+  } else if (feedFirstImage?.url) {
+    format = "single_image"
+    media = {
+      type: "image",
+      imageUrl: feedFirstImage.url,
+      thumbnailUrl: null,
       videoUrl: null,
     }
   }
@@ -341,6 +387,17 @@ function normalizeCreative(
     media,
     children: normalizedChildren,
   }
+}
+
+/** asset_feed_spec text fields look like `[{text: "..."}]`; this just grabs
+ *  the first non-empty entry. */
+function pickArrayText(arr: any): string | null {
+  if (!Array.isArray(arr)) return null
+  for (const item of arr) {
+    const text = item?.text
+    if (typeof text === "string" && text.length > 0) return text
+  }
+  return null
 }
 
 function extractDomain(url: string): string | null {
