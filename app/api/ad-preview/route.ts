@@ -54,6 +54,7 @@ function isLegacyCachedHtml(html: string): boolean {
 export async function GET(request: NextRequest) {
   const adId = request.nextUrl.searchParams.get("ad_id")
   const format = request.nextUrl.searchParams.get("format") || "MOBILE_FEED_STANDARD"
+  const debug = request.nextUrl.searchParams.get("debug") === "1"
 
   if (!adId) {
     return NextResponse.json({ error: "ad_id required" }, { status: 400 })
@@ -78,6 +79,9 @@ export async function GET(request: NextRequest) {
   if (cacheUsable && cached?.html && cached.fetched_at) {
     const age = Date.now() - new Date(cached.fetched_at).getTime()
     if (age < CACHE_TTL_MS) {
+      if (debug) {
+        return new NextResponse(cached.html, { headers: { "Content-Type": "text/html; charset=utf-8" } })
+      }
       return NextResponse.json({ html: cached.html, source: "cache" })
     }
   }
@@ -150,18 +154,29 @@ export async function GET(request: NextRequest) {
         continue
       }
 
-      const renderedHtml = await renderedRes.text()
-      if (!renderedHtml || renderedHtml.length < 50) {
+      const rawHtml = await renderedRes.text()
+      if (!rawHtml || rawHtml.length < 50) {
         attempts.push({ via, id, status: renderedRes.status, ok: true, message: "inner empty" })
         continue
       }
 
-      // Cache and return.
+      // srcDoc gives the iframe a base URL of `about:srcdoc`, which breaks
+      // every relative or protocol-relative URL in Meta's response (scripts,
+      // stylesheets, CDN images). Inject a <base> tag pointing at
+      // facebook.com so those resolve correctly.
+      const renderedHtml = injectBaseTag(rawHtml, "https://www.facebook.com/")
+
+      // Cache and return. Debug mode returns the html as text/html so the
+      // operator can hit /api/ad-preview?ad_id=...&debug=1 directly and read
+      // exactly what we're shipping to the iframe.
       supabase
         .from("meta_ad_creative_previews")
         .upsert({ ad_id: adId, format, html: renderedHtml, fetched_at: new Date().toISOString() })
         .then(() => {})
 
+      if (debug) {
+        return new NextResponse(renderedHtml, { headers: { "Content-Type": "text/html; charset=utf-8" } })
+      }
       return NextResponse.json({ html: renderedHtml, source: "fresh", via })
     } catch (e: any) {
       const message = e?.message || "fetch threw"
@@ -187,4 +202,19 @@ function extractIframeSrc(wrapper: string): string | null {
   const match = wrapper.match(/<iframe[^>]*\ssrc=(["'])(.+?)\1/i)
   if (!match) return null
   return match[2].replace(/&amp;/g, "&")
+}
+
+/** Inject `<base href>` so relative URLs in the response resolve against
+ *  facebook.com instead of about:srcdoc. Skips if a base tag is already
+ *  present. Inserts inside <head> when one exists, otherwise prepends. */
+function injectBaseTag(html: string, base: string): string {
+  if (/<base\s+href=/i.test(html)) return html
+  const tag = `<base href="${base}">`
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head[^>]*>/i, (m) => `${m}${tag}`)
+  }
+  if (/<html[^>]*>/i.test(html)) {
+    return html.replace(/<html[^>]*>/i, (m) => `${m}<head>${tag}</head>`)
+  }
+  return `<!doctype html><html><head>${tag}</head><body>${html}</body></html>`
 }
