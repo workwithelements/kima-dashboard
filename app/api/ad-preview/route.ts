@@ -16,10 +16,12 @@ const CREATIVE_FIELDS = [
   "image_url",
   "thumbnail_url",
   "video_id",
-  "instagram_permalink_url",
-  "effective_instagram_media_id",
   "effective_object_story_id",
-  "object_story_spec{page_id,instagram_actor_id,link_data{message,name,description,link,caption,call_to_action,image_hash,picture,video_id,child_attachments{name,description,link,picture,image_hash,call_to_action,video_id}},video_data{title,message,call_to_action,image_hash,image_url,video_id,link_description},photo_data{url,caption,branded_content_shared_to_sponsor_status}}",
+  // Note: `instagram_actor_id` was removed here — Meta deprecated it as part
+  // of the v22.0 API changes and rejects requests for it pre-emptively on
+  // v21.0 with `(#12) Old Instagram ID is deprecated`. We never used the
+  // returned value, so dropping it is the simplest fix.
+  "object_story_spec{page_id,link_data{message,name,description,link,caption,call_to_action,image_hash,picture,video_id,child_attachments{name,description,link,picture,image_hash,call_to_action,video_id}},video_data{title,message,call_to_action,image_hash,image_url,video_id,link_description},photo_data{url,caption,branded_content_shared_to_sponsor_status}}",
 ].join(",")
 
 /** What the client gets back — structured, render-ready. */
