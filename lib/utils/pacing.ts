@@ -29,7 +29,7 @@ export type PacingResult = {
   pacingPct: number | null
   /** Status label */
   status: PacingStatus
-  /** Ideal daily spend (budget / days in month) */
+  /** Daily spend required from today (over remaining days) to land exactly on budget. */
   idealDailySpend: number | null
   /** Projected remaining spend */
   remainingProjected: number
@@ -159,7 +159,10 @@ export function calculatePacing(
     projectedSpend: Math.round(projectedSpend * 100) / 100,
     pacingPct: pacingPct !== null ? Math.round(pacingPct * 10) / 10 : null,
     status: getPacingStatus(pacingPct),
-    idealDailySpend: budget ? Math.round((budget / total) * 100) / 100 : null,
+    idealDailySpend:
+      budget && remaining > 0
+        ? Math.round((Math.max(0, budget - spentToDate) / remaining) * 100) / 100
+        : null,
     remainingProjected: Math.round(Math.max(0, projectedSpend - spentToDate) * 100) / 100,
     daysElapsed: elapsed,
     daysTotal: total,
