@@ -193,6 +193,7 @@ function mergeMetrics(a: AggregatedMetrics, b: AggregatedMetrics): AggregatedMet
     revenue: a.revenue + b.revenue,
     appInstalls: a.appInstalls + b.appInstalls,
     mobileAppRegistrations: a.mobileAppRegistrations + b.mobileAppRegistrations,
+    estimatedAdRecallers: a.estimatedAdRecallers + b.estimatedAdRecallers,
     video2SecViews: a.video2SecViews + b.video2SecViews,
     // Lifetime fields are client-wide, not platform-wide — take the
     // larger of the two so Meta's value isn't lost when merged with
@@ -1506,11 +1507,18 @@ export default function ClientPerformanceView({
     })),
   ] : undefined
 
-  const handleDrillDown = isMeta && metaLevel !== "ad" ? (row: { id: string; name: string }) => {
-    setDrillPath(prev => [...prev, { level: metaLevel, id: row.id, name: row.name }])
-    setMetaLevel(metaLevel === "campaign" ? "adset" : "ad")
-    setPerfDimFilters({}) // reset naming convention filters on drill
-  } : undefined
+  const handleDrillDown = isMeta
+    ? metaLevel === "ad"
+      ? (row: { id: string; name: string }) => {
+          const match = enrichedAds.find((a) => a.adId === row.id)
+          if (match) setDetailAd(match)
+        }
+      : (row: { id: string; name: string }) => {
+          setDrillPath(prev => [...prev, { level: metaLevel, id: row.id, name: row.name }])
+          setMetaLevel(metaLevel === "campaign" ? "adset" : "ad")
+          setPerfDimFilters({})
+        }
+    : undefined
 
   return (
     <div className="space-y-6">

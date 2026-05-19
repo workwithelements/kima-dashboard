@@ -123,6 +123,19 @@ export const FUNNEL_STEP_DEFS: Record<string, FunnelStepDef> = {
     rateMultiplier: 100,
     costLabel: "Cost per In-App Reg.",
   },
+  // Top-of-funnel: Meta's modelled count of people likely to remember the ad
+  // within 2 days. Recall Lift Rate = recallers / reach, matching Meta's
+  // estimated_ad_recall_rate.
+  estimated_ad_recallers: {
+    field: "estimatedAdRecallers",
+    label: "Ad Recall Lift",
+    shortLabel: "Recall",
+    rateLabel: "Recall Lift Rate",
+    rateDenominator: "reach",
+    rateMultiplier: 100,
+    costLabel: "Cost per Recaller",
+    rateDecimals: 2,
+  },
   // Reuses meta_daily_performance.video_3s_views — Meta's `video_view`
   // action is what most teams colloquially call a "2-second view".
   video_2sec_views: {
@@ -150,7 +163,9 @@ export const FUNNEL_STEP_DEFS: Record<string, FunnelStepDef> = {
   },
 }
 
-/** Ordered list of all available step keys for the config UI */
+/** Ordered list of all available step keys for the config UI.
+ *  TOF metrics (video views, ad recall, eyeballs) live at the end so the
+ *  default conversion-oriented steps stay at the top of the picker. */
 export const FUNNEL_STEP_ORDER = [
   "unique_link_clicks",
   "landing_page_views",
@@ -162,6 +177,7 @@ export const FUNNEL_STEP_ORDER = [
   "app_installs",
   "mobile_app_registrations",
   "video_2sec_views",
+  "estimated_ad_recallers",
   "lifetime_eyeballs",
 ] as const
 

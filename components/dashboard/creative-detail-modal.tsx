@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { createPortal } from "react-dom"
 import MiniRetentionCurve from "@/components/charts/mini-retention-curve"
 import { fmtCurrency, fmtNumber, fmtPercent } from "@/lib/utils/format"
@@ -13,6 +13,7 @@ import { FATIGUE_CONFIG } from "@/lib/utils/fatigue-detection"
 import { FUNNEL_STEP_DEFS } from "@/lib/utils/funnel-steps"
 import type { TagInfo } from "@/components/dashboard/creative-card-grid"
 import type { MetaDailyRow, MetaDemographicsRow, MetaPlacementsRow } from "@/lib/utils/types"
+import AdPreview, { FORMAT_LABELS, pickDefaultFormat, type AdPreviewFormat } from "@/components/dashboard/ad-preview"
 
 type Props = {
   ad: ClassifiedAd
@@ -44,8 +45,14 @@ export default function CreativeDetailModal({
   onClose,
 }: Props) {
   const cls = CLASSIFICATIONS[ad.classification.type]
-  const [detailImgError, setDetailImgError] = useState(false)
   const roas = ad.spend > 0 ? ad.revenue / ad.spend : 0
+
+  const defaultFormat = useMemo<AdPreviewFormat>(
+    () => pickDefaultFormat(placements, ad.adId),
+    [placements, ad.adId]
+  )
+  const [format, setFormat] = useState<AdPreviewFormat>(defaultFormat)
+  useEffect(() => { setFormat(defaultFormat) }, [defaultFormat])
 
   useEffect(() => {
     function handleEsc(e: KeyboardEvent) {
@@ -72,31 +79,13 @@ export default function CreativeDetailModal({
           </svg>
         </button>
 
-        <div className="bg-neutral-800 relative flex items-center justify-center overflow-hidden" style={{ minHeight: 200, maxHeight: 400 }}>
-          {thumbnailUrl && !detailImgError ? (
-            <img
-              src={thumbnailUrl}
-              alt={ad.adName}
-              className="w-full object-contain"
-              style={{ maxHeight: 400, imageRendering: "auto" }}
-              loading="eager"
-              referrerPolicy="no-referrer"
-              onError={() => setDetailImgError(true)}
-            />
-          ) : (
-            <div className="text-neutral-600 text-sm py-20">
-              {isVideo ? "🎬" : "🖼"} No preview
-            </div>
-          )}
-          {isVideo && thumbnailUrl && !detailImgError && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="h-12 w-12 rounded-full bg-black/50 flex items-center justify-center backdrop-blur-sm">
-                <svg className="h-6 w-6 text-white ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              </div>
-            </div>
-          )}
+        <div className="relative">
+          <AdPreview
+            adId={ad.adId}
+            format={format}
+            fallbackThumbnailUrl={thumbnailUrl}
+            isVideo={isVideo}
+          />
           <span
             className={`absolute top-3 left-3 inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg border backdrop-blur-sm ${cls.bgColor}`}
           >
@@ -108,6 +97,21 @@ export default function CreativeDetailModal({
               />
             )}
           </span>
+        </div>
+        <div className="flex gap-1 overflow-x-auto border-b border-neutral-800 bg-neutral-900/80 px-3 py-2 scrollbar-hide">
+          {FORMAT_LABELS.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => setFormat(f.key)}
+              className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium transition ${
+                format === f.key
+                  ? "bg-brand-lime/10 text-brand-lime ring-1 ring-brand-lime/40"
+                  : "text-neutral-400 hover:text-white"
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
         </div>
 
         <div className="p-5 space-y-4">
