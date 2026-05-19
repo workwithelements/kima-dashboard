@@ -62,11 +62,12 @@ export default async function DashboardPage({ searchParams }: Props) {
       purchases: number
       purchase_value: number
       app_installs: number
+      estimated_ad_recallers: number
     }>(() =>
       supabase
         .from("meta_daily_performance")
         .select(
-          "date, client_id, spend, impressions, reach, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, trials_started, checkouts_initiated, purchases, purchase_value, app_installs"
+          "date, client_id, spend, impressions, reach, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, trials_started, checkouts_initiated, purchases, purchase_value, app_installs, estimated_ad_recallers"
         )
         .gte("date", fromDate)
         .lte("date", toDate)
@@ -85,7 +86,7 @@ export default async function DashboardPage({ searchParams }: Props) {
           supabase
             .from("meta_daily_performance")
             .select(
-              "client_id, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, trials_started, checkouts_initiated, purchases, app_installs"
+              "client_id, unique_link_clicks, landing_page_views, adds_to_cart, registrations_completed, trials_started, checkouts_initiated, purchases, app_installs, estimated_ad_recallers"
             )
             .gte("date", compRange.from)
             .lte("date", compRange.to)
@@ -125,6 +126,7 @@ export default async function DashboardPage({ searchParams }: Props) {
     "checkouts_initiated",
     "purchases",
     "app_installs",
+    "estimated_ad_recallers",
   ] as const
 
   const clientAgg: Record<string, Record<string, number>> = {}

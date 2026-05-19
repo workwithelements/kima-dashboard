@@ -25,6 +25,7 @@ export type MetaDailyRow = {
   purchase_value: number
   app_installs: number
   mobile_app_registrations: number
+  estimated_ad_recallers: number
   video_plays: number
   video_3s_views: number
   video_p25: number
@@ -49,6 +50,9 @@ export type AggregatedMetrics = {
   revenue: number
   appInstalls: number
   mobileAppRegistrations: number
+  /** Meta's modelled count of people likely to recall the ad within 2 days of
+   *  seeing it. Paired with reach to derive the "Recall Lift Rate". */
+  estimatedAdRecallers: number
   /** Period 2-sec video views — populated from meta_daily_performance.video_3s_views. */
   video2SecViews: number
   /** All-time cumulative reach for the client, summed across every day in
@@ -151,6 +155,7 @@ export const BASE_METRIC_FIELDS = [
   { value: "purchase_value", label: "Purchase Value (Revenue)" },
   { value: "app_installs", label: "App Installs" },
   { value: "mobile_app_registrations", label: "In-App Registrations" },
+  { value: "estimated_ad_recallers", label: "Estimated Ad Recallers" },
   { value: "video_3s_views", label: "2-Sec Video Views" },
 ] as const
 

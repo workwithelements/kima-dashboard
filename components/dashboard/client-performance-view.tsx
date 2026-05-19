@@ -193,6 +193,7 @@ function mergeMetrics(a: AggregatedMetrics, b: AggregatedMetrics): AggregatedMet
     revenue: a.revenue + b.revenue,
     appInstalls: a.appInstalls + b.appInstalls,
     mobileAppRegistrations: a.mobileAppRegistrations + b.mobileAppRegistrations,
+    estimatedAdRecallers: a.estimatedAdRecallers + b.estimatedAdRecallers,
     video2SecViews: a.video2SecViews + b.video2SecViews,
     // Lifetime fields are client-wide, not platform-wide — take the
     // larger of the two so Meta's value isn't lost when merged with
