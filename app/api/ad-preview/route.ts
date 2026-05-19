@@ -76,6 +76,7 @@ type GraphAttempt = { via: string; id: string; status: number; ok: boolean; mess
 export async function GET(request: NextRequest) {
   const adId = request.nextUrl.searchParams.get("ad_id")
   const debug = request.nextUrl.searchParams.get("debug") === "1"
+  const nocache = request.nextUrl.searchParams.get("nocache") === "1"
 
   if (!adId) {
     return NextResponse.json({ error: "ad_id required" }, { status: 400 })
@@ -85,7 +86,7 @@ export async function GET(request: NextRequest) {
 
   // Cache key is fixed per-ad (data is format-independent now).
   const cacheKey = "v4"
-  const { data: cached } = await supabase
+  const { data: cached } = nocache ? { data: null } : await supabase
     .from("meta_ad_creative_previews")
     .select("html, fetched_at")
     .eq("ad_id", adId)
