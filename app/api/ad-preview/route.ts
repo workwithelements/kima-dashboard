@@ -65,9 +65,11 @@ type GraphAttempt = { via: string; id: string; status: number; ok: boolean; mess
  * never rendered in our sandboxed srcDoc).
  *
  * Cached as JSON in meta_ad_creative_previews (`html` column) keyed by
- * `(ad_id, "v2")` — the `format` query param doesn't change the data,
- * only how the client renders it. Old cache rows (the iframe-era HTML)
- * are detected and treated as a miss.
+ * `(ad_id, "v3")` — the `format` query param doesn't change the data,
+ * only how the client renders it. Old cache rows (iframe HTML, or
+ * earlier-normalizer JSON missing asset_feed_spec data) are detected
+ * and treated as a miss. Bump this key when changing normalizer output
+ * to invalidate everything.
  *
  * The Meta access token never leaves the server.
  */
@@ -82,7 +84,7 @@ export async function GET(request: NextRequest) {
   const supabase = createServiceClient()
 
   // Cache key is fixed per-ad (data is format-independent now).
-  const cacheKey = "v2"
+  const cacheKey = "v3"
   const { data: cached } = await supabase
     .from("meta_ad_creative_previews")
     .select("html, fetched_at")
@@ -218,25 +220,38 @@ function debugResponse(
 }
 
 /** Hit /{page_id}?fields=name,picture for the header chrome. Failures are
- *  non-fatal — we just render without page info. */
+ *  non-fatal — we just render without page info — but log them so we know
+ *  whether the issue is permissions, a wrong field name, or the page being
+ *  unavailable. */
 async function fetchPageInfo(pageId: string, token: string): Promise<{ name: string | null; pictureUrl: string | null }> {
   try {
     const res = await fetch(
       `${META_GRAPH_URL}/${pageId}?fields=name,picture.type(large)&access_token=${token}`,
       { next: { revalidate: 0 } }
     )
-    if (!res.ok) return { name: null, pictureUrl: null }
-    const json = await res.json()
+    const text = await res.text()
+    let json: any = null
+    try { json = JSON.parse(text) } catch { /* keep null */ }
+    if (!res.ok) {
+      console.warn(`[ad-preview] page ${pageId} lookup failed status=${res.status} msg=${json?.error?.message ?? text.slice(0, 200)}`)
+      return { name: null, pictureUrl: null }
+    }
     return {
       name: json?.name ?? null,
       pictureUrl: json?.picture?.data?.url ?? null,
     }
-  } catch {
+  } catch (e: any) {
+    console.warn(`[ad-preview] page ${pageId} lookup threw: ${e?.message ?? "unknown"}`)
     return { name: null, pictureUrl: null }
   }
 }
 
-/** Resolve a batch of video_ids to source URLs via one /v.../?ids=... call. */
+/** Resolve a batch of video_ids to source URLs via one /v.../?ids=... call.
+ *
+ *  `source` requires ads_management on most tokens; with only ads_read we
+ *  get HTTP 400 with `(#100)` or per-id error objects. Logs the failure and
+ *  returns whatever URLs did resolve. The renderer falls back to the
+ *  thumbnail when no URL is available. */
 async function fetchVideoSources(ids: string[], token: string): Promise<Record<string, string>> {
   const uniq = Array.from(new Set(ids.filter(Boolean)))
   if (uniq.length === 0) return {}
@@ -245,15 +260,27 @@ async function fetchVideoSources(ids: string[], token: string): Promise<Record<s
       `${META_GRAPH_URL}/?ids=${uniq.join(",")}&fields=source,picture&access_token=${token}`,
       { next: { revalidate: 0 } }
     )
-    if (!res.ok) return {}
-    const json = await res.json()
+    const text = await res.text()
+    let json: any = null
+    try { json = JSON.parse(text) } catch { /* keep null */ }
+
+    if (!res.ok) {
+      console.warn(`[ad-preview] video sources batch failed status=${res.status} msg=${json?.error?.message ?? text.slice(0, 200)}`)
+      return {}
+    }
     const map: Record<string, string> = {}
     for (const id of uniq) {
-      const src = json?.[id]?.source
-      if (typeof src === "string") map[id] = src
+      const entry = json?.[id]
+      const src = entry?.source
+      if (typeof src === "string") {
+        map[id] = src
+      } else if (entry?.error) {
+        console.warn(`[ad-preview] video ${id} returned error: ${entry.error.message ?? "(no message)"}`)
+      }
     }
     return map
-  } catch {
+  } catch (e: any) {
+    console.warn(`[ad-preview] video sources threw: ${e?.message ?? "unknown"}`)
     return {}
   }
 }
@@ -302,8 +329,10 @@ function normalizeCreative(
   // Body — the long message above the media.
   const body = linkData?.message ?? videoData?.message ?? raw?.body ?? photoData?.caption ?? feedBody ?? null
 
-  // Title — the headline beneath the media.
-  const title = linkData?.name ?? videoData?.title ?? raw?.title ?? raw?.name ?? feedTitle ?? null
+  // Title — the headline beneath the media. NB: `raw.name` is the
+  // AdCreative's internal Meta label (often a template like
+  // `{{product.name}} <hash>`), never a user-facing headline. Excluded.
+  const title = linkData?.name ?? videoData?.title ?? feedTitle ?? raw?.title ?? null
 
   const description = linkData?.description ?? videoData?.link_description ?? feedDescription ?? null
   const linkUrl = linkData?.link ?? raw?.link_url ?? feedLinkUrl ?? null
