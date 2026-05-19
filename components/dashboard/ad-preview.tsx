@@ -109,7 +109,9 @@ function FeedCard({ data, format }: { data: AdCreativeData; format: AdPreviewFor
   return (
     <div className="bg-white text-neutral-900 text-[13px] leading-snug">
       <Header data={data} variant={isInstagram ? "instagram" : "facebook"} />
-      {data.body && (
+      {/* Instagram puts the body below the media (as a caption), Facebook
+          puts it above the media. Render it in the right place per format. */}
+      {!isInstagram && data.body && (
         <div className="px-3 pb-2.5 whitespace-pre-wrap text-[13px]">
           <ClampedText text={data.body} maxLines={4} />
         </div>
@@ -191,15 +193,29 @@ function MediaArea({ data, format }: { data: AdCreativeData; format: AdPreviewFo
   if (data.format === "carousel" && data.children.length > 0) {
     return <Carousel children={data.children} />
   }
-  if (!data.media) {
-    return <div className="aspect-[1.91/1] bg-neutral-200 flex items-center justify-center text-xs text-neutral-500">No media</div>
+
+  // Extract URLs defensively so we render something whenever there's ANY
+  // image or video to show. Previously the renderer bailed to "No media"
+  // even when `data.media.thumbnailUrl` was populated, because the type
+  // check sat in front of the URL check.
+  const videoUrl = data.media?.videoUrl ?? null
+  const imageUrl = data.media?.imageUrl ?? data.media?.thumbnailUrl ?? null
+  const isVideoCard = data.format === "single_video" || data.media?.type === "video"
+
+  if (!videoUrl && !imageUrl) {
+    return (
+      <div className="aspect-[1.91/1] bg-neutral-200 flex items-center justify-center text-xs text-neutral-500">
+        No media
+      </div>
+    )
   }
+
   return (
-    <div className="w-full bg-neutral-100">
-      {data.media.type === "video" && data.media.videoUrl ? (
+    <div className="relative w-full bg-neutral-100">
+      {videoUrl ? (
         <video
-          src={data.media.videoUrl}
-          poster={data.media.thumbnailUrl ?? undefined}
+          src={videoUrl}
+          poster={data.media?.thumbnailUrl ?? undefined}
           muted
           autoPlay
           loop
@@ -209,12 +225,23 @@ function MediaArea({ data, format }: { data: AdCreativeData; format: AdPreviewFo
         />
       ) : (
         <img
-          src={data.media.imageUrl ?? data.media.thumbnailUrl ?? ""}
+          src={imageUrl ?? ""}
           alt=""
           className="w-full h-auto block max-h-[60vh] object-contain bg-black"
           loading="eager"
           referrerPolicy="no-referrer"
         />
+      )}
+      {/* Video ad with no source URL — overlay a play icon so it's obviously
+          a video rather than a static image, and link out to Meta. */}
+      {isVideoCard && !videoUrl && imageUrl && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div className="h-14 w-14 rounded-full bg-black/55 flex items-center justify-center backdrop-blur-sm">
+            <svg className="h-7 w-7 text-white ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          </div>
+        </div>
       )}
     </div>
   )
