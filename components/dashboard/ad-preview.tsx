@@ -16,6 +16,10 @@ type Props = {
   format: AdPreviewFormat
   fallbackThumbnailUrl?: string
   isVideo?: boolean
+  /** Used to construct a "View on Meta" fallback link for video ads where
+   *  the source URL can't be played inline. */
+  metaAccountId?: string | null
+  adName?: string | null
 }
 
 /**
@@ -27,7 +31,7 @@ type Props = {
  * a square-ish card with header + body + media + footer; story/reels is a
  * full-height 9:16 frame with overlays on top of the media.
  */
-export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo }: Props) {
+export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo, metaAccountId, adName }: Props) {
   const [data, setData] = useState<AdCreativeData | null>(null)
   const [errored, setErrored] = useState(false)
   const [errorReason, setErrorReason] = useState<string | null>(null)
@@ -70,9 +74,18 @@ export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo 
   const isStory = isStoryFormat(format)
 
   if (data) {
+    // Where to send a user when they click the play button on a video ad
+    // whose source URL we can't play inline. Priority: the post's own
+    // permalink (best — opens the ad in context), else the same Ads
+    // Manager search the modal header uses.
+    const watchUrl =
+      data.permalinkUrl ??
+      (metaAccountId && adName
+        ? `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${metaAccountId}&search_value=${encodeURIComponent(adName)}`
+        : `https://www.facebook.com/ads/library/?id=${encodeURIComponent(adId)}`)
     return isStory
-      ? <StoryCard data={data} format={format} />
-      : <FeedCard data={data} format={format} />
+      ? <StoryCard data={data} format={format} watchUrl={watchUrl} />
+      : <FeedCard data={data} format={format} watchUrl={watchUrl} />
   }
 
   // Loading or error — surface the thumbnail so the modal never looks broken.
@@ -108,7 +121,7 @@ export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo 
 
 /* ───────────────────────── Feed card (FB Feed / IG Feed) ────────────────── */
 
-function FeedCard({ data, format }: { data: AdCreativeData; format: AdPreviewFormat }) {
+function FeedCard({ data, format, watchUrl }: { data: AdCreativeData; format: AdPreviewFormat; watchUrl: string }) {
   const isInstagram = format === "INSTAGRAM_STANDARD"
   return (
     <div className="bg-white text-neutral-900 text-[13px] leading-snug">
@@ -120,7 +133,7 @@ function FeedCard({ data, format }: { data: AdCreativeData; format: AdPreviewFor
           <ClampedText text={data.body} maxLines={4} />
         </div>
       )}
-      <MediaArea data={data} format={format} />
+      <MediaArea data={data} format={format} watchUrl={watchUrl} />
       {!isInstagram && data.format !== "carousel" && (
         <Footer data={data} />
       )}
@@ -133,7 +146,11 @@ function FeedCard({ data, format }: { data: AdCreativeData; format: AdPreviewFor
 
 /* ───────────────────────── Story card (Story / Reels) ───────────────────── */
 
-function StoryCard({ data, format }: { data: AdCreativeData; format: AdPreviewFormat }) {
+function StoryCard({ data, format, watchUrl }: { data: AdCreativeData; format: AdPreviewFormat; watchUrl: string }) {
+  // watchUrl reserved for a future "tap to watch" overlay on Stories;
+  // ignored for now since the video element is already rendered fullbleed.
+  void format
+  void watchUrl
   // 9:16 sized by height (not width) so the card fits cleanly inside the
   // modal — `w-full aspect-[9/16]` made height = width × 16/9 which
   // overshot the modal and forced the whole thing to scroll.
@@ -196,7 +213,8 @@ function Header({ data, variant }: { data: AdCreativeData; variant: "facebook" |
   )
 }
 
-function MediaArea({ data, format }: { data: AdCreativeData; format: AdPreviewFormat }) {
+function MediaArea({ data, format, watchUrl }: { data: AdCreativeData; format: AdPreviewFormat; watchUrl: string }) {
+  void format
   if (data.format === "carousel" && data.children.length > 0) {
     return <Carousel children={data.children} />
   }
@@ -239,37 +257,28 @@ function MediaArea({ data, format }: { data: AdCreativeData; format: AdPreviewFo
           referrerPolicy="no-referrer"
         />
       )}
-      {/* Video ad with no source URL — overlay a play icon. If we have a
-          post permalink, make the whole media area click out to the live
-          post on Meta so users can watch the video. Otherwise just show
-          the play badge as a visual cue that it's a video creative. */}
+      {/* Video ad with no inline source — overlay a clickable play icon that
+          opens the ad on Meta in a new tab. watchUrl is computed up-front
+          with a sensible fallback chain (post permalink → Ads Manager →
+          Ad Library), so it's never empty. */}
       {isVideoCard && !videoUrl && imageUrl && (
-        data.permalinkUrl ? (
-          <a
-            href={data.permalinkUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="absolute inset-0 flex items-center justify-center group"
-            title="Open on Meta to watch"
-          >
-            <div className="h-14 w-14 rounded-full bg-black/55 group-hover:bg-black/75 flex items-center justify-center backdrop-blur-sm transition">
-              <svg className="h-7 w-7 text-white ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-            </div>
-            <span className="absolute bottom-2 right-2 rounded bg-black/65 px-2 py-0.5 text-[10px] text-white">
-              Watch on Meta ↗
-            </span>
-          </a>
-        ) : (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div className="h-14 w-14 rounded-full bg-black/55 flex items-center justify-center backdrop-blur-sm">
-              <svg className="h-7 w-7 text-white ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-            </div>
+        <a
+          href={watchUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="absolute inset-0 flex items-center justify-center group"
+          title="Open on Meta to watch"
+        >
+          <div className="h-14 w-14 rounded-full bg-black/55 group-hover:bg-black/75 flex items-center justify-center backdrop-blur-sm transition">
+            <svg className="h-7 w-7 text-white ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z" />
+            </svg>
           </div>
-        )
+          <span className="absolute bottom-2 right-2 rounded bg-black/65 px-2 py-0.5 text-[10px] text-white">
+            Watch on Meta ↗
+          </span>
+        </a>
       )}
     </div>
   )

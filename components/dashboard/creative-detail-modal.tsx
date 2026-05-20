@@ -85,6 +85,8 @@ export default function CreativeDetailModal({
             format={format}
             fallbackThumbnailUrl={thumbnailUrl}
             isVideo={isVideo}
+            metaAccountId={metaAccountId ?? null}
+            adName={ad.adName ?? null}
           />
           <span
             className={`absolute top-3 left-3 inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg border backdrop-blur-sm ${cls.bgColor}`}

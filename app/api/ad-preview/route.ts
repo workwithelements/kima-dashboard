@@ -8,6 +8,7 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000
  *  name + profile picture and carousel children without follow-up requests. */
 const CREATIVE_FIELDS = [
   "id",
+  "account_id",
   "body",
   "title",
   "name",
@@ -87,7 +88,7 @@ export async function GET(request: NextRequest) {
   const supabase = createServiceClient()
 
   // Cache key is fixed per-ad (data is format-independent now).
-  const cacheKey = "v7"
+  const cacheKey = "v8"
   const { data: cached } = await supabase
     .from("meta_ad_creative_previews")
     .select("html, fetched_at")
@@ -158,23 +159,32 @@ export async function GET(request: NextRequest) {
         continue
       }
 
-      // Three follow-up calls in parallel:
+      // Four follow-up calls in parallel:
       //  - pageInfo: page name + avatar for header chrome
       //  - videoUrlMap: AdVideo source URLs (often blocked by ads_read scope)
       //  - postInfo: the underlying organic post via effective_object_story_id
       //    — gives us full_picture (high-res, vs. the ~64x64 thumbnail_url),
       //      source (post-level video URL, can succeed when AdVideo source
       //      fails), and permalink_url ("View on Meta" fallback)
+      //  - imageHashMap: resolves image_hash values to full-res URLs via
+      //    /act_{accountId}/adimages. Reliable backup when post fetch fails
+      //    (often: token doesn't have pages_read_engagement).
       const pageId: string | undefined = raw?.object_story_spec?.page_id
       const storyId: string | undefined = raw?.effective_object_story_id
+      // For the ad_id path account_id sits on the ad envelope, not the
+      // creative; for the creative_id path it's on the creative directly.
+      const accountId: string | undefined =
+        (via === "ad_id" ? json?.account_id : undefined) ?? raw?.account_id
       const videoIds = collectVideoIds(raw)
-      const [pageInfo, videoUrlMap, postInfo] = await Promise.all([
+      const imageHashes = collectImageHashes(raw)
+      const [pageInfo, videoUrlMap, postInfo, imageHashMap] = await Promise.all([
         pageId ? fetchPageInfo(pageId, accessToken) : Promise.resolve({ name: null, pictureUrl: null }),
         fetchVideoSources(videoIds, accessToken),
         storyId ? fetchPostInfo(storyId, accessToken) : Promise.resolve({ fullPicture: null, videoSource: null, permalinkUrl: null }),
+        accountId && imageHashes.length > 0 ? fetchImagesByHash(accountId, imageHashes, accessToken) : Promise.resolve({}),
       ])
 
-      const data = normalizeCreative(raw, pageInfo, videoUrlMap, postInfo)
+      const data = normalizeCreative(raw, pageInfo, videoUrlMap, postInfo, imageHashMap)
 
       // Fire-and-forget cache write.
       supabase
@@ -197,6 +207,9 @@ export async function GET(request: NextRequest) {
         postFullPicture: !!postInfo.fullPicture,
         postVideoSource: !!postInfo.videoSource,
         postPermalink: !!postInfo.permalinkUrl,
+        accountId: accountId ?? null,
+        imageHashesCollected: imageHashes.length,
+        imageHashesResolved: Object.keys(imageHashMap).length,
       }
 
       if (debug) return debugResponse(data, { raw, via, page: pageInfo, videoUrlMap, _diag: diag })
@@ -279,6 +292,53 @@ async function fetchPageInfo(pageId: string, token: string): Promise<{ name: str
     console.warn(`[ad-preview] page ${pageId} lookup threw: ${e?.message ?? "unknown"}`)
     return { name: null, pictureUrl: null }
   }
+}
+
+/** Resolve a batch of image_hash values to full-resolution URLs via
+ *  /act_{accountId}/adimages?hashes=[...]. This is the v1 codebase's
+ *  primary mechanism — works regardless of token scope on the underlying
+ *  post (which often fails) because it queries the ad account directly. */
+async function fetchImagesByHash(accountId: string, hashes: string[], token: string): Promise<Record<string, string>> {
+  const uniq = Array.from(new Set(hashes.filter(Boolean)))
+  if (uniq.length === 0 || !accountId) return {}
+  try {
+    const url = `${META_GRAPH_URL}/act_${accountId}/adimages?hashes=${encodeURIComponent(JSON.stringify(uniq))}&fields=hash,url&access_token=${token}`
+    const res = await fetch(url, { next: { revalidate: 0 } })
+    const text = await res.text()
+    let json: any = null
+    try { json = JSON.parse(text) } catch { /* keep null */ }
+    if (!res.ok) {
+      console.warn(`[ad-preview] adimages lookup failed status=${res.status} msg=${json?.error?.message ?? text.slice(0, 200)}`)
+      return {}
+    }
+    const map: Record<string, string> = {}
+    if (Array.isArray(json?.data)) {
+      for (const item of json.data) {
+        if (item?.hash && typeof item?.url === "string") map[item.hash] = item.url
+      }
+    }
+    return map
+  } catch (e: any) {
+    console.warn(`[ad-preview] adimages threw: ${e?.message ?? "unknown"}`)
+    return {}
+  }
+}
+
+/** Collect every image_hash value across the creative so a single
+ *  /adimages batch call can resolve them all. */
+function collectImageHashes(raw: any): string[] {
+  const hashes: string[] = []
+  const push = (v: any) => { if (typeof v === "string" && v.length > 0) hashes.push(v) }
+  const links = raw?.object_story_spec?.link_data
+  push(links?.image_hash)
+  if (Array.isArray(links?.child_attachments)) {
+    for (const c of links.child_attachments) push(c?.image_hash)
+  }
+  const feedImages = raw?.asset_feed_spec?.images
+  if (Array.isArray(feedImages)) {
+    for (const i of feedImages) push(i?.hash)
+  }
+  return hashes
 }
 
 /** Fetch the underlying organic post for an ad via its
@@ -378,8 +438,12 @@ function normalizeCreative(
   raw: any,
   page: { name: string | null; pictureUrl: string | null },
   videoUrlMap: Record<string, string>,
-  postInfo: { fullPicture: string | null; videoSource: string | null; permalinkUrl: string | null }
+  postInfo: { fullPicture: string | null; videoSource: string | null; permalinkUrl: string | null },
+  imageHashMap: Record<string, string>
 ): AdCreativeData {
+  /** Resolve an image_hash to a full-res URL via the batched /adimages call. */
+  const fromHash = (h: string | null | undefined): string | null =>
+    (typeof h === "string" && h.length > 0 && imageHashMap[h]) || null
   const spec = raw?.object_story_spec ?? {}
   const linkData = spec?.link_data
   const videoData = spec?.video_data
@@ -439,11 +503,11 @@ function normalizeCreative(
       thumbnailUrl: postInfo.fullPicture ?? videoData?.image_url ?? raw?.thumbnail_url ?? raw?.image_url ?? null,
       imageUrl: null,
     }
-  } else if (linkData?.picture || raw?.image_url || photoData?.url) {
+  } else if (linkData?.picture || raw?.image_url || photoData?.url || fromHash(linkData?.image_hash)) {
     format = "single_image"
     media = {
       type: "image",
-      imageUrl: postInfo.fullPicture ?? linkData?.picture ?? raw?.image_url ?? photoData?.url ?? null,
+      imageUrl: postInfo.fullPicture ?? fromHash(linkData?.image_hash) ?? linkData?.picture ?? raw?.image_url ?? photoData?.url ?? null,
       thumbnailUrl: raw?.thumbnail_url ?? null,
       videoUrl: null,
     }
@@ -455,11 +519,11 @@ function normalizeCreative(
       thumbnailUrl: postInfo.fullPicture ?? feedFirstVideo?.thumbnail_url ?? null,
       imageUrl: null,
     }
-  } else if (feedFirstImage?.url || postInfo.fullPicture) {
+  } else if (feedFirstImage?.url || postInfo.fullPicture || fromHash(feedFirstImage?.hash)) {
     format = "single_image"
     media = {
       type: "image",
-      imageUrl: postInfo.fullPicture ?? feedFirstImage?.url ?? null,
+      imageUrl: postInfo.fullPicture ?? fromHash(feedFirstImage?.hash) ?? feedFirstImage?.url ?? null,
       thumbnailUrl: null,
       videoUrl: null,
     }
@@ -473,7 +537,7 @@ function normalizeCreative(
   // Hash resolution via /act_{id}/adimages is a future improvement;
   // thumbnail_url is enough for most preview surfaces.
   if (format === "unknown") {
-    const fallback = postInfo.fullPicture ?? pickBestImageUrl(raw)
+    const fallback = postInfo.fullPicture ?? pickBestImageUrl(raw, imageHashMap)
     if (fallback) {
       format = "single_image"
       media = {
@@ -530,21 +594,26 @@ function pickArrayText(arr: any): string | null {
  *  creative arrays, and the top-level thumbnail_url. Returns null only
  *  when every path comes back empty — typically when imagery is only
  *  available as `image_hash` values that need a /adimages lookup. */
-function pickBestImageUrl(raw: any): string | null {
+function pickBestImageUrl(raw: any, imageHashMap: Record<string, string>): string | null {
   const spec = raw?.object_story_spec
   const links = spec?.link_data
   const photo = spec?.photo_data
   const video = spec?.video_data
   const feed = raw?.asset_feed_spec
+  const fromHash = (h: any): string | null =>
+    (typeof h === "string" && h.length > 0 && imageHashMap[h]) || null
   return (
     video?.image_url ||
     links?.picture ||
     links?.image_url ||
+    fromHash(links?.image_hash) ||
     links?.child_attachments?.[0]?.picture ||
     links?.child_attachments?.[0]?.image_url ||
+    fromHash(links?.child_attachments?.[0]?.image_hash) ||
     photo?.url ||
     photo?.images?.[0]?.url ||
     feed?.images?.[0]?.url ||
+    fromHash(feed?.images?.[0]?.hash) ||
     feed?.videos?.[0]?.thumbnail_url ||
     raw?.image_url ||
     raw?.thumbnail_url ||
