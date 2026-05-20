@@ -84,7 +84,7 @@ export async function GET(request: NextRequest) {
   const supabase = createServiceClient()
 
   // Cache key is fixed per-ad (data is format-independent now).
-  const cacheKey = "v4"
+  const cacheKey = "v5"
   const { data: cached } = await supabase
     .from("meta_ad_creative_previews")
     .select("html, fetched_at")
@@ -172,8 +172,22 @@ export async function GET(request: NextRequest) {
         .upsert({ ad_id: adId, format: cacheKey, html: JSON.stringify(data), fetched_at: new Date().toISOString() })
         .then(() => {})
 
-      if (debug) return debugResponse(data, { raw, via, page: pageInfo, videoUrlMap })
-      return NextResponse.json({ data, source: "fresh", via })
+      // Compact diagnostic so the client can console.log it. Tells us, in
+      // one glance, which Meta fields were populated for this ad — useful
+      // for figuring out why the normalizer fell through to media=null.
+      const diag = {
+        rawTopLevelKeys: Object.keys(raw).slice(0, 30),
+        hasObjectStorySpec: !!raw?.object_story_spec,
+        objectStorySpecKeys: raw?.object_story_spec ? Object.keys(raw.object_story_spec) : null,
+        hasAssetFeedSpec: !!raw?.asset_feed_spec,
+        assetFeedSpecKeys: raw?.asset_feed_spec ? Object.keys(raw.asset_feed_spec) : null,
+        feedVideosCount: Array.isArray(raw?.asset_feed_spec?.videos) ? raw.asset_feed_spec.videos.length : null,
+        feedImagesCount: Array.isArray(raw?.asset_feed_spec?.images) ? raw.asset_feed_spec.images.length : null,
+        videoUrlMapKeys: Object.keys(videoUrlMap),
+      }
+
+      if (debug) return debugResponse(data, { raw, via, page: pageInfo, videoUrlMap, _diag: diag })
+      return NextResponse.json({ data, source: "fresh", via, _diag: diag })
     } catch (e: any) {
       const message = e?.message || "fetch threw"
       attempts.push({ via, id: via === "creative_id" ? metaRow!.creative_id! : adId, status: 0, ok: false, message })
@@ -199,8 +213,16 @@ function tryParseJson(text: string): AdCreativeData | null {
   if (text.trimStart().startsWith("<")) return null
   try {
     const parsed = JSON.parse(text)
-    if (parsed && typeof parsed === "object" && "format" in parsed) return parsed as AdCreativeData
-    return null
+    if (!parsed || typeof parsed !== "object" || !("format" in parsed)) return null
+    // Reject entries that contain no usable data — better to re-fetch than
+    // to keep serving a stuck "No media" placeholder. An entry with no
+    // media, no children, AND format == "unknown" can't render anything,
+    // so we treat it as a miss.
+    const p = parsed as AdCreativeData
+    if (p.format === "unknown" && !p.media && (!Array.isArray(p.children) || p.children.length === 0)) {
+      return null
+    }
+    return p
   } catch {
     return null
   }
@@ -208,7 +230,7 @@ function tryParseJson(text: string): AdCreativeData | null {
 
 function debugResponse(
   data: AdCreativeData,
-  extras?: { raw?: any; via?: string; page?: unknown; videoUrlMap?: Record<string, string> }
+  extras?: { raw?: any; via?: string; page?: unknown; videoUrlMap?: Record<string, string>; _diag?: unknown }
 ) {
   // When `extras` is present, include the raw Meta response so operators
   // can see exactly what fields came back when the normalized output looks

@@ -50,8 +50,12 @@ export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo 
           console.warn("[AdPreview] failed", { adId, status: res.status, payload })
           return
         }
-        if (payload?.data) setData(payload.data as AdCreativeData)
-        else {
+        if (payload?.data) {
+          setData(payload.data as AdCreativeData)
+          // Log the server-provided diagnostic so the team can inspect
+          // which Meta fields were populated without a separate debug URL.
+          if (payload?._diag) console.log("[AdPreview] _diag", { adId, ...payload._diag })
+        } else {
           setErrored(true)
           setErrorReason("empty response")
         }
