@@ -41,6 +41,12 @@ export type AdCreativeData = {
   /** facebook.com URL of the underlying organic post when available — used
    *  as a "View on Meta" fallback when we can't render the video inline. */
   permalinkUrl: string | null
+  /** Facebook video plugin URL (facebook.com/plugins/video.php?…) for video
+   *  ads, built from the creative's video_id. Embeds as an iframe and
+   *  plays the video inline — works without ads_management scope and is
+   *  designed for third-party embedding (no X-Frame-Options block). Null
+   *  for image ads or when no video_id is present. */
+  videoEmbedUrl: string | null
   media: {
     type: "image" | "video"
     imageUrl: string | null
@@ -88,7 +94,7 @@ export async function GET(request: NextRequest) {
   const supabase = createServiceClient()
 
   // Cache key is fixed per-ad (data is format-independent now).
-  const cacheKey = "v9"
+  const cacheKey = "v10"
   const { data: cached } = await supabase
     .from("meta_ad_creative_previews")
     .select("html, fetched_at")
@@ -572,6 +578,19 @@ function normalizeCreative(
     }
   })
 
+  // Pick the first video_id we can find anywhere on the creative. Used
+  // to build a Facebook video plugin embed URL when we don't have a
+  // direct .mp4 to drop into <video>.
+  const embedVideoId: string | null =
+    raw?.video_id ??
+    raw?.object_story_spec?.video_data?.video_id ??
+    raw?.object_story_spec?.link_data?.video_id ??
+    raw?.asset_feed_spec?.videos?.[0]?.video_id ??
+    null
+  const videoEmbedUrl = embedVideoId
+    ? `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(`https://www.facebook.com/watch/?v=${embedVideoId}`)}&show_text=false&autoplay=true&mute=true`
+    : null
+
   return {
     format,
     page,
@@ -582,6 +601,7 @@ function normalizeCreative(
     linkUrl,
     cta,
     permalinkUrl: postInfo.permalinkUrl,
+    videoEmbedUrl,
     media,
     children: normalizedChildren,
   }

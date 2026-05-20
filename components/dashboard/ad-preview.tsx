@@ -240,10 +240,11 @@ function MediaArea({ data, format, watchUrl }: { data: AdCreativeData; format: A
   // even when `data.media.thumbnailUrl` was populated, because the type
   // check sat in front of the URL check.
   const videoUrl = data.media?.videoUrl ?? null
+  const embedUrl = data.videoEmbedUrl ?? null
   const imageUrl = data.media?.imageUrl ?? data.media?.thumbnailUrl ?? null
   const isVideoCard = data.format === "single_video" || data.media?.type === "video"
 
-  if (!videoUrl && !imageUrl) {
+  if (!videoUrl && !embedUrl && !imageUrl) {
     return (
       <div className="aspect-[1.91/1] bg-neutral-200 flex items-center justify-center text-xs text-neutral-500">
         No media
@@ -251,6 +252,9 @@ function MediaArea({ data, format, watchUrl }: { data: AdCreativeData; format: A
     )
   }
 
+  // Priority: direct <video> > Facebook plugin iframe > thumbnail+Watch link.
+  // The plugin URL plays the video inline without needing the ads_management
+  // scope that gates the AdVideo `source` field.
   return (
     <div className="relative w-full bg-neutral-100">
       {videoUrl ? (
@@ -264,6 +268,16 @@ function MediaArea({ data, format, watchUrl }: { data: AdCreativeData; format: A
           controls
           className="w-full h-auto block max-h-[60vh] object-contain bg-black"
         />
+      ) : isVideoCard && embedUrl ? (
+        <div className="w-full aspect-[4/5] bg-black">
+          <iframe
+            src={embedUrl}
+            allow="autoplay; encrypted-media; picture-in-picture; web-share; fullscreen"
+            allowFullScreen
+            className="w-full h-full border-0"
+            title="Video preview"
+          />
+        </div>
       ) : (
         <img
           src={imageUrl ?? ""}
@@ -273,11 +287,10 @@ function MediaArea({ data, format, watchUrl }: { data: AdCreativeData; format: A
           referrerPolicy="no-referrer"
         />
       )}
-      {/* Video ad with no inline source — overlay a clickable play icon that
-          opens the ad on Meta in a new tab. watchUrl is computed up-front
-          with a sensible fallback chain (post permalink → Ads Manager →
-          Ad Library), so it's never empty. */}
-      {isVideoCard && !videoUrl && imageUrl && (
+      {/* Video ad with no inline source and no embed URL — fall through to
+          a thumbnail with a clickable play overlay that opens Meta in a
+          new tab. */}
+      {isVideoCard && !videoUrl && !embedUrl && imageUrl && (
         <a
           href={watchUrl}
           target="_blank"
@@ -309,6 +322,20 @@ function MediaFill({ data }: { data: AdCreativeData }) {
   }
   if (data.media?.type === "video" && data.media.videoUrl) {
     return <video src={data.media.videoUrl} poster={data.media.thumbnailUrl ?? undefined} muted autoPlay loop playsInline className="absolute inset-0 w-full h-full object-cover" />
+  }
+  // Inline FB video plugin embed when we don't have a direct mp4. Sized
+  // to fill the Story/Reels frame.
+  const isVideoCard = data.format === "single_video" || data.media?.type === "video"
+  if (isVideoCard && data.videoEmbedUrl) {
+    return (
+      <iframe
+        src={data.videoEmbedUrl}
+        allow="autoplay; encrypted-media; picture-in-picture; web-share; fullscreen"
+        allowFullScreen
+        className="absolute inset-0 w-full h-full border-0"
+        title="Video preview"
+      />
+    )
   }
   const img = data.media?.imageUrl ?? data.media?.thumbnailUrl
   if (img) return <img src={img} alt="" className="absolute inset-0 w-full h-full object-cover" referrerPolicy="no-referrer" />
