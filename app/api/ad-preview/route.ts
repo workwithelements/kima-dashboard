@@ -88,7 +88,7 @@ export async function GET(request: NextRequest) {
   const supabase = createServiceClient()
 
   // Cache key is fixed per-ad (data is format-independent now).
-  const cacheKey = "v8"
+  const cacheKey = "v9"
   const { data: cached } = await supabase
     .from("meta_ad_creative_previews")
     .select("html, fetched_at")
@@ -345,8 +345,9 @@ function collectImageHashes(raw: any): string[] {
  *  `effective_object_story_id` (format: `{page_id}_{post_id}`). Returns:
  *   - fullPicture: full-resolution image URL (vs. the ~64x64 thumbnail_url
  *     Meta returns on the creative directly)
- *   - videoSource: post-level video URL — accessible even when the AdVideo
- *     source field is blocked by token scope, since it's a different object
+ *   - videoSource: directly-playable .mp4 URL — for video ads this is
+ *     usually only available via the post's `attachments.media.source`
+ *     field, not the top-level `source` (which is often null on ad posts)
  *   - permalinkUrl: facebook.com URL to view the post; used as a "View on
  *     Meta" fallback when no inline video URL is available */
 async function fetchPostInfo(storyId: string, token: string): Promise<{
@@ -356,7 +357,7 @@ async function fetchPostInfo(storyId: string, token: string): Promise<{
 }> {
   try {
     const res = await fetch(
-      `${META_GRAPH_URL}/${storyId}?fields=full_picture,source,permalink_url&access_token=${token}`,
+      `${META_GRAPH_URL}/${storyId}?fields=full_picture,source,permalink_url,attachments{type,media{source,image{src}}}&access_token=${token}`,
       { next: { revalidate: 0 } }
     )
     const text = await res.text()
@@ -366,9 +367,18 @@ async function fetchPostInfo(storyId: string, token: string): Promise<{
       console.warn(`[ad-preview] post ${storyId} lookup failed status=${res.status} msg=${json?.error?.message ?? text.slice(0, 200)}`)
       return { fullPicture: null, videoSource: null, permalinkUrl: null }
     }
+    // Walk attachments for a playable source. For video ad posts Meta
+    // typically returns the mp4 URL at attachments.data[0].media.source.
+    const firstAttachment = json?.attachments?.data?.[0]
+    const attachmentSource: unknown = firstAttachment?.media?.source
+    const attachmentImage: unknown = firstAttachment?.media?.image?.src
     return {
-      fullPicture: typeof json?.full_picture === "string" ? json.full_picture : null,
-      videoSource: typeof json?.source === "string" ? json.source : null,
+      fullPicture:
+        (typeof json?.full_picture === "string" ? json.full_picture : null) ??
+        (typeof attachmentImage === "string" ? attachmentImage : null),
+      videoSource:
+        (typeof json?.source === "string" ? json.source : null) ??
+        (typeof attachmentSource === "string" ? attachmentSource : null),
       permalinkUrl: typeof json?.permalink_url === "string" ? json.permalink_url : null,
     }
   } catch (e: any) {

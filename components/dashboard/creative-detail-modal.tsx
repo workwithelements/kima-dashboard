@@ -4,12 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { createPortal } from "react-dom"
 import MiniRetentionCurve from "@/components/charts/mini-retention-curve"
 import { fmtCurrency, fmtNumber, fmtPercent } from "@/lib/utils/format"
-import {
-  CLASSIFICATIONS,
-  getUnifiedStatusLabel,
-  type ClassifiedAd,
-} from "@/lib/utils/creative-classification"
-import { FATIGUE_CONFIG } from "@/lib/utils/fatigue-detection"
+import { type ClassifiedAd } from "@/lib/utils/creative-classification"
 import { FUNNEL_STEP_DEFS } from "@/lib/utils/funnel-steps"
 import type { TagInfo } from "@/components/dashboard/creative-card-grid"
 import type { MetaDailyRow, MetaDemographicsRow, MetaPlacementsRow } from "@/lib/utils/types"
@@ -44,7 +39,6 @@ export default function CreativeDetailModal({
   keyAction,
   onClose,
 }: Props) {
-  const cls = CLASSIFICATIONS[ad.classification.type]
   const roas = ad.spend > 0 ? ad.revenue / ad.spend : 0
 
   const defaultFormat = useMemo<AdPreviewFormat>(
@@ -88,17 +82,6 @@ export default function CreativeDetailModal({
             metaAccountId={metaAccountId ?? null}
             adName={ad.adName ?? null}
           />
-          <span
-            className={`absolute top-3 left-3 inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg border backdrop-blur-sm ${cls.bgColor}`}
-          >
-            {getUnifiedStatusLabel(ad)}
-            {ad.fatigueStatus && ad.fatigueStatus !== "healthy" && (
-              <span
-                className={`inline-block h-2 w-2 rounded-full ${FATIGUE_CONFIG.dot[ad.fatigueStatus]}`}
-                title={ad.fatigueReason}
-              />
-            )}
-          </span>
         </div>
         <div className="flex gap-1 overflow-x-auto border-b border-neutral-800 bg-neutral-900/80 px-3 py-2 scrollbar-hide">
           {FORMAT_LABELS.map((f) => (

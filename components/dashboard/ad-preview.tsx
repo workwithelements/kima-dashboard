@@ -147,13 +147,19 @@ function FeedCard({ data, format, watchUrl }: { data: AdCreativeData; format: Ad
 /* ───────────────────────── Story card (Story / Reels) ───────────────────── */
 
 function StoryCard({ data, format, watchUrl }: { data: AdCreativeData; format: AdPreviewFormat; watchUrl: string }) {
-  // watchUrl reserved for a future "tap to watch" overlay on Stories;
-  // ignored for now since the video element is already rendered fullbleed.
   void format
-  void watchUrl
   // 9:16 sized by height (not width) so the card fits cleanly inside the
   // modal — `w-full aspect-[9/16]` made height = width × 16/9 which
   // overshot the modal and forced the whole thing to scroll.
+  //
+  // For Story / Reels formats, Meta bakes the headline + body text into
+  // the creative image itself. Overlaying our own text on top of that
+  // duplicates the same copy — render the image fullbleed and only keep
+  // the Sponsored chrome at the top and the CTA button at the bottom,
+  // matching how real IG/FB Story ads look.
+  const videoUrl = data.media?.videoUrl ?? null
+  const imageUrl = data.media?.imageUrl ?? data.media?.thumbnailUrl ?? null
+  const isVideoCard = data.format === "single_video" || data.media?.type === "video"
   return (
     <div className="relative mx-auto h-[60vh] max-h-[600px] aspect-[9/16] bg-black overflow-hidden text-white">
       <MediaFill data={data} />
@@ -165,22 +171,32 @@ function StoryCard({ data, format, watchUrl }: { data: AdCreativeData; format: A
           <div className="text-[10px] text-white/80">Sponsored</div>
         </div>
       </div>
-      {data.body && (
-        <div className="pointer-events-none absolute inset-x-0 top-20 px-4">
-          <p className="text-[13px] line-clamp-4 drop-shadow-md">{data.body}</p>
-        </div>
+      {isVideoCard && !videoUrl && imageUrl && (
+        <a
+          href={watchUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="absolute inset-0 flex items-center justify-center group"
+          title="Open on Meta to watch"
+        >
+          <div className="h-14 w-14 rounded-full bg-black/55 group-hover:bg-black/75 flex items-center justify-center backdrop-blur-sm transition">
+            <svg className="h-7 w-7 text-white ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          </div>
+        </a>
       )}
-      <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
-        {data.title && <div className="mb-2 text-[14px] font-semibold drop-shadow">{data.title}</div>}
-        {data.cta.label && (
+      {data.cta.label && (
+        <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
           <button
             className="w-full rounded-full bg-white text-black text-[13px] font-semibold py-2.5"
             type="button"
           >
             {data.cta.label}
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }
