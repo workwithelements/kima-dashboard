@@ -134,8 +134,11 @@ function FeedCard({ data, format }: { data: AdCreativeData; format: AdPreviewFor
 /* ───────────────────────── Story card (Story / Reels) ───────────────────── */
 
 function StoryCard({ data, format }: { data: AdCreativeData; format: AdPreviewFormat }) {
+  // 9:16 sized by height (not width) so the card fits cleanly inside the
+  // modal — `w-full aspect-[9/16]` made height = width × 16/9 which
+  // overshot the modal and forced the whole thing to scroll.
   return (
-    <div className="relative w-full aspect-[9/16] bg-black overflow-hidden text-white">
+    <div className="relative mx-auto h-[60vh] max-h-[600px] aspect-[9/16] bg-black overflow-hidden text-white">
       <MediaFill data={data} />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/60 to-transparent" />
       <div className="absolute inset-x-0 top-3 px-3 flex items-center gap-2">
@@ -236,16 +239,37 @@ function MediaArea({ data, format }: { data: AdCreativeData; format: AdPreviewFo
           referrerPolicy="no-referrer"
         />
       )}
-      {/* Video ad with no source URL — overlay a play icon so it's obviously
-          a video rather than a static image, and link out to Meta. */}
+      {/* Video ad with no source URL — overlay a play icon. If we have a
+          post permalink, make the whole media area click out to the live
+          post on Meta so users can watch the video. Otherwise just show
+          the play badge as a visual cue that it's a video creative. */}
       {isVideoCard && !videoUrl && imageUrl && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div className="h-14 w-14 rounded-full bg-black/55 flex items-center justify-center backdrop-blur-sm">
-            <svg className="h-7 w-7 text-white ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M8 5v14l11-7z" />
-            </svg>
+        data.permalinkUrl ? (
+          <a
+            href={data.permalinkUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="absolute inset-0 flex items-center justify-center group"
+            title="Open on Meta to watch"
+          >
+            <div className="h-14 w-14 rounded-full bg-black/55 group-hover:bg-black/75 flex items-center justify-center backdrop-blur-sm transition">
+              <svg className="h-7 w-7 text-white ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            </div>
+            <span className="absolute bottom-2 right-2 rounded bg-black/65 px-2 py-0.5 text-[10px] text-white">
+              Watch on Meta ↗
+            </span>
+          </a>
+        ) : (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="h-14 w-14 rounded-full bg-black/55 flex items-center justify-center backdrop-blur-sm">
+              <svg className="h-7 w-7 text-white ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            </div>
           </div>
-        </div>
+        )
       )}
     </div>
   )

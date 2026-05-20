@@ -37,6 +37,9 @@ export type AdCreativeData = {
   linkDomain: string | null
   linkUrl: string | null
   cta: { type: string | null; label: string | null }
+  /** facebook.com URL of the underlying organic post when available — used
+   *  as a "View on Meta" fallback when we can't render the video inline. */
+  permalinkUrl: string | null
   media: {
     type: "image" | "video"
     imageUrl: string | null
@@ -84,7 +87,7 @@ export async function GET(request: NextRequest) {
   const supabase = createServiceClient()
 
   // Cache key is fixed per-ad (data is format-independent now).
-  const cacheKey = "v6"
+  const cacheKey = "v7"
   const { data: cached } = await supabase
     .from("meta_ad_creative_previews")
     .select("html, fetched_at")
@@ -155,16 +158,23 @@ export async function GET(request: NextRequest) {
         continue
       }
 
-      // Page info needs a second small call — Meta doesn't return page name
-      // via creative field expansion any more.
+      // Three follow-up calls in parallel:
+      //  - pageInfo: page name + avatar for header chrome
+      //  - videoUrlMap: AdVideo source URLs (often blocked by ads_read scope)
+      //  - postInfo: the underlying organic post via effective_object_story_id
+      //    — gives us full_picture (high-res, vs. the ~64x64 thumbnail_url),
+      //      source (post-level video URL, can succeed when AdVideo source
+      //      fails), and permalink_url ("View on Meta" fallback)
       const pageId: string | undefined = raw?.object_story_spec?.page_id
-      const pageInfo = pageId ? await fetchPageInfo(pageId, accessToken) : { name: null, pictureUrl: null }
-
-      // Video src URL needs resolving for any video_id we found.
+      const storyId: string | undefined = raw?.effective_object_story_id
       const videoIds = collectVideoIds(raw)
-      const videoUrlMap = await fetchVideoSources(videoIds, accessToken)
+      const [pageInfo, videoUrlMap, postInfo] = await Promise.all([
+        pageId ? fetchPageInfo(pageId, accessToken) : Promise.resolve({ name: null, pictureUrl: null }),
+        fetchVideoSources(videoIds, accessToken),
+        storyId ? fetchPostInfo(storyId, accessToken) : Promise.resolve({ fullPicture: null, videoSource: null, permalinkUrl: null }),
+      ])
 
-      const data = normalizeCreative(raw, pageInfo, videoUrlMap)
+      const data = normalizeCreative(raw, pageInfo, videoUrlMap, postInfo)
 
       // Fire-and-forget cache write.
       supabase
@@ -184,6 +194,9 @@ export async function GET(request: NextRequest) {
         feedVideosCount: Array.isArray(raw?.asset_feed_spec?.videos) ? raw.asset_feed_spec.videos.length : null,
         feedImagesCount: Array.isArray(raw?.asset_feed_spec?.images) ? raw.asset_feed_spec.images.length : null,
         videoUrlMapKeys: Object.keys(videoUrlMap),
+        postFullPicture: !!postInfo.fullPicture,
+        postVideoSource: !!postInfo.videoSource,
+        postPermalink: !!postInfo.permalinkUrl,
       }
 
       if (debug) return debugResponse(data, { raw, via, page: pageInfo, videoUrlMap, _diag: diag })
@@ -268,6 +281,42 @@ async function fetchPageInfo(pageId: string, token: string): Promise<{ name: str
   }
 }
 
+/** Fetch the underlying organic post for an ad via its
+ *  `effective_object_story_id` (format: `{page_id}_{post_id}`). Returns:
+ *   - fullPicture: full-resolution image URL (vs. the ~64x64 thumbnail_url
+ *     Meta returns on the creative directly)
+ *   - videoSource: post-level video URL — accessible even when the AdVideo
+ *     source field is blocked by token scope, since it's a different object
+ *   - permalinkUrl: facebook.com URL to view the post; used as a "View on
+ *     Meta" fallback when no inline video URL is available */
+async function fetchPostInfo(storyId: string, token: string): Promise<{
+  fullPicture: string | null
+  videoSource: string | null
+  permalinkUrl: string | null
+}> {
+  try {
+    const res = await fetch(
+      `${META_GRAPH_URL}/${storyId}?fields=full_picture,source,permalink_url&access_token=${token}`,
+      { next: { revalidate: 0 } }
+    )
+    const text = await res.text()
+    let json: any = null
+    try { json = JSON.parse(text) } catch { /* keep null */ }
+    if (!res.ok) {
+      console.warn(`[ad-preview] post ${storyId} lookup failed status=${res.status} msg=${json?.error?.message ?? text.slice(0, 200)}`)
+      return { fullPicture: null, videoSource: null, permalinkUrl: null }
+    }
+    return {
+      fullPicture: typeof json?.full_picture === "string" ? json.full_picture : null,
+      videoSource: typeof json?.source === "string" ? json.source : null,
+      permalinkUrl: typeof json?.permalink_url === "string" ? json.permalink_url : null,
+    }
+  } catch (e: any) {
+    console.warn(`[ad-preview] post ${storyId} lookup threw: ${e?.message ?? "unknown"}`)
+    return { fullPicture: null, videoSource: null, permalinkUrl: null }
+  }
+}
+
 /** Resolve a batch of video_ids to source URLs via one /v.../?ids=... call.
  *
  *  `source` requires ads_management on most tokens; with only ads_read we
@@ -328,7 +377,8 @@ function collectVideoIds(raw: any): string[] {
 function normalizeCreative(
   raw: any,
   page: { name: string | null; pictureUrl: string | null },
-  videoUrlMap: Record<string, string>
+  videoUrlMap: Record<string, string>,
+  postInfo: { fullPicture: string | null; videoSource: string | null; permalinkUrl: string | null }
 ): AdCreativeData {
   const spec = raw?.object_story_spec ?? {}
   const linkData = spec?.link_data
@@ -383,15 +433,17 @@ function normalizeCreative(
     const vid = videoData?.video_id ?? raw?.video_id
     media = {
       type: "video",
-      videoUrl: vid ? videoUrlMap[vid] ?? null : null,
-      thumbnailUrl: videoData?.image_url ?? raw?.thumbnail_url ?? raw?.image_url ?? null,
+      // Prefer the post-level video source (`postInfo.videoSource`) when
+      // the AdVideo `source` field is blocked by token scope.
+      videoUrl: (vid ? videoUrlMap[vid] : null) ?? postInfo.videoSource ?? null,
+      thumbnailUrl: postInfo.fullPicture ?? videoData?.image_url ?? raw?.thumbnail_url ?? raw?.image_url ?? null,
       imageUrl: null,
     }
   } else if (linkData?.picture || raw?.image_url || photoData?.url) {
     format = "single_image"
     media = {
       type: "image",
-      imageUrl: linkData?.picture ?? raw?.image_url ?? photoData?.url ?? null,
+      imageUrl: postInfo.fullPicture ?? linkData?.picture ?? raw?.image_url ?? photoData?.url ?? null,
       thumbnailUrl: raw?.thumbnail_url ?? null,
       videoUrl: null,
     }
@@ -399,15 +451,15 @@ function normalizeCreative(
     format = "single_video"
     media = {
       type: "video",
-      videoUrl: videoUrlMap[feedFirstVideo.video_id] ?? null,
-      thumbnailUrl: feedFirstVideo?.thumbnail_url ?? null,
+      videoUrl: videoUrlMap[feedFirstVideo.video_id] ?? postInfo.videoSource ?? null,
+      thumbnailUrl: postInfo.fullPicture ?? feedFirstVideo?.thumbnail_url ?? null,
       imageUrl: null,
     }
-  } else if (feedFirstImage?.url) {
+  } else if (feedFirstImage?.url || postInfo.fullPicture) {
     format = "single_image"
     media = {
       type: "image",
-      imageUrl: feedFirstImage.url,
+      imageUrl: postInfo.fullPicture ?? feedFirstImage?.url ?? null,
       thumbnailUrl: null,
       videoUrl: null,
     }
@@ -421,7 +473,7 @@ function normalizeCreative(
   // Hash resolution via /act_{id}/adimages is a future improvement;
   // thumbnail_url is enough for most preview surfaces.
   if (format === "unknown") {
-    const fallback = pickBestImageUrl(raw)
+    const fallback = postInfo.fullPicture ?? pickBestImageUrl(raw)
     if (fallback) {
       format = "single_image"
       media = {
@@ -455,6 +507,7 @@ function normalizeCreative(
     linkDomain,
     linkUrl,
     cta,
+    permalinkUrl: postInfo.permalinkUrl,
     media,
     children: normalizedChildren,
   }
