@@ -84,7 +84,7 @@ export async function GET(request: NextRequest) {
   const supabase = createServiceClient()
 
   // Cache key is fixed per-ad (data is format-independent now).
-  const cacheKey = "v5"
+  const cacheKey = "v6"
   const { data: cached } = await supabase
     .from("meta_ad_creative_previews")
     .select("html, fetched_at")
@@ -413,6 +413,26 @@ function normalizeCreative(
     }
   }
 
+  // Final fallback: walk the proven v1 priority chain to recover an image
+  // URL the branches above didn't find. ASC image creatives in particular
+  // tend to put `image_hash` (not `url`) in asset_feed_spec.images, so the
+  // `feedFirstImage?.url` branch falls through, but raw.thumbnail_url is
+  // still populated. Without this fallback those ads show "No media".
+  // Hash resolution via /act_{id}/adimages is a future improvement;
+  // thumbnail_url is enough for most preview surfaces.
+  if (format === "unknown") {
+    const fallback = pickBestImageUrl(raw)
+    if (fallback) {
+      format = "single_image"
+      media = {
+        type: "image",
+        imageUrl: fallback,
+        thumbnailUrl: fallback,
+        videoUrl: null,
+      }
+    }
+  }
+
   const normalizedChildren: AdCreativeData["children"] = children.map((c) => {
     const cVid = c?.video_id
     return {
@@ -449,6 +469,34 @@ function pickArrayText(arr: any): string | null {
     if (typeof text === "string" && text.length > 0) return text
   }
   return null
+}
+
+/** Walk the priority chain proven in the v1 codebase to recover a usable
+ *  image URL from anywhere on the creative. Covers all the spots Meta
+ *  hides imagery: video posters, link/photo/carousel objects, dynamic
+ *  creative arrays, and the top-level thumbnail_url. Returns null only
+ *  when every path comes back empty — typically when imagery is only
+ *  available as `image_hash` values that need a /adimages lookup. */
+function pickBestImageUrl(raw: any): string | null {
+  const spec = raw?.object_story_spec
+  const links = spec?.link_data
+  const photo = spec?.photo_data
+  const video = spec?.video_data
+  const feed = raw?.asset_feed_spec
+  return (
+    video?.image_url ||
+    links?.picture ||
+    links?.image_url ||
+    links?.child_attachments?.[0]?.picture ||
+    links?.child_attachments?.[0]?.image_url ||
+    photo?.url ||
+    photo?.images?.[0]?.url ||
+    feed?.images?.[0]?.url ||
+    feed?.videos?.[0]?.thumbnail_url ||
+    raw?.image_url ||
+    raw?.thumbnail_url ||
+    null
+  )
 }
 
 function extractDomain(url: string): string | null {
