@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
   const supabase = createServiceClient()
 
   // Cache key is fixed per-ad (data is format-independent now).
-  const cacheKey = "v10"
+  const cacheKey = "v11"
   const { data: cached } = await supabase
     .from("meta_ad_creative_previews")
     .select("html, fetched_at")
@@ -175,6 +175,9 @@ export async function GET(request: NextRequest) {
       //  - imageHashMap: resolves image_hash values to full-res URLs via
       //    /act_{accountId}/adimages. Reliable backup when post fetch fails
       //    (often: token doesn't have pages_read_engagement).
+      //  - inlineVideoUrl: scrapes the direct fbcdn .mp4 URL out of the
+      //    /previews iframe response for video ads. Last-resort path when
+      //    every cheaper API source for the video URL came back empty.
       const pageId: string | undefined = raw?.object_story_spec?.page_id
       const storyId: string | undefined = raw?.effective_object_story_id
       // For the ad_id path account_id sits on the ad envelope, not the
@@ -183,14 +186,28 @@ export async function GET(request: NextRequest) {
         (via === "ad_id" ? json?.account_id : undefined) ?? raw?.account_id
       const videoIds = collectVideoIds(raw)
       const imageHashes = collectImageHashes(raw)
-      const [pageInfo, videoUrlMap, postInfo, imageHashMap] = await Promise.all([
+      const isVideoAd = videoIds.length > 0
+      // Use whatever identifier we have here for the /previews call. The
+      // endpoint works on both ad_ids and creative_ids; we already know
+      // which one was successful for the main fetch.
+      const previewResourceId = via === "ad_id" ? adId : (metaRow?.creative_id ?? adId)
+      const [pageInfo, videoUrlMap, postInfo, imageHashMap, inlineVideoUrl] = await Promise.all([
         pageId ? fetchPageInfo(pageId, accessToken) : Promise.resolve({ name: null, pictureUrl: null }),
         fetchVideoSources(videoIds, accessToken),
         storyId ? fetchPostInfo(storyId, accessToken) : Promise.resolve({ fullPicture: null, videoSource: null, permalinkUrl: null }),
         accountId && imageHashes.length > 0 ? fetchImagesByHash(accountId, imageHashes, accessToken) : Promise.resolve({}),
+        isVideoAd ? extractInlineVideoUrl(previewResourceId, accessToken) : Promise.resolve(null),
       ])
 
-      const data = normalizeCreative(raw, pageInfo, videoUrlMap, postInfo, imageHashMap)
+      // Roll the scraped URL into postInfo so normalizeCreative picks it
+      // up via its existing postInfo.videoSource fallback. Cheaper than
+      // adding another parameter.
+      const enrichedPostInfo = {
+        ...postInfo,
+        videoSource: postInfo.videoSource ?? inlineVideoUrl,
+      }
+
+      const data = normalizeCreative(raw, pageInfo, videoUrlMap, enrichedPostInfo, imageHashMap)
 
       // Fire-and-forget cache write.
       supabase
@@ -216,6 +233,7 @@ export async function GET(request: NextRequest) {
         accountId: accountId ?? null,
         imageHashesCollected: imageHashes.length,
         imageHashesResolved: Object.keys(imageHashMap).length,
+        inlineVideoUrlFound: !!inlineVideoUrl,
       }
 
       if (debug) return debugResponse(data, { raw, via, page: pageInfo, videoUrlMap, _diag: diag })
@@ -345,6 +363,71 @@ function collectImageHashes(raw: any): string[] {
     for (const i of feedImages) push(i?.hash)
   }
   return hashes
+}
+
+/** Last-resort video URL extraction: hit Meta's `/previews` endpoint,
+ *  follow the inner `preview_iframe.php` URL server-side, and regex out
+ *  the direct fbcdn .mp4 URL embedded in the page's React payload.
+ *
+ *  The mp4 URLs are publicly accessible (signed query string but no
+ *  auth header required) and play natively in <video src>. They have
+ *  a short-ish expiry (~1-2 hours via `oe=`) but that's fine for a
+ *  preview surface — we'll just refetch on the next cache miss.
+ *
+ *  Used only when the cheaper API paths (AdVideo.source, post.source,
+ *  post.attachments.media.source) all came back null — which is the
+ *  common case on tokens without ads_management scope. */
+async function extractInlineVideoUrl(resourceId: string, token: string): Promise<string | null> {
+  try {
+    const previewsRes = await fetch(
+      `${META_GRAPH_URL}/${resourceId}/previews?ad_format=MOBILE_FEED_STANDARD&access_token=${token}`,
+      { next: { revalidate: 0 } }
+    )
+    if (!previewsRes.ok) {
+      const t = await previewsRes.text()
+      console.warn(`[ad-preview] previews fetch failed for ${resourceId} status=${previewsRes.status} body=${t.slice(0, 200)}`)
+      return null
+    }
+    const previewsJson = await previewsRes.json().catch(() => null)
+    const wrapper: string | undefined = previewsJson?.data?.[0]?.body
+    if (!wrapper) {
+      console.warn(`[ad-preview] previews response had no body for ${resourceId}`)
+      return null
+    }
+
+    // Extract the inner preview_iframe.php URL from the iframe wrapper.
+    const srcMatch = wrapper.match(/<iframe[^>]*\ssrc=(["'])(.+?)\1/i)
+    if (!srcMatch) {
+      console.warn(`[ad-preview] previews wrapper had no iframe src`)
+      return null
+    }
+    const innerUrl = srcMatch[2].replace(/&amp;/g, "&")
+
+    // Pull down the rendered page HTML.
+    const innerRes = await fetch(innerUrl, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; KIMA-Dashboard)" },
+    })
+    if (!innerRes.ok) {
+      console.warn(`[ad-preview] preview inner fetch failed status=${innerRes.status}`)
+      return null
+    }
+    const innerHtml = await innerRes.text()
+
+    // The mp4 URLs live inside a big JSON payload in a requireLazy(...)
+    // script. Prefer HD; fall back to SD.
+    const hd = innerHtml.match(/"videoURIHD"\s*:\s*"([^"]+)"/)
+    const sd = innerHtml.match(/"videoURISD"\s*:\s*"([^"]+)"/)
+    const escaped = hd?.[1] || sd?.[1]
+    if (!escaped) {
+      console.warn(`[ad-preview] preview HTML had no videoURI fields`)
+      return null
+    }
+    // JSON-decode the URL (`\/` → `/`).
+    return escaped.replace(/\\\//g, "/")
+  } catch (e: any) {
+    console.warn(`[ad-preview] preview video extraction threw: ${e?.message ?? "unknown"}`)
+    return null
+  }
 }
 
 /** Fetch the underlying organic post for an ad via its
