@@ -10,21 +10,31 @@ const MAX_ATTEMPTS = 5
 const WINDOW_MS = 60_000 // 1 minute
 
 /**
- * Returns true if the key has exceeded the rate limit.
- * Call this before processing the request.
+ * Returns true if the key has exceeded the failed-attempt budget in the
+ * window. Does NOT increment — call `recordFailedAttempt` after a failure.
  */
 export function isRateLimited(key: string): boolean {
   const now = Date.now()
   const timestamps = attempts.get(key) || []
-
-  // Remove entries outside the window
   const recent = timestamps.filter((t) => now - t < WINDOW_MS)
 
-  if (recent.length >= MAX_ATTEMPTS) {
+  if (recent.length !== timestamps.length) {
     attempts.set(key, recent)
-    return true
   }
 
+  return recent.length >= MAX_ATTEMPTS
+}
+
+/**
+ * Record a failed attempt for the key. Successful auths must NOT be
+ * counted — otherwise a user who legitimately re-authenticates a few
+ * times in quick succession would lock themselves out with the right
+ * password.
+ */
+export function recordFailedAttempt(key: string): void {
+  const now = Date.now()
+  const timestamps = attempts.get(key) || []
+  const recent = timestamps.filter((t) => now - t < WINDOW_MS)
   recent.push(now)
   attempts.set(key, recent)
 
@@ -38,6 +48,4 @@ export function isRateLimited(key: string): boolean {
       else attempts.set(k, fresh)
     }
   }
-
-  return false
 }
