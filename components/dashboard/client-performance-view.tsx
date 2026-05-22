@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname } from "next/navigation"
 import dynamic from "next/dynamic"
 import type { MetaDailyRow, GoogleAdsDailyRow, MetaDemographicsRow, MetaPlacementsRow, Client, ComparisonType, HierarchyLevel, AggregatedMetrics, ShopifyDailyOrdersRow, ShopifyAttributionRow } from "@/lib/utils/types"
 import { getClientPlatforms } from "@/lib/utils/types"
@@ -238,6 +238,7 @@ export default function ClientPerformanceView({
 }: Props) {
   const currency = client.currency_code ?? "GBP"
   const router = useRouter()
+  const pathname = usePathname()
   const [gaLevel, setGaLevel] = useState<"campaign" | "ad_group">("campaign")
   const [showConfig, setShowConfig] = useState(false)
 
@@ -1365,7 +1366,11 @@ export default function ClientPerformanceView({
     const newFrom = String(merged.from || from)
     const newTo = String(merged.to || to)
     const newCompare = (merged.compare || compareType) as ComparisonType
-    const url = `/dashboard/clients/${client.id}?${params.toString()}`
+    // Use the current pathname so this works both under /dashboard/clients/[id]
+    // (admin) and /view/[slug] (client-facing). Hardcoding the admin path here
+    // sent the client view to /dashboard/... on every date/compare change, which
+    // middleware then redirected to /login.
+    const url = `${pathname}?${params.toString()}`
     if (opts?.allowShallow && canShallowRoute(newFrom, newTo, newCompare)) {
       // Update URL in place without re-running the server component
       window.history.replaceState(null, "", url)
