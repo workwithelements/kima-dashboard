@@ -695,19 +695,22 @@ export default function ClientPerformanceView({
     return Math.round(total / numDays)
   }, [filteredCompRows, compareType, platform, numDays])
 
-  // Helper: generate all dates in the selected range so charts always span the full range
+  // Helper: generate all dates in the selected range so charts always span the full range.
+  // Use UTC arithmetic so the resulting YYYY-MM-DD strings match the input dates regardless
+  // of the user's local timezone (toISOString returns UTC, so a local-time cursor in a
+  // positive offset like BST would shift every date one day earlier).
   const allDates = useMemo(() => {
     const dates: string[] = []
     if (!from || !to) return dates
-    const d = new Date(from + "T00:00:00")
-    const end = new Date(to + "T00:00:00")
+    const d = new Date(from + "T00:00:00Z")
+    const end = new Date(to + "T00:00:00Z")
     if (isNaN(d.getTime()) || isNaN(end.getTime())) return dates
     // Safety: cap at 366 days to prevent infinite loops
     const maxDays = 366
     let count = 0
     while (d <= end && count < maxDays) {
       dates.push(d.toISOString().split("T")[0])
-      d.setDate(d.getDate() + 1)
+      d.setUTCDate(d.getUTCDate() + 1)
       count++
     }
     return dates
