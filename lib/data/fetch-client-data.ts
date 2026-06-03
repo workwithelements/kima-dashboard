@@ -372,7 +372,7 @@ async function _fetchReachDataInner(
   // Fetch all rows with pagination to avoid PostgREST 1000-row cap
   type ReachRow = { date: string; reach: number; impressions: number; spend?: number; adset_id?: string; adset_name?: string }
 
-  const [reachRows, baselineRows, comparisonRows] = await Promise.all([
+  const [reachRows, baselineRows, comparisonRows, lifetimeRaw] = await Promise.all([
     fetchAllRows<ReachRow>(() =>
       supabase
         .from("meta_daily_performance")
@@ -401,6 +401,17 @@ async function _fetchReachDataInner(
             .order("date")
         )
       : Promise.resolve([] as ReachRow[]),
+    // Lifetime daily reach (inception → period end). Powers the weeks/months
+    // toggle and the deduped "true new reach" calculation, which measures new
+    // reach within a period against the campaign/ad set/ad lifetime reach.
+    fetchAllRows<ReachRow>(() =>
+      supabase
+        .from("meta_daily_performance")
+        .select("date, reach, impressions, spend, adset_id, adset_name")
+        .eq("client_id", clientId)
+        .lte("date", to)
+        .order("date")
+    ),
   ])
 
   let baselineReach = 0
@@ -408,11 +419,38 @@ async function _fetchReachDataInner(
     baselineReach += row.reach || 0
   }
 
+  // Collapse lifetime rows to one row per (date, ad set) to keep the client
+  // payload bounded while preserving ad-set-level filtering for the chart.
+  const lifetimeByKey = new Map<string, ReachRow>()
+  for (const row of lifetimeRaw) {
+    if (!row.date) continue
+    const key = `${row.date}|${row.adset_id ?? ""}`
+    const existing = lifetimeByKey.get(key)
+    if (existing) {
+      existing.reach += row.reach || 0
+      existing.impressions += row.impressions || 0
+      existing.spend = (existing.spend || 0) + (row.spend || 0)
+    } else {
+      lifetimeByKey.set(key, {
+        date: row.date,
+        reach: row.reach || 0,
+        impressions: row.impressions || 0,
+        spend: row.spend || 0,
+        adset_id: row.adset_id,
+        adset_name: row.adset_name,
+      })
+    }
+  }
+  const lifetimeRows = Array.from(lifetimeByKey.values()).sort((a, b) =>
+    a.date.localeCompare(b.date)
+  )
+
   return {
     client,
     rows: reachRows,
     baselineReach,
     comparisonRows,
+    lifetimeRows,
   }
 }
 

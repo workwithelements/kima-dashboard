@@ -45,6 +45,7 @@ export default async function ReachAnalysisPage({ params, searchParams }: Props)
       to={range.to}
       currency={data.client.currency_code ?? "GBP"}
       comparisonRows={data.comparisonRows}
+      lifetimeRows={data.lifetimeRows}
     />
   )
 }
