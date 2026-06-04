@@ -17,9 +17,11 @@ type CpmrChartProps = {
   data: CpmrDataPoint[]
   height?: number
   currency?: string
+  /** Axis/tooltip label formatter (defaults to short date) */
+  labelFormatter?: (dateStr: string) => string
 }
 
-export default function CpmrChart({ data, height = 280, currency = "GBP" }: CpmrChartProps) {
+export default function CpmrChart({ data, height = 280, currency = "GBP", labelFormatter = fmtDateShort }: CpmrChartProps) {
   return (
     <ResponsiveContainer width="100%" height={height}>
       <ComposedChart data={data}>
@@ -29,7 +31,7 @@ export default function CpmrChart({ data, height = 280, currency = "GBP" }: Cpmr
           tick={{ fill: "#737373", fontSize: 11 }}
           tickLine={false}
           axisLine={{ stroke: "#262626" }}
-          tickFormatter={fmtDateShort}
+          tickFormatter={labelFormatter}
         />
         <YAxis
           tick={{ fill: "#737373", fontSize: 11 }}
@@ -45,7 +47,7 @@ export default function CpmrChart({ data, height = 280, currency = "GBP" }: Cpmr
             fontSize: "12px",
           }}
           labelStyle={{ color: "#a3a3a3" }}
-          labelFormatter={fmtDateShort}
+          labelFormatter={labelFormatter}
           formatter={(value: number, name: string) => {
             const label = name === "cpmr" ? "CPMr (per 1k reach)" : "CPM"
             return [fmtCurrency(value, currency), label]

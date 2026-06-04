@@ -33,8 +33,12 @@ import {
   prepareReachData,
   calculateSaturation,
   detectReachFatigue,
-  dailyCpmrSeries,
-  rollingSaturationSeries,
+  buildReachBuckets,
+  granularityWindow,
+  formatBucketLabel,
+  DEFAULT_WEEKS,
+  DEFAULT_MONTHS,
+  type Granularity,
 } from "@/lib/utils/reach"
 import type { DatePreset } from "@/lib/utils/dates"
 
@@ -48,7 +52,16 @@ type Props = {
   to: string
   currency?: string
   comparisonRows?: ReachRow[]
+  /** Full lifetime daily reach (inception → period end) for the granularity
+   *  toggle and deduped lifetime new-reach calculation. Falls back to `rows`. */
+  lifetimeRows?: ReachRow[]
 }
+
+const GRANULARITY_OPTIONS: { value: Granularity; label: string }[] = [
+  { value: "day", label: "Days" },
+  { value: "week", label: `Weeks` },
+  { value: "month", label: `Months` },
+]
 
 export default function ReachAnalysisView({
   rows,
@@ -58,7 +71,10 @@ export default function ReachAnalysisView({
   to,
   currency = "GBP",
   comparisonRows = [],
+  lifetimeRows,
 }: Props) {
+  const [granularity, setGranularity] = useState<Granularity>("day")
+  const lifetime = lifetimeRows && lifetimeRows.length > 0 ? lifetimeRows : rows
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -79,33 +95,75 @@ export default function ReachAnalysisView({
     router.push(`${pathname}?${params.toString()}`)
   }
 
-  // Extract unique ad sets from rows
+  // Extract unique ad sets from the lifetime rows (most complete set)
   const adsets = useMemo(() => {
     const map = new Map<string, string>()
-    for (const r of rows) {
+    for (const r of lifetime) {
       if (r.adset_id && r.adset_name) map.set(r.adset_id, r.adset_name)
     }
     return Array.from(map, ([id, name]) => ({ id, name })).sort((a, b) =>
       a.name.localeCompare(b.name)
     )
-  }, [rows])
+  }, [lifetime])
 
   const [selectedAdSets, setSelectedAdSets] = useState<string[]>(() =>
     adsets.map((a) => a.id)
   )
 
+  const allAdSetsSelected =
+    selectedAdSets.length === 0 || selectedAdSets.length === adsets.length
+
   // Filter rows by selected ad sets
   const filteredRows = useMemo(() => {
-    if (selectedAdSets.length === 0 || selectedAdSets.length === adsets.length) return rows
+    if (allAdSetsSelected) return rows
     return rows.filter((r) => r.adset_id && selectedAdSets.includes(r.adset_id))
-  }, [rows, selectedAdSets, adsets.length])
+  }, [rows, selectedAdSets, allAdSetsSelected])
 
   const filteredCompRows = useMemo(() => {
-    if (selectedAdSets.length === 0 || selectedAdSets.length === adsets.length) return comparisonRows
+    if (allAdSetsSelected) return comparisonRows
     return comparisonRows.filter((r) => r.adset_id && selectedAdSets.includes(r.adset_id))
-  }, [comparisonRows, selectedAdSets, adsets.length])
+  }, [comparisonRows, selectedAdSets, allAdSetsSelected])
 
-  // — Primary period data —
+  const filteredLifetime = useMemo(() => {
+    if (allAdSetsSelected) return lifetime
+    return lifetime.filter((r) => r.adset_id && selectedAdSets.includes(r.adset_id))
+  }, [lifetime, selectedAdSets, allAdSetsSelected])
+
+  // Lifetime cumulative reach series (deduped via the running-baseline model,
+  // accumulated from inception). New reach in any period is measured against
+  // this so users first reached earlier in the lifetime aren't re-counted.
+  const lifetimeDaily = useMemo(() => dailyReachSeries(filteredLifetime), [filteredLifetime])
+  const lifetimePrepared = useMemo(() => prepareReachData(lifetimeDaily, 0), [lifetimeDaily])
+
+  // Bucketed series for the time-series charts, per granularity + window.
+  const { windowFrom, windowTo } = granularityWindow(granularity, from, to)
+  const buckets = useMemo(
+    () => buildReachBuckets(lifetimeDaily, granularity, windowFrom, windowTo),
+    [lifetimeDaily, granularity, windowFrom, windowTo]
+  )
+
+  // True new reach during the SELECTED period as a share of lifetime reach.
+  const selectedNew = useMemo(() => {
+    const inPeriod = lifetimePrepared.filter((p) => p.date >= from && p.date <= to)
+    const newReach = inPeriod.reduce((s, d) => s + d.newReach, 0)
+    const upToEnd = lifetimePrepared.filter((p) => p.date <= to)
+    const lifetimeCum = upToEnd.length ? upToEnd[upToEnd.length - 1].totalReach : 0
+    return { newReach, lifetimeCum, pct: lifetimeCum > 0 ? (newReach / lifetimeCum) * 100 : 0 }
+  }, [lifetimePrepared, from, to])
+
+  const compNew = useMemo(() => {
+    if (filteredCompRows.length === 0) return null
+    const dates = filteredCompRows.map((r) => r.date).filter(Boolean).sort()
+    const cFrom = dates[0]
+    const cTo = dates[dates.length - 1]
+    const inPeriod = lifetimePrepared.filter((p) => p.date >= cFrom && p.date <= cTo)
+    const newReach = inPeriod.reduce((s, d) => s + d.newReach, 0)
+    const upToEnd = lifetimePrepared.filter((p) => p.date <= cTo)
+    const lifetimeCum = upToEnd.length ? upToEnd[upToEnd.length - 1].totalReach : 0
+    return { newReach, pct: lifetimeCum > 0 ? (newReach / lifetimeCum) * 100 : 0 }
+  }, [filteredCompRows, lifetimePrepared])
+
+  // — Primary period data (scorecards reflect the selected date range) —
   const dailyReach = dailyReachSeries(filteredRows)
   const reachData = prepareReachData(dailyReach, baselineReach)
 
@@ -118,18 +176,15 @@ export default function ReachAnalysisView({
   const cpmr = totalReach > 0 ? (totalSpend / totalReach) * 1000 : 0
   const cpm = totalImpressions > 0 ? (totalSpend / totalImpressions) * 1000 : 0
 
-  const totalNewReach = reachData.reduce((sum, d) => sum + d.newReach, 0)
-  const avgNewReachPct =
-    reachData.length > 0
-      ? reachData.reduce((sum, d) => sum + d.newReachPct, 0) / reachData.length
-      : 0
+  // True new reach for the selected period as a share of lifetime reach.
+  const totalNewReach = selectedNew.newReach
+  const avgNewReachPct = selectedNew.pct
 
   // — Comparison period data —
   const hasComparison = filteredCompRows.length > 0
   let compTotalReach = 0
   let compTotalImpressions = 0
   let compTotalSpend = 0
-  let compAvgNewReachPct = 0
   let compFrequency = 0
   let compCpmr = 0
   let compCpm = 0
@@ -139,13 +194,6 @@ export default function ReachAnalysisView({
     compTotalImpressions = filteredCompRows.reduce((sum, r) => sum + (r.impressions || 0), 0)
     compTotalSpend = filteredCompRows.reduce((sum, r) => sum + (r.spend || 0), 0)
 
-    const compDailyReach = dailyReachSeries(filteredCompRows)
-    const compReachData = prepareReachData(compDailyReach, 0)
-    compAvgNewReachPct =
-      compReachData.length > 0
-        ? compReachData.reduce((sum, d) => sum + d.newReachPct, 0) / compReachData.length
-        : 0
-
     compFrequency = compTotalReach > 0 ? compTotalImpressions / compTotalReach : 0
     compCpmr = compTotalReach > 0 ? (compTotalSpend / compTotalReach) * 1000 : 0
     compCpm = compTotalImpressions > 0 ? (compTotalSpend / compTotalImpressions) * 1000 : 0
@@ -153,30 +201,47 @@ export default function ReachAnalysisView({
 
   // Deltas
   const reachDelta = hasComparison ? fmtDelta(totalReach, compTotalReach) : null
-  const newReachPctDelta = hasComparison ? fmtDelta(avgNewReachPct, compAvgNewReachPct) : null
+  const newReachPctDelta =
+    hasComparison && compNew ? fmtDelta(avgNewReachPct, compNew.pct) : null
   const freqDelta = hasComparison ? fmtDelta(saturation.avgFrequency, compFrequency) : null
   const cpmrDelta = hasComparison ? fmtDelta(cpmr, compCpmr) : null
   const cpmDelta = hasComparison ? fmtDelta(cpm, compCpm) : null
 
-  // — Charts data —
-  const cpmrData = dailyCpmrSeries(
-    filteredRows.map((r) => ({
-      date: r.date,
-      spend: r.spend || 0,
-      impressions: r.impressions,
-      reach: r.reach,
-    }))
-  )
-
-  const saturationTimeline = rollingSaturationSeries(dailyReach, baselineReach, 7)
-  const fatigueDays = detectReachFatigue(reachData)
+  // — Charts data (bucketed per the selected granularity / window) —
+  const cpmrData = buckets.cpmr
+  const saturationTimeline = buckets.saturation
+  const fatigueDays = detectReachFatigue(buckets.reach)
+  const bucketLabel = (s: string) => formatBucketLabel(s, granularity)
 
   return (
     <div className="space-y-6">
       {/* Header bar */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-sm font-medium text-neutral-400">Reach Analysis</h2>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Granularity toggle: Days (date select) / Weeks (12) / Months (6) */}
+          <div className="inline-flex rounded-lg border border-neutral-700 bg-neutral-800/50 p-0.5">
+            {GRANULARITY_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setGranularity(opt.value)}
+                className={`rounded-md px-2.5 py-1 text-xs transition ${
+                  granularity === opt.value
+                    ? "bg-brand-lime/15 text-brand-lime"
+                    : "text-neutral-400 hover:text-white"
+                }`}
+                title={
+                  opt.value === "day"
+                    ? "Daily — pinned to the selected date range"
+                    : opt.value === "week"
+                      ? `Weekly — last ${DEFAULT_WEEKS} weeks`
+                      : `Monthly — last ${DEFAULT_MONTHS} months`
+                }
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
           <AdSetSelector
             items={adsets}
             selected={selectedAdSets}
@@ -203,7 +268,7 @@ export default function ReachAnalysisView({
         <MetricCard
           label="Est. New Reach %"
           value={fmtPercent(avgNewReachPct, 1)}
-          subValue={`${fmtNumber(totalNewReach)} new users`}
+          subValue={`${fmtNumber(totalNewReach)} new of ${fmtNumber(selectedNew.lifetimeCum)} lifetime`}
           delta={newReachPctDelta}
         />
         <MetricCard
@@ -231,10 +296,29 @@ export default function ReachAnalysisView({
       {/* Charts row 1: Reach + Saturation gauge */}
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
-          <h2 className="mb-4 text-sm font-medium text-neutral-400">
-            Reach Over Time
+          <h2 className="mb-4 flex items-center justify-between text-sm font-medium text-neutral-400">
+            <span>Reach Over Time</span>
+            <span className="text-[10px] font-normal text-neutral-600">
+              {granularity === "day"
+                ? "Daily · selected range"
+                : granularity === "week"
+                  ? `Weekly · last ${DEFAULT_WEEKS} weeks`
+                  : `Monthly · last ${DEFAULT_MONTHS} months`}
+              {" · new reach vs lifetime"}
+            </span>
           </h2>
-          <ReachChart data={reachData} fatigueDays={fatigueDays} height={300} />
+          {buckets.reach.length > 0 ? (
+            <ReachChart
+              data={buckets.reach}
+              granularity={granularity}
+              fatigueDays={fatigueDays}
+              height={300}
+            />
+          ) : (
+            <p className="py-12 text-center text-xs text-neutral-500">
+              No reach data for this period
+            </p>
+          )}
         </Card>
 
         <Card>
@@ -254,7 +338,7 @@ export default function ReachAnalysisView({
             CPM vs CPMr
           </h2>
           {cpmrData.length > 0 ? (
-            <CpmrChart data={cpmrData} height={280} currency={currency} />
+            <CpmrChart data={cpmrData} height={280} currency={currency} labelFormatter={bucketLabel} />
           ) : (
             <p className="py-12 text-center text-xs text-neutral-500">
               No spend data available
@@ -268,7 +352,7 @@ export default function ReachAnalysisView({
             <span className="ml-2 text-[10px] text-neutral-600">(7-day rolling)</span>
           </h2>
           {saturationTimeline.length > 0 ? (
-            <SaturationTimelineChart data={saturationTimeline} height={280} />
+            <SaturationTimelineChart data={saturationTimeline} height={280} labelFormatter={bucketLabel} />
           ) : (
             <p className="py-12 text-center text-xs text-neutral-500">
               Need at least 7 days of data

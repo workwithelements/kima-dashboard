@@ -11,106 +11,50 @@ import {
   Line,
   ComposedChart,
 } from "recharts"
-import { fmtDateShort, fmtNumber, fmtPercent } from "@/lib/utils/format"
-import type { PreparedReachPoint } from "@/lib/utils/reach"
+import { fmtNumber, fmtPercent } from "@/lib/utils/format"
+import { formatBucketLabel, type Granularity, type PreparedReachPoint } from "@/lib/utils/reach"
 
 type ReachChartProps = {
   data: PreparedReachPoint[]
-  /** Number of consecutive declining days (for fatigue warning) */
+  /** Bucket granularity — controls axis labels and the % line meaning */
+  granularity?: Granularity
+  /** Number of consecutive declining buckets (for fatigue warning) */
   fatigueDays?: number
   height?: number
 }
 
-/** Group daily data into ISO weeks, summing reach values */
-function groupByWeek(data: PreparedReachPoint[]): {
-  date: string
-  existingReach: number
-  newReach: number
-  totalReach: number
-  avgNewReachPct: number
-}[] {
-  const weeks = new Map<
-    string,
-    { dates: string[]; existingReach: number; newReach: number; totalReach: number; newReachPctSum: number; count: number }
-  >()
-
-  for (const d of data) {
-    const dt = new Date(d.date + "T00:00:00")
-    // Get Monday of this week
-    const day = dt.getDay()
-    const diff = dt.getDate() - day + (day === 0 ? -6 : 1)
-    const monday = new Date(dt)
-    monday.setDate(diff)
-    const weekKey = monday.toISOString().split("T")[0]
-
-    const existing = weeks.get(weekKey) || {
-      dates: [],
-      existingReach: 0,
-      newReach: 0,
-      totalReach: 0,
-      newReachPctSum: 0,
-      count: 0,
-    }
-    existing.dates.push(d.date)
-    existing.existingReach += d.previousReach
-    existing.newReach += d.newReach
-    existing.totalReach += d.totalReach
-    existing.newReachPctSum += d.newReachPct
-    existing.count += 1
-    weeks.set(weekKey, existing)
-  }
-
-  return Array.from(weeks.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([weekStart, w]) => ({
-      date: weekStart,
-      existingReach: w.existingReach,
-      newReach: w.newReach,
-      totalReach: w.totalReach,
-      avgNewReachPct: w.count > 0 ? w.newReachPctSum / w.count : 0,
-    }))
-}
-
-function formatWeekLabel(dateStr: string): string {
-  const dt = new Date(dateStr + "T00:00:00")
-  return `w/c ${dt.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`
-}
-
 export default function ReachChart({
   data,
+  granularity = "day",
   fatigueDays = 0,
   height = 300,
 }: ReachChartProps) {
-  const useWeekly = data.length > 30
+  const isDaily = granularity === "day"
 
-  // Build chart data
-  const chartData = useWeekly
-    ? groupByWeek(data).map((w) => ({
-        date: w.date,
-        existingReach: w.existingReach,
-        newReach: w.newReach,
-        rollingNewPct: w.avgNewReachPct,
-      }))
-    : data.map((d, i) => {
-        // 7-day rolling average of newReachPct
-        const windowSize = Math.min(7, i + 1)
-        const windowSlice = data.slice(Math.max(0, i - windowSize + 1), i + 1)
-        const rollingAvgPct =
-          windowSlice.reduce((sum, p) => sum + p.newReachPct, 0) / windowSlice.length
+  // For daily view, smooth the new-reach % with a 7-day rolling average.
+  // For week/month buckets, each point already represents the whole period's
+  // new reach as a share of lifetime cumulative reach, so show it directly.
+  const chartData = data.map((d, i) => {
+    let pct = d.newReachPct
+    if (isDaily) {
+      const windowSize = Math.min(7, i + 1)
+      const windowSlice = data.slice(Math.max(0, i - windowSize + 1), i + 1)
+      pct = windowSlice.reduce((sum, p) => sum + p.newReachPct, 0) / windowSlice.length
+    }
+    return {
+      date: d.date,
+      existingReach: d.previousReach,
+      newReach: d.newReach,
+      rollingNewPct: pct,
+    }
+  })
 
-        return {
-          date: d.date,
-          existingReach: d.previousReach,
-          newReach: d.newReach,
-          rollingNewPct: rollingAvgPct,
-        }
-      })
-
-  const tickFormatter = useWeekly ? formatWeekLabel : fmtDateShort
+  const pctLabel = isDaily ? "New Reach % (7d avg)" : "New Reach % of lifetime"
+  const tickFormatter = (s: string) => formatBucketLabel(s, granularity)
 
   return (
     <div>
-      {fatigueDays >= 7 && (
+      {fatigueDays >= 7 && isDaily && (
         <div className="mb-3 flex items-center gap-2 rounded-lg bg-red-950/30 px-3 py-2 text-xs text-red-400">
           <span>⚠️</span>
           <span>
@@ -161,7 +105,7 @@ export default function ReachChart({
                 case "newReach":
                   return [fmtNumber(value), "New Reach"]
                 case "rollingNewPct":
-                  return [fmtPercent(value, 1), useWeekly ? "Avg New Reach %" : "7d Avg New Reach %"]
+                  return [fmtPercent(value, 1), pctLabel]
                 default:
                   return [fmtNumber(value), name]
               }
@@ -176,7 +120,7 @@ export default function ReachChart({
               const labels: Record<string, string> = {
                 existingReach: "Existing Reach",
                 newReach: "New Reach",
-                rollingNewPct: useWeekly ? "Avg New Reach %" : "7d Avg New Reach %",
+                rollingNewPct: pctLabel,
               }
               return (
                 <span className="text-xs text-neutral-400">

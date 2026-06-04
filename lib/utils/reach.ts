@@ -282,6 +282,172 @@ export function dailyCpmrSeries(
 }
 
 /**
+ * Time granularity for reach time-series charts.
+ *  - "day":   daily buckets, pinned to the selected date range
+ *  - "week":  ISO-week buckets (Monday start), defaults to the last 12 weeks
+ *  - "month": calendar-month buckets, defaults to the last 6 months
+ */
+export type Granularity = "day" | "week" | "month"
+
+export const DEFAULT_WEEKS = 12
+export const DEFAULT_MONTHS = 6
+
+/** Monday (UTC) of the ISO week containing dateStr (YYYY-MM-DD) */
+export function weekStart(dateStr: string): string {
+  const dt = new Date(dateStr + "T00:00:00Z")
+  const day = dt.getUTCDay()
+  const diff = (day === 0 ? -6 : 1) - day // shift back to Monday
+  dt.setUTCDate(dt.getUTCDate() + diff)
+  return dt.toISOString().split("T")[0]
+}
+
+/** First day of the calendar month containing dateStr (YYYY-MM-DD) */
+export function monthStartKey(dateStr: string): string {
+  return dateStr.slice(0, 7) + "-01"
+}
+
+/** Start date (YYYY-MM-DD) of the bucket that dateStr falls into. */
+export function bucketStart(dateStr: string, g: Granularity): string {
+  if (g === "week") return weekStart(dateStr)
+  if (g === "month") return monthStartKey(dateStr)
+  return dateStr
+}
+
+/** Human-friendly axis/tooltip label for a bucket start date. */
+export function formatBucketLabel(dateStr: string, g: Granularity): string {
+  const dt = new Date(dateStr + "T00:00:00")
+  if (g === "week") {
+    return `w/c ${dt.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`
+  }
+  if (g === "month") {
+    return dt.toLocaleDateString("en-GB", { month: "short", year: "numeric" })
+  }
+  return dt.toLocaleDateString("en-GB", { day: "numeric", month: "short" })
+}
+
+/**
+ * Compute the display window [from, to] for a given granularity, anchored to
+ * the end of the selected range (`to`).
+ *  - day:   the selected range as-is
+ *  - week:  the last `weeks` ISO weeks ending in the week of `to`
+ *  - month: the last `months` calendar months ending in the month of `to`
+ */
+export function granularityWindow(
+  g: Granularity,
+  from: string,
+  to: string,
+  weeks = DEFAULT_WEEKS,
+  months = DEFAULT_MONTHS
+): { windowFrom: string; windowTo: string } {
+  if (g === "day") return { windowFrom: from, windowTo: to }
+  if (g === "week") {
+    const start = new Date(weekStart(to) + "T00:00:00Z")
+    start.setUTCDate(start.getUTCDate() - 7 * (weeks - 1))
+    return { windowFrom: start.toISOString().split("T")[0], windowTo: to }
+  }
+  const start = new Date(monthStartKey(to) + "T00:00:00Z")
+  start.setUTCMonth(start.getUTCMonth() - (months - 1))
+  return { windowFrom: start.toISOString().split("T")[0], windowTo: to }
+}
+
+export type ReachBuckets = {
+  reach: PreparedReachPoint[]
+  cpmr: CpmrDataPoint[]
+  saturation: { date: string; score: number }[]
+}
+
+/**
+ * Build bucketed reach / CPMr / saturation series from a LIFETIME daily series.
+ *
+ * Cumulative reach is accumulated from the very first day of the supplied
+ * series, so "new reach" within any bucket is measured against the campaign /
+ * ad set / ad's deduplicated lifetime reach. This captures only the audience
+ * first reached during that bucket — not users already reached earlier in the
+ * lifetime — which is what "true new reach during this period" means.
+ *
+ * For the stacked bars, `previousReach` is the lifetime cumulative reach BEFORE
+ * the bucket (existing audience) and `newReach` is the incremental new reach
+ * added during the bucket. `newReachPct` expresses that new reach as a share of
+ * the lifetime cumulative reach at the end of the bucket.
+ *
+ * Only buckets whose start falls within [windowFrom, windowTo] are returned,
+ * but the cumulative is always computed across the full `lifetimeDaily` input.
+ */
+export function buildReachBuckets(
+  lifetimeDaily: ReachDataPoint[],
+  granularity: Granularity,
+  windowFrom: string,
+  windowTo: string
+): ReachBuckets {
+  const dailyPrepared = prepareReachData(lifetimeDaily, 0)
+  const dailySat = rollingSaturationSeries(lifetimeDaily, 0, 7)
+  const satByDate = new Map(dailySat.map((s) => [s.date, s.score]))
+
+  type Acc = {
+    start: string
+    firstPrev: number
+    lastTotal: number
+    newReach: number
+    spend: number
+    impressions: number
+    reach: number
+    lastSat: number | undefined
+  }
+  const buckets = new Map<string, Acc>()
+
+  for (let i = 0; i < dailyPrepared.length; i++) {
+    const p = dailyPrepared[i]
+    const d = lifetimeDaily[i]
+    const key = bucketStart(p.date, granularity)
+    let acc = buckets.get(key)
+    if (!acc) {
+      acc = {
+        start: key,
+        firstPrev: p.previousReach,
+        lastTotal: p.totalReach,
+        newReach: 0,
+        spend: 0,
+        impressions: 0,
+        reach: 0,
+        lastSat: undefined,
+      }
+      buckets.set(key, acc)
+    }
+    acc.newReach += p.newReach
+    acc.lastTotal = p.totalReach
+    acc.spend += d.spend || 0
+    acc.impressions += d.impressions || 0
+    acc.reach += d.reach || 0
+    const s = satByDate.get(p.date)
+    if (s !== undefined) acc.lastSat = s
+  }
+
+  const ordered = Array.from(buckets.values())
+    .sort((a, b) => a.start.localeCompare(b.start))
+    .filter((b) => b.start >= windowFrom && b.start <= windowTo)
+
+  const reach: PreparedReachPoint[] = ordered.map((b) => ({
+    date: b.start,
+    totalReach: b.lastTotal,
+    previousReach: b.firstPrev,
+    newReach: Math.max(0, Math.round(b.newReach)),
+    newReachPct: b.lastTotal > 0 ? Math.round((b.newReach / b.lastTotal) * 1000) / 10 : 0,
+  }))
+
+  const cpmr: CpmrDataPoint[] = ordered.map((b) => ({
+    date: b.start,
+    cpm: b.impressions > 0 ? Math.round((b.spend / b.impressions) * 100000) / 100 : 0,
+    cpmr: b.reach > 0 ? Math.round((b.spend / b.reach) * 100000) / 100 : 0,
+  }))
+
+  const saturation = ordered
+    .filter((b) => b.lastSat !== undefined)
+    .map((b) => ({ date: b.start, score: b.lastSat as number }))
+
+  return { reach, cpmr, saturation }
+}
+
+/**
  * Rolling saturation score over time.
  * For each day, calculates saturation using a trailing window of N days.
  */

@@ -64,6 +64,7 @@ type Props = {
   reachRows: { date: string; reach: number; impressions: number; spend?: number; adset_id?: string; adset_name?: string }[]
   reachBaselineReach: number
   reachComparisonRows: { date: string; reach: number; impressions: number; spend?: number }[]
+  reachLifetimeRows: { date: string; reach: number; impressions: number; spend?: number; adset_id?: string; adset_name?: string }[]
   /* Pacing */
   pacing: PacingResult
   monthlyBudget: number | null
@@ -281,6 +282,7 @@ export default function ClientDashboard(props: Props) {
           <ReachAnalysisView
             rows={props.reachRows}
             baselineReach={props.reachBaselineReach}
+            lifetimeRows={props.reachLifetimeRows}
             preset={props.preset}
             from={props.from}
             to={props.to}

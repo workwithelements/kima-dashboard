@@ -204,6 +204,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
       reachRows={reachData?.rows || []}
       reachBaselineReach={reachData?.baselineReach || 0}
       reachComparisonRows={reachData?.comparisonRows || []}
+      reachLifetimeRows={reachData?.lifetimeRows || []}
       /* Pacing tab */
       pacing={pacing}
       monthlyBudget={client.monthly_budget || null}

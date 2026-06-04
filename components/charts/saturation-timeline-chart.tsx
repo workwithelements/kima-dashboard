@@ -15,11 +15,14 @@ import { fmtDateShort } from "@/lib/utils/format"
 type SaturationTimelineChartProps = {
   data: { date: string; score: number }[]
   height?: number
+  /** Axis/tooltip label formatter (defaults to short date) */
+  labelFormatter?: (dateStr: string) => string
 }
 
 export default function SaturationTimelineChart({
   data,
   height = 280,
+  labelFormatter = fmtDateShort,
 }: SaturationTimelineChartProps) {
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -35,7 +38,7 @@ export default function SaturationTimelineChart({
           tick={{ fill: "#737373", fontSize: 11 }}
           tickLine={false}
           axisLine={{ stroke: "#262626" }}
-          tickFormatter={fmtDateShort}
+          tickFormatter={labelFormatter}
         />
         <YAxis
           domain={[0, 100]}
@@ -53,7 +56,7 @@ export default function SaturationTimelineChart({
             fontSize: "12px",
           }}
           labelStyle={{ color: "#a3a3a3" }}
-          labelFormatter={fmtDateShort}
+          labelFormatter={labelFormatter}
           formatter={(value: number) => {
             let label = "Low"
             if (value > 60) label = "High"
