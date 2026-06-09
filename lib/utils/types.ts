@@ -324,6 +324,33 @@ export type InstagramTaggedPostRow = {
   mentions: string[]
 }
 
+/**
+ * A row from public.v_attribution_weekly_performance (KIMA V2 attribution model).
+ * One row per outcome × ISO week. The attribution model is Ezra-only.
+ */
+export type WeeklyPerformanceRow = {
+  outcome: "Booking" | "Signup"
+  week_start: string // date (YYYY-MM-DD)
+  actual: number | null
+  predicted: number | null
+  modeled_total: number
+  modeled_low: number // variance band (lower)
+  modeled_high: number // variance band (upper)
+  meta: number
+  meta_low: number // Meta CI lower
+  meta_high: number // Meta CI upper
+  organic_nonbranded: number
+  organic_branded: number
+  organic_social: number
+  paid_search_brand: number
+  paid_search_nonbrand: number
+  pr: number
+  paid_spend: number // USD
+  blended_cac: number | null // paid_spend / actual
+  meta_cpa: number | null // meta_spend / meta contribution
+  meta_maturity_pct: number // <100 = provisional (carryover still landing)
+}
+
 /** A row from weekly_bookings (CSV-imported). */
 export type WeeklyBookingRow = {
   week_start_date: string
