@@ -99,6 +99,24 @@ export default function WeeklyPerformanceView({ clientName, rows }: Props) {
     return { weeks, totalActual, totalSpend, overallCac, latest }
   }, [rows])
 
+  /* ─── per-channel breakdown (what the stacked area represents) ───────── */
+  const channelBreakdown = useMemo(() => {
+    const latestRow = rows.length ? rows[rows.length - 1] : null
+    const perChannel = CHANNELS.map((ch) => {
+      const total = rows.reduce((s, r) => s + ((r[ch.key] as number) ?? 0), 0)
+      const latest = latestRow ? ((latestRow[ch.key] as number) ?? 0) : 0
+      return { ...ch, total, latest }
+    })
+    const grandTotal = perChannel.reduce((s, c) => s + c.total, 0)
+    const latestTotal = perChannel.reduce((s, c) => s + c.latest, 0)
+    return {
+      channels: perChannel.sort((a, b) => b.total - a.total),
+      grandTotal,
+      latestTotal,
+      latestWeek: latestRow?.week_start ?? null,
+    }
+  }, [rows])
+
   if (rows.length === 0) {
     return (
       <div className="space-y-6">
@@ -262,6 +280,83 @@ export default function WeeklyPerformanceView({ clientName, rows }: Props) {
             />
           </ComposedChart>
         </ResponsiveContainer>
+      </Card>
+
+      {/* Channel breakdown — explains the stacked area */}
+      <Card>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-medium text-neutral-300">Breakdown by channel</h3>
+          <span className="text-xs text-neutral-500">
+            what the stacked area represents · {totals.weeks} weeks
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-neutral-800 text-xs text-neutral-500">
+                <th className="px-2 py-2 text-left">Channel</th>
+                <th className="px-2 py-2 text-right">Total bookings</th>
+                <th className="px-2 py-2 text-right">Share</th>
+                <th className="px-2 py-2 text-right">Avg / week</th>
+                <th className="px-2 py-2 text-right whitespace-nowrap">
+                  Latest wk{channelBreakdown.latestWeek ? ` (${channelBreakdown.latestWeek})` : ""}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {channelBreakdown.channels.map((ch) => {
+                const share =
+                  channelBreakdown.grandTotal > 0
+                    ? (ch.total / channelBreakdown.grandTotal) * 100
+                    : 0
+                return (
+                  <tr
+                    key={ch.key as string}
+                    className="border-b border-neutral-900 text-neutral-300 hover:bg-neutral-900"
+                  >
+                    <td className="px-2 py-2">
+                      <span className="inline-flex items-center gap-2">
+                        <span
+                          className="inline-block h-2.5 w-2.5 rounded-sm"
+                          style={{ backgroundColor: ch.color }}
+                        />
+                        {ch.label}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 text-right tabular-nums">{fmtBookings(ch.total)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{share.toFixed(1)}%</td>
+                    <td className="px-2 py-2 text-right tabular-nums text-neutral-400">
+                      {fmtBookings(totals.weeks > 0 ? ch.total / totals.weeks : 0)}
+                    </td>
+                    <td className="px-2 py-2 text-right tabular-nums text-neutral-400">
+                      {fmtBookings(ch.latest)}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-neutral-800 font-medium text-neutral-200">
+                <td className="px-2 py-2">Modeled total</td>
+                <td className="px-2 py-2 text-right tabular-nums">
+                  {fmtBookings(channelBreakdown.grandTotal)}
+                </td>
+                <td className="px-2 py-2 text-right tabular-nums">100.0%</td>
+                <td className="px-2 py-2 text-right tabular-nums">
+                  {fmtBookings(totals.weeks > 0 ? channelBreakdown.grandTotal / totals.weeks : 0)}
+                </td>
+                <td className="px-2 py-2 text-right tabular-nums">
+                  {fmtBookings(channelBreakdown.latestTotal)}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <p className="mt-3 text-xs text-neutral-500">
+          Modeled contributions are the model&apos;s attribution of bookings to each channel — they
+          sum to the modeled total (the top of the stack), which is directional and sits within the
+          variance band rather than matching actuals exactly.
+        </p>
       </Card>
 
       {/* Weekly table */}
