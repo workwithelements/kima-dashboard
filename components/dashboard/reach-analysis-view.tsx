@@ -40,11 +40,23 @@ import {
   DEFAULT_MONTHS,
   type Granularity,
 } from "@/lib/utils/reach"
+import { deriveReachEvents } from "@/lib/utils/reach-events"
+import AnnotationsBar, { type Annotation } from "@/components/ui/annotations-bar"
 import type { DatePreset } from "@/lib/utils/dates"
 
-type ReachRow = { date: string; reach: number; impressions: number; spend?: number; adset_id?: string; adset_name?: string }
+type ReachRow = {
+  date: string
+  reach: number
+  impressions: number
+  spend?: number
+  adset_id?: string
+  adset_name?: string
+  campaign_id?: string
+  campaign_name?: string
+}
 
 type Props = {
+  clientId: string
   rows: ReachRow[]
   baselineReach: number
   preset: DatePreset
@@ -55,6 +67,10 @@ type Props = {
   /** Full lifetime daily reach (inception → period end) for the granularity
    *  toggle and deduped lifetime new-reach calculation. Falls back to `rows`. */
   lifetimeRows?: ReachRow[]
+  /** Manual annotations for the client (rendered as flags on the reach chart). */
+  annotations?: Annotation[]
+  /** Read-only (public share view) — hides annotation add/delete controls. */
+  readOnly?: boolean
 }
 
 const GRANULARITY_OPTIONS: { value: Granularity; label: string }[] = [
@@ -64,6 +80,7 @@ const GRANULARITY_OPTIONS: { value: Granularity; label: string }[] = [
 ]
 
 export default function ReachAnalysisView({
+  clientId,
   rows,
   baselineReach,
   preset,
@@ -72,8 +89,11 @@ export default function ReachAnalysisView({
   currency = "GBP",
   comparisonRows = [],
   lifetimeRows,
+  annotations: initialAnnotations = [],
+  readOnly = false,
 }: Props) {
   const [granularity, setGranularity] = useState<Granularity>("day")
+  const [annotations, setAnnotations] = useState<Annotation[]>(initialAnnotations)
   const lifetime = lifetimeRows && lifetimeRows.length > 0 ? lifetimeRows : rows
   const router = useRouter()
   const pathname = usePathname()
@@ -140,6 +160,19 @@ export default function ReachAnalysisView({
   const buckets = useMemo(
     () => buildReachBuckets(lifetimeDaily, granularity, windowFrom, windowTo),
     [lifetimeDaily, granularity, windowFrom, windowTo]
+  )
+
+  // Auto-detected reach-change flags: buckets where net-new reach moved materially,
+  // with likely causes attributed from launches / spend / saturation.
+  const autoEvents = useMemo(
+    () =>
+      deriveReachEvents({
+        bucketReach: buckets.reach,
+        lifetimeRows: filteredLifetime,
+        granularity,
+        windowTo,
+      }),
+    [buckets.reach, filteredLifetime, granularity, windowTo]
   )
 
   // True new reach during the SELECTED period as a share of lifetime reach.
@@ -313,11 +346,41 @@ export default function ReachAnalysisView({
               granularity={granularity}
               fatigueDays={fatigueDays}
               height={300}
+              events={autoEvents}
+              annotations={annotations.map((a) => ({ date: a.date, text: a.text }))}
             />
           ) : (
             <p className="py-12 text-center text-xs text-neutral-500">
               No reach data for this period
             </p>
+          )}
+
+          {/* Flag legend + manual notes */}
+          {buckets.reach.length > 0 && (
+            <div className="mt-2 border-t border-neutral-800/60 pt-2">
+              <div className="flex items-center gap-4 text-[10px] text-neutral-500">
+                <span className="inline-flex items-center gap-1">
+                  <span className="text-[#60A5FA]">◆</span> auto-detected reach change
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="text-brand-lime">▼</span> your note
+                </span>
+                <span className="text-neutral-600">hover a flag&apos;s bar for details</span>
+              </div>
+              <AnnotationsBar
+                annotations={annotations}
+                clientId={clientId}
+                from={from}
+                to={to}
+                readOnly={readOnly}
+                onAdd={(a) =>
+                  setAnnotations((prev) =>
+                    [...prev, a].sort((x, y) => x.date.localeCompare(y.date))
+                  )
+                }
+                onDelete={(id) => setAnnotations((prev) => prev.filter((a) => a.id !== id))}
+              />
+            </div>
           )}
         </Card>
 

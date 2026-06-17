@@ -370,13 +370,14 @@ async function _fetchReachDataInner(
   const baselineStartStr = baselineStart.toISOString().split("T")[0]
 
   // Fetch all rows with pagination to avoid PostgREST 1000-row cap
-  type ReachRow = { date: string; reach: number; impressions: number; spend?: number; adset_id?: string; adset_name?: string }
+  type ReachRow = { date: string; reach: number; impressions: number; spend?: number; adset_id?: string; adset_name?: string; campaign_id?: string; campaign_name?: string }
+  const REACH_COLS = "date, reach, impressions, spend, adset_id, adset_name, campaign_id, campaign_name"
 
   const [reachRows, baselineRows, comparisonRows, lifetimeRaw] = await Promise.all([
     fetchAllRows<ReachRow>(() =>
       supabase
         .from("meta_daily_performance")
-        .select("date, reach, impressions, spend, adset_id, adset_name")
+        .select(REACH_COLS)
         .eq("client_id", clientId)
         .gte("date", from)
         .lte("date", to)
@@ -394,7 +395,7 @@ async function _fetchReachDataInner(
       ? fetchAllRows<ReachRow>(() =>
           supabase
             .from("meta_daily_performance")
-            .select("date, reach, impressions, spend, adset_id, adset_name")
+            .select(REACH_COLS)
             .eq("client_id", clientId)
             .gte("date", compFrom)
             .lte("date", compTo)
@@ -407,7 +408,7 @@ async function _fetchReachDataInner(
     fetchAllRows<ReachRow>(() =>
       supabase
         .from("meta_daily_performance")
-        .select("date, reach, impressions, spend, adset_id, adset_name")
+        .select(REACH_COLS)
         .eq("client_id", clientId)
         .lte("date", to)
         .order("date")
@@ -438,6 +439,8 @@ async function _fetchReachDataInner(
         spend: row.spend || 0,
         adset_id: row.adset_id,
         adset_name: row.adset_name,
+        campaign_id: row.campaign_id,
+        campaign_name: row.campaign_name,
       })
     }
   }
