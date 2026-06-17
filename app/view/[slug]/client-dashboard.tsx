@@ -280,6 +280,7 @@ export default function ClientDashboard(props: Props) {
 
         {activeTab === "reach" && (
           <ReachAnalysisView
+            clientId={props.client.id}
             rows={props.reachRows}
             baselineReach={props.reachBaselineReach}
             lifetimeRows={props.reachLifetimeRows}
@@ -288,6 +289,7 @@ export default function ClientDashboard(props: Props) {
             to={props.to}
             currency={currency}
             comparisonRows={props.reachComparisonRows}
+            readOnly
           />
         )}
       </div>
