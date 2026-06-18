@@ -6,9 +6,14 @@
 - The Supabase migration applied (see Step 1)
 - Node.js 18+ installed
 
-## Step 1: Run the database migration
+## Step 1: Run the database migrations
 
-In the **Supabase SQL Editor**, run the contents of `supabase-shopify.sql`:
+In the **Supabase SQL Editor**, run **both** migration files in order:
+
+1. `supabase-shopify.sql` — base tables + `clients.shopify_store_domain`
+2. `supabase-shopify-cogs-rate.sql` — adds `clients.shopify_cogs_rate` (per-client default COGS used by the sync + the daily cron)
+
+The contents of `supabase-shopify.sql`:
 
 ```sql
 ALTER TABLE clients ADD COLUMN IF NOT EXISTS shopify_store_domain TEXT;
@@ -74,15 +79,18 @@ SHOPIFY_STORE_DOMAIN=your-store.myshopify.com
 SHOPIFY_ACCESS_TOKEN=shpat_your-access-token-here
 ```
 
-## Step 4: Set the client's store domain (optional)
+## Step 4: Enable Shopify on the client (in the dashboard)
 
-In Supabase, update the client record:
+In the admin dashboard, open the client's **Settings** tab and:
 
-```sql
-UPDATE clients SET shopify_store_domain = 'your-store.myshopify.com' WHERE id = '<client-uuid>';
-```
+1. Toggle **Enable Shopify data** on
+2. Enter the **Store domain** (e.g. `lucky-beau.myshopify.com`)
+3. Enter the **COGS rate** as a percent (e.g. `35` for 35% of gross revenue)
+4. Click **Save**
 
-## Step 5: Run the sync
+These values are stored on the client row (`shopify_store_domain`, `shopify_cogs_rate`), and the daily cron picks them up automatically.
+
+## Step 5: Run an initial backfill
 
 In your **terminal** (not the SQL editor):
 
@@ -90,26 +98,31 @@ In your **terminal** (not the SQL editor):
 # Install dependencies (first time only)
 npm install
 
-# Sync last 7 days (default)
+# Sync last 7 days using the client's stored store_domain + cogs_rate
 npm run sync:shopify -- --client-id <uuid>
 
-# Sync a custom date range
+# Backfill a custom date range
 npm run sync:shopify -- --client-id <uuid> --from 2024-01-01 --to 2024-03-31
 
-# With COGS estimate (35% of gross revenue)
-npm run sync:shopify -- --client-id <uuid> --cogs-rate 0.35
-
-# Override store/token (instead of env vars)
-npm run sync:shopify -- --client-id <uuid> --store my-store.myshopify.com --token shpat_xxx
+# Override the stored COGS rate for this run only
+npm run sync:shopify -- --client-id <uuid> --cogs-rate 0.40
 ```
 
-## Step 6: Set up recurring sync (optional)
+## Step 6: Recurring sync via cron route
 
-Add a cron job to sync daily, e.g. at 6am:
+The dashboard exposes `POST /api/cron/shopify-sync` which syncs **every active client with a Shopify store domain**. Wire your scheduler (Netlify Scheduled Functions, Vercel Cron, GitHub Actions, etc.) to call it daily, e.g. 6am:
 
+```bash
+curl -X POST https://<dashboard-host>/api/cron/shopify-sync \
+  -H "Authorization: Bearer $CRON_SECRET"
 ```
-0 6 * * * cd /path/to/kima-dashboard && npx tsx scripts/sync-shopify.ts --client-id <uuid>
-```
+
+Query params:
+
+- `?days=3` — how many days back to sync (default 3, rolling window catches late refunds)
+- `?client_id=<uuid>` — restrict to a single client (useful for ad-hoc triggers)
+
+The route uses `SHOPIFY_ACCESS_TOKEN` for all stores by default. To use a different token per store, set `SHOPIFY_ACCESS_TOKEN_<STORENAME>` (uppercase, non-alphanumerics replaced with `_`) — e.g. `SHOPIFY_ACCESS_TOKEN_LUCKY_BEAU` for `lucky-beau.myshopify.com`.
 
 ## What the dashboard shows
 

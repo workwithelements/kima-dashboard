@@ -85,9 +85,11 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
   /* ── Shopify config state ── */
   const [shopifyEnabled, setShopifyEnabled] = useState(false)
   const [shopifyDomain, setShopifyDomain] = useState("")
+  const [shopifyCogsPct, setShopifyCogsPct] = useState("") // stored as percent string (e.g. "35")
   const [shopifyLoading, setShopifyLoading] = useState(true)
   const [shopifySaving, setShopifySaving] = useState(false)
   const [shopifySaved, setShopifySaved] = useState(false)
+  const [shopifyError, setShopifyError] = useState<string | null>(null)
 
   /* ── Marketing Impact config state ── */
   const [marketingImpactEnabled, setMarketingImpactEnabled] = useState(false)
@@ -190,6 +192,9 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
           if (data) {
             setShopifyEnabled(data.enabled ?? false)
             setShopifyDomain(data.store_domain ?? "")
+            setShopifyCogsPct(
+              data.cogs_rate != null ? String(Math.round(Number(data.cogs_rate) * 10000) / 100) : "",
+            )
           }
         }
         if (marketingImpactRes.ok) {
@@ -431,18 +436,40 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
 
   /* ── Save Shopify config ── */
   async function handleSaveShopify() {
+    setShopifyError(null)
+
+    // Convert "35" (percent UI) → 0.35 (DB). Empty string means "not set".
+    let cogsRate: number | null = null
+    if (shopifyEnabled && shopifyCogsPct.trim() !== "") {
+      const pct = Number(shopifyCogsPct)
+      if (isNaN(pct) || pct < 0 || pct > 100) {
+        setShopifyError("COGS rate must be between 0 and 100%")
+        return
+      }
+      cogsRate = Math.round(pct) / 100
+    }
+
     setShopifySaving(true)
     try {
       const res = await fetch(`/api/clients/${clientId}/shopify`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: shopifyEnabled, store_domain: shopifyDomain }),
+        body: JSON.stringify({
+          enabled: shopifyEnabled,
+          store_domain: shopifyDomain,
+          cogs_rate: cogsRate,
+        }),
       })
       if (res.ok) {
         setShopifySaved(true)
         setTimeout(() => setShopifySaved(false), 3000)
+      } else {
+        const body = await res.json().catch(() => ({}))
+        setShopifyError(body?.error || `Save failed (${res.status})`)
       }
-    } catch { /* ignore */ }
+    } catch (e: any) {
+      setShopifyError(e?.message || "Network error")
+    }
     setShopifySaving(false)
   }
 
@@ -1357,17 +1384,50 @@ export default function ClientSettingsView({ clientId }: { clientId: string }) {
               </div>
             )}
 
+            {/* COGS rate (shown when enabled) */}
+            {shopifyEnabled && (
+              <div>
+                <label className="mb-1 block text-[11px] text-neutral-500">
+                  COGS rate (% of gross revenue)
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={shopifyCogsPct}
+                    onChange={(e) => setShopifyCogsPct(e.target.value)}
+                    placeholder="e.g. 35"
+                    className="w-24 rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-brand-lime"
+                  />
+                  <span className="text-xs text-neutral-500">%</span>
+                </div>
+                <p className="mt-1 text-[10px] text-neutral-600">
+                  Used by the daily Shopify sync to compute COGS on each order so CM3 stays
+                  accurate. Leave blank to skip (CM3 will then treat COGS as 0).
+                </p>
+              </div>
+            )}
+
             {/* Sync instructions (shown when enabled) */}
             {shopifyEnabled && (
               <div className="rounded-lg border border-neutral-800 bg-neutral-950/50 p-3">
                 <p className="text-[11px] font-medium text-neutral-400">Sync data</p>
                 <p className="mt-1 text-[10px] text-neutral-500">
-                  After saving, run the sync script in your terminal to pull Shopify order data:
+                  Daily backfill runs automatically via the cron route once the
+                  store domain is saved. To trigger a manual sync (e.g. backfill a wider
+                  date range), run:
                 </p>
                 <code className="mt-2 block rounded bg-neutral-900 px-2 py-1.5 text-[10px] text-neutral-300">
                   npm run sync:shopify -- --client-id {clientId}
                 </code>
               </div>
+            )}
+
+            {/* Error */}
+            {shopifyError && (
+              <p className="text-xs text-red-400">{shopifyError}</p>
             )}
 
             {/* Save */}

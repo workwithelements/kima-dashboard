@@ -15,7 +15,7 @@ export async function GET(
   const db = createServiceClient()
   const { data, error } = await db
     .from("clients")
-    .select("id, shopify_store_domain")
+    .select("id, shopify_store_domain, shopify_cogs_rate")
     .eq("id", params.clientId)
     .single()
 
@@ -24,13 +24,14 @@ export async function GET(
   return NextResponse.json({
     enabled: !!data.shopify_store_domain,
     store_domain: data.shopify_store_domain || "",
+    cogs_rate: data.shopify_cogs_rate != null ? Number(data.shopify_cogs_rate) : null,
   })
 }
 
 /**
  * PUT /api/clients/[clientId]/shopify — update Shopify settings for a client
  *
- * Body: { enabled: boolean, store_domain?: string }
+ * Body: { enabled: boolean, store_domain?: string, cogs_rate?: number | null }
  */
 export async function PUT(
   request: NextRequest,
@@ -40,9 +41,12 @@ export async function PUT(
   if (authError) return authError
 
   const body = await request.json()
-  const { enabled, store_domain } = body
+  const { enabled, store_domain, cogs_rate } = body as {
+    enabled: boolean
+    store_domain?: string
+    cogs_rate?: number | string | null
+  }
 
-  // When enabled, store_domain is required
   if (enabled && (!store_domain || typeof store_domain !== "string" || !store_domain.trim())) {
     return NextResponse.json(
       { error: "store_domain is required when Shopify is enabled" },
@@ -50,7 +54,6 @@ export async function PUT(
     )
   }
 
-  // Validate domain format (basic check)
   if (enabled && store_domain) {
     const domain = store_domain.trim()
     if (!domain.includes(".")) {
@@ -61,14 +64,29 @@ export async function PUT(
     }
   }
 
-  const shopify_store_domain = enabled ? store_domain.trim() : null
+  let cogsRateValue: number | null = null
+  if (cogs_rate !== undefined && cogs_rate !== null && cogs_rate !== "") {
+    const parsed = Number(cogs_rate)
+    if (isNaN(parsed) || parsed < 0 || parsed > 1) {
+      return NextResponse.json(
+        { error: "cogs_rate must be a number between 0 and 1" },
+        { status: 400 }
+      )
+    }
+    cogsRateValue = parsed
+  }
+
+  const update: Record<string, string | number | null> = {
+    shopify_store_domain: enabled ? store_domain!.trim() : null,
+    shopify_cogs_rate: enabled ? cogsRateValue : null,
+  }
 
   const db = createServiceClient()
   const { data, error } = await db
     .from("clients")
-    .update({ shopify_store_domain })
+    .update(update)
     .eq("id", params.clientId)
-    .select("id, shopify_store_domain")
+    .select("id, shopify_store_domain, shopify_cogs_rate")
     .single()
 
   if (error) return safeError(error)
@@ -76,5 +94,6 @@ export async function PUT(
   return NextResponse.json({
     enabled: !!data.shopify_store_domain,
     store_domain: data.shopify_store_domain || "",
+    cogs_rate: data.shopify_cogs_rate != null ? Number(data.shopify_cogs_rate) : null,
   })
 }
