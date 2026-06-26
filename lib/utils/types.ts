@@ -179,6 +179,23 @@ export type GoogleAdsDailyRow = {
   conversion_value: number
 }
 
+/** Google Ads Quality Score component band */
+export type QualityBand = "below_average" | "average" | "above_average"
+
+/** Ad-group-level Quality Score, rolled up (spend-weighted) from keyword scores */
+export type AdGroupQualityScore = {
+  campaign_id: string
+  campaign_name: string
+  ad_group_id: string
+  ad_group_name: string
+  spend: number // used for weighting + crucial-amends ranking
+  impressions: number
+  quality_score: number // 1–10, spend-weighted average
+  expected_ctr: QualityBand
+  ad_relevance: QualityBand
+  landing_page_experience: QualityBand
+}
+
 /** Unified spend row for pacing (platform-agnostic) */
 export type DailySpendRow = {
   date: string

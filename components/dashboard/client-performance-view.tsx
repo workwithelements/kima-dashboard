@@ -45,6 +45,7 @@ import ScorecardConfigModal from "./scorecard-config-modal"
 import TagSelector, { UNTAGGED_FILTER_ID } from "@/components/ui/tag-selector"
 import CreativeCardGrid, { type TagInfo } from "@/components/dashboard/creative-card-grid"
 import CreativeDetailModal from "@/components/dashboard/creative-detail-modal"
+import GoogleAdsQualitySection from "@/components/dashboard/google-ads-quality-section"
 import type { Tag } from "@/components/dashboard/tag-manager-modal"
 import AnnotationsBar, { type Annotation } from "@/components/ui/annotations-bar"
 import { calculatePacing } from "@/lib/utils/pacing"
@@ -2366,6 +2367,11 @@ export default function ClientPerformanceView({
           </div>
         )}
       </Card>
+
+      {/* Quality Score by ad group (Google Ads only) — sits at the bottom of the GA view */}
+      {isGoogleAds && (
+        <GoogleAdsQualitySection rows={filteredGaRows} currency={currency} />
+      )}
 
       {/* Breakdowns section (Meta only, not All Platforms) */}
       {isMeta && (demographics.length > 0 || placements.length > 0) && (
