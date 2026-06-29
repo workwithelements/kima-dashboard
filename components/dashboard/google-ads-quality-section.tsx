@@ -18,13 +18,14 @@ import type { AdGroupQualityScore, QualityBand } from "@/lib/utils/types"
 type SortKey = "ad_group" | "campaign" | "spend" | "impressions" | "quality_score" | "impact"
 
 /**
- * Spend impact of a low score: spend × (10 − QS). Surfaces ad groups where a
- * poor Quality Score actually costs money, so the table doesn't draw the eye to
- * low-QS ad groups that spend next to nothing. Same ranking the crucial-amends
- * panel uses.
+ * Combined spend × quality score, in currency: spend weighted by the quality
+ * gap, spend × (10 − QS) / 10. Surfaces high-spend, low-QS ad groups — a big
+ * spender at QS 4 outranks a tiny one at QS 2 — so the table draws the eye to
+ * where a poor score actually costs money. Reads as "spend at risk": e.g.
+ * £14.4k at QS 7.2 → £4.0k. Same ranking the crucial-amends panel uses.
  */
 function impactOf(ag: AdGroupQualityScore): number {
-  return ag.spend * (10 - ag.quality_score)
+  return (ag.spend * (10 - ag.quality_score)) / 10
 }
 
 function BandBadge({ band }: { band: QualityBand }) {
@@ -158,6 +159,15 @@ export default function GoogleAdsQualitySection({
               <Th label="Spend" col="spend" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
               <Th label="Impr." col="impressions" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
               <Th label="Quality Score" col="quality_score" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              <Th
+                label="Impact"
+                col="impact"
+                align="right"
+                title="Spend at risk: spend weighted by the quality gap — spend × (10 − QS) ÷ 10. Higher = bigger spend on a weaker score."
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onSort={toggleSort}
+              />
               <th className="px-2 py-2 font-medium">Expected CTR</th>
               <th className="px-2 py-2 font-medium">Ad Relevance</th>
               <th className="px-2 py-2 font-medium">Landing Page Exp.</th>
@@ -179,6 +189,9 @@ export default function GoogleAdsQualitySection({
                 </td>
                 <td className={`px-2 py-2 text-right font-semibold tabular-nums ${qsColor(ag.quality_score)}`}>
                   {ag.quality_score.toFixed(1)}
+                </td>
+                <td className="px-2 py-2 text-right tabular-nums text-neutral-300">
+                  {fmtCurrency(impactOf(ag), currency)}
                 </td>
                 <td className="px-2 py-2">
                   <BandBadge band={ag.expected_ctr} />
@@ -240,6 +253,7 @@ function Th({
   label,
   col,
   align = "left",
+  title,
   sortKey,
   sortDir,
   onSort,
@@ -247,6 +261,7 @@ function Th({
   label: string
   col: SortKey
   align?: "left" | "right"
+  title?: string
   sortKey: SortKey
   sortDir: "asc" | "desc"
   onSort: (col: SortKey) => void
@@ -256,6 +271,7 @@ function Th({
     <th className={`px-2 py-2 font-medium ${align === "right" ? "text-right" : "text-left"}`}>
       <button
         onClick={() => onSort(col)}
+        title={title}
         className={`inline-flex items-center gap-1 transition hover:text-neutral-300 ${
           active ? "text-neutral-300" : ""
         }`}

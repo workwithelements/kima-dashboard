@@ -133,15 +133,34 @@ export function rollupAdGroupQualityScore(rows: KeywordQualityRow[]): AdGroupQua
 }
 
 /**
- * The most pressing ad groups to fix: spend-weighted lowest Quality Score.
- * Priority = spend × (10 − QS), so a poor score that costs real money ranks
- * above a poor score on a tiny ad group. Returns the top `n`.
+ * Whether an ad group has a genuine Quality Score weakness worth flagging:
+ * a below-average component (Google's explicit "this is hurting you" signal),
+ * or an overall score in the red zone (< 5). Healthy ad groups — average or
+ * better across the board with a decent overall score — don't qualify, so the
+ * crucial-amends panel stays quiet rather than always surfacing "the worst of a
+ * good bunch".
+ */
+export function needsAttention(ag: AdGroupQualityScore): boolean {
+  const hasBelowAverage =
+    ag.expected_ctr === "below_average" ||
+    ag.ad_relevance === "below_average" ||
+    ag.landing_page_experience === "below_average"
+  return hasBelowAverage || ag.quality_score < 5
+}
+
+/**
+ * The most pressing ad groups to fix: among those with a real weakness
+ * (see `needsAttention`), the spend-weighted lowest Quality Score. Priority =
+ * spend × (10 − QS), so a poor score that costs real money ranks above a poor
+ * score on a tiny ad group. Returns up to `n` — fewer (or none) when the
+ * account is healthy.
  */
 export function crucialAmends(
   adGroups: AdGroupQualityScore[],
   n = 3
 ): AdGroupQualityScore[] {
-  return [...adGroups]
+  return adGroups
+    .filter(needsAttention)
     .map((ag) => ({ ag, priority: ag.spend * (10 - ag.quality_score) }))
     .sort((a, b) => b.priority - a.priority)
     .slice(0, n)
