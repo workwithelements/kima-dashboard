@@ -46,6 +46,7 @@ import TagSelector, { UNTAGGED_FILTER_ID } from "@/components/ui/tag-selector"
 import CreativeCardGrid, { type TagInfo } from "@/components/dashboard/creative-card-grid"
 import CreativeDetailModal from "@/components/dashboard/creative-detail-modal"
 import GoogleAdsQualitySection from "@/components/dashboard/google-ads-quality-section"
+import type { KeywordQualityRow } from "@/lib/utils/quality-score"
 import type { Tag } from "@/components/dashboard/tag-manager-modal"
 import AnnotationsBar, { type Annotation } from "@/components/ui/annotations-bar"
 import { calculatePacing } from "@/lib/utils/pacing"
@@ -123,6 +124,7 @@ type Props = {
   comparisonRows: Partial<MetaDailyRow>[]
   googleAdsRows?: Partial<GoogleAdsDailyRow>[]
   googleAdsComparisonRows?: Partial<GoogleAdsDailyRow>[]
+  googleAdsQualityRows?: KeywordQualityRow[]
   preset: DatePreset
   from: string
   to: string
@@ -210,6 +212,7 @@ export default function ClientPerformanceView({
   comparisonRows: rawComparisonRows,
   googleAdsRows: rawGoogleAdsRows = [],
   googleAdsComparisonRows: rawGoogleAdsComparisonRows = [],
+  googleAdsQualityRows = [],
   preset,
   from,
   to,
@@ -2370,7 +2373,7 @@ export default function ClientPerformanceView({
 
       {/* Quality Score by ad group (Google Ads only) — sits at the bottom of the GA view */}
       {isGoogleAds && (
-        <GoogleAdsQualitySection rows={filteredGaRows} currency={currency} />
+        <GoogleAdsQualitySection rows={googleAdsQualityRows} currency={currency} />
       )}
 
       {/* Breakdowns section (Meta only, not All Platforms) */}
