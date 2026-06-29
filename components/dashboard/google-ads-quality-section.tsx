@@ -14,7 +14,17 @@ import {
 import { fmtCurrency, fmtNumber } from "@/lib/utils/format"
 import type { AdGroupQualityScore, GoogleAdsDailyRow, QualityBand } from "@/lib/utils/types"
 
-type SortKey = "ad_group" | "campaign" | "spend" | "impressions" | "quality_score"
+type SortKey = "ad_group" | "campaign" | "spend" | "impressions" | "quality_score" | "impact"
+
+/**
+ * Spend impact of a low score: spend × (10 − QS). Surfaces ad groups where a
+ * poor Quality Score actually costs money, so the table doesn't draw the eye to
+ * low-QS ad groups that spend next to nothing. Same ranking the crucial-amends
+ * panel uses.
+ */
+function impactOf(ag: AdGroupQualityScore): number {
+  return ag.spend * (10 - ag.quality_score)
+}
 
 function BandBadge({ band }: { band: QualityBand }) {
   return (
@@ -46,8 +56,10 @@ export default function GoogleAdsQualitySection({
   }, [allAdGroups])
 
   const [selectedCampaigns, setSelectedCampaigns] = useState<string[]>([])
-  const [sortKey, setSortKey] = useState<SortKey>("quality_score")
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
+  // Default to spend impact (spend × low-QS) so the costliest weak ad groups
+  // surface first, rather than tiny-spend ad groups creating noise.
+  const [sortKey, setSortKey] = useState<SortKey>("impact")
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
 
   const filtered = useMemo(() => {
     if (selectedCampaigns.length === 0 || selectedCampaigns.length === campaigns.length) {
@@ -73,9 +85,13 @@ export default function GoogleAdsQualitySection({
           return (a.impressions - b.impressions) * dir
         case "quality_score":
           return (a.quality_score - b.quality_score) * dir
+        case "impact":
+          return (impactOf(a) - impactOf(b)) * dir
       }
     })
   }, [filtered, sortKey, sortDir])
+
+  const impactSorted = sortKey === "impact"
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -95,6 +111,21 @@ export default function GoogleAdsQualitySection({
           <h2 className="text-sm font-medium text-neutral-400">Quality Score by Ad Group</h2>
           <p className="mt-0.5 text-[11px] text-neutral-600">
             Sample data — live Quality Score sync coming soon
+          </p>
+          <p className="mt-0.5 text-[11px] text-neutral-600">
+            {impactSorted ? (
+              <span>Sorted by spend impact (spend × low score) — biggest opportunities first</span>
+            ) : (
+              <button
+                onClick={() => {
+                  setSortKey("impact")
+                  setSortDir("desc")
+                }}
+                className="text-neutral-500 underline decoration-dotted underline-offset-2 transition hover:text-neutral-300"
+              >
+                Sort by spend impact
+              </button>
+            )}
           </p>
         </div>
         <AdSetSelector
