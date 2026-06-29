@@ -694,7 +694,7 @@ export async function fetchGoogleAdsData(
 
 /** Columns in google_ads_keyword_quality consumed by the Quality Score section */
 const GA_QUALITY_COLUMNS =
-  "campaign_id, campaign_name, ad_group_id, ad_group_name, spend, impressions, quality_score, expected_ctr, ad_relevance, landing_page_experience"
+  "campaign_id, campaign_name, ad_group_id, ad_group_name, criterion_id, keyword_text, spend, impressions, quality_score, expected_ctr, ad_relevance, landing_page_experience"
 
 /**
  * Fetch the latest Google Ads keyword Quality Score snapshot for a client.

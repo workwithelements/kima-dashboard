@@ -194,6 +194,9 @@ export type AdGroupQualityScore = {
   expected_ctr: QualityBand
   ad_relevance: QualityBand
   landing_page_experience: QualityBand
+  /** Share (0–1) of the ad group's spend on keywords with at least one
+   *  below-average component — surfaces spend-skew the averaged QS can hide. */
+  weak_spend_share: number
 }
 
 /** Unified spend row for pacing (platform-agnostic) */

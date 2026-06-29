@@ -61,14 +61,15 @@ function ordinalToBand(ord: number): QualityBand {
 }
 
 /**
- * A keyword-level QS row (Phase 2 shape from `keyword_view`). Phase 1 builds
- * mock ad-group rows directly, so this is exercised once the real sync lands.
+ * A keyword-level QS row from `google_ads_keyword_quality`.
  */
 export type KeywordQualityRow = {
   campaign_id: string
   campaign_name: string
   ad_group_id: string
   ad_group_name: string
+  criterion_id: string
+  keyword_text: string
   spend: number
   impressions: number
   /** 1–10. Null when Google Ads has no score yet (low-volume keyword). */
@@ -76,6 +77,19 @@ export type KeywordQualityRow = {
   expected_ctr: QualityBand
   ad_relevance: QualityBand
   landing_page_experience: QualityBand
+}
+
+/**
+ * A keyword is "weak" if any of its three components is below average —
+ * Google's explicit "this is hurting you" signal. Null-QS keywords (no data)
+ * aren't counted as weak.
+ */
+export function isWeakKeyword(r: KeywordQualityRow): boolean {
+  return (
+    r.expected_ctr === "below_average" ||
+    r.ad_relevance === "below_average" ||
+    r.landing_page_experience === "below_average"
+  )
 }
 
 /**
@@ -112,14 +126,18 @@ export function rollupAdGroupQualityScore(rows: KeywordQualityRow[]): AdGroupQua
     const wAvg = (pick: (r: KeywordQualityRow) => number) =>
       scored.reduce((s, r) => s + pick(r) * weightOf(r), 0) / weightTotal
 
+    const totalSpend = list.reduce((s, r) => s + r.spend, 0)
+    const weakSpend = list.filter(isWeakKeyword).reduce((s, r) => s + r.spend, 0)
+
     const first = list[0]
     result.push({
       campaign_id: first.campaign_id,
       campaign_name: first.campaign_name,
       ad_group_id: first.ad_group_id,
       ad_group_name: first.ad_group_name,
-      spend: list.reduce((s, r) => s + r.spend, 0),
+      spend: totalSpend,
       impressions: list.reduce((s, r) => s + r.impressions, 0),
+      weak_spend_share: totalSpend > 0 ? weakSpend / totalSpend : 0,
       quality_score: Math.round(wAvg((r) => r.quality_score as number) * 10) / 10,
       expected_ctr: ordinalToBand(wAvg((r) => QS_BANDS[r.expected_ctr].ordinal)),
       ad_relevance: ordinalToBand(wAvg((r) => QS_BANDS[r.ad_relevance].ordinal)),

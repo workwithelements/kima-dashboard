@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { Fragment, useMemo, useState } from "react"
 import { Card } from "../ui/card"
 import AdSetSelector from "../ui/adset-selector"
 import {
@@ -12,10 +12,10 @@ import {
   rollupAdGroupQualityScore,
   type KeywordQualityRow,
 } from "@/lib/utils/quality-score"
-import { fmtCurrency, fmtNumber } from "@/lib/utils/format"
+import { fmtCurrency, fmtNumber, fmtPercent } from "@/lib/utils/format"
 import type { AdGroupQualityScore, QualityBand } from "@/lib/utils/types"
 
-type SortKey = "ad_group" | "campaign" | "spend" | "impressions" | "quality_score" | "impact"
+type SortKey = "ad_group" | "campaign" | "spend" | "impressions" | "quality_score" | "impact" | "weak_share"
 
 /**
  * Combined spend × quality score, in currency: spend weighted by the quality
@@ -38,6 +38,42 @@ function BandBadge({ band }: { band: QualityBand }) {
   )
 }
 
+/** A single keyword row shown when an ad group is expanded. */
+function KeywordDetailRow({ kw, currency }: { kw: KeywordQualityRow; currency?: string }) {
+  return (
+    <tr className="border-b border-neutral-800/30 bg-neutral-950/40 text-[11px]">
+      <td className="px-2 py-1.5 pl-7 text-neutral-400" title={kw.keyword_text}>
+        {kw.keyword_text || "—"}
+      </td>
+      <td className="px-2 py-1.5" />
+      <td className="px-2 py-1.5 text-right tabular-nums text-neutral-500">
+        {fmtCurrency(kw.spend, currency)}
+      </td>
+      <td className="px-2 py-1.5 text-right tabular-nums text-neutral-500">
+        {fmtNumber(kw.impressions)}
+      </td>
+      <td
+        className={`px-2 py-1.5 text-right tabular-nums ${
+          kw.quality_score != null ? qsColor(kw.quality_score) : "text-neutral-600"
+        }`}
+      >
+        {kw.quality_score != null ? kw.quality_score.toFixed(0) : "—"}
+      </td>
+      <td className="px-2 py-1.5 text-right text-neutral-700">—</td>
+      <td className="px-2 py-1.5" />
+      <td className="px-2 py-1.5">
+        <BandBadge band={kw.expected_ctr} />
+      </td>
+      <td className="px-2 py-1.5">
+        <BandBadge band={kw.ad_relevance} />
+      </td>
+      <td className="px-2 py-1.5">
+        <BandBadge band={kw.landing_page_experience} />
+      </td>
+    </tr>
+  )
+}
+
 export default function GoogleAdsQualitySection({
   rows,
   currency,
@@ -47,6 +83,18 @@ export default function GoogleAdsQualitySection({
 }) {
   // Roll real keyword-level Quality Score up to ad-group level (spend-weighted).
   const allAdGroups = useMemo(() => rollupAdGroupQualityScore(rows), [rows])
+
+  // Keyword rows grouped per ad group (spend desc) for the drill-down.
+  const keywordsByAdGroup = useMemo(() => {
+    const map = new Map<string, KeywordQualityRow[]>()
+    for (const r of rows) {
+      const list = map.get(r.ad_group_id)
+      if (list) list.push(r)
+      else map.set(r.ad_group_id, [r])
+    }
+    for (const list of Array.from(map.values())) list.sort((a, b) => b.spend - a.spend)
+    return map
+  }, [rows])
 
   // Campaign filter — distinct campaigns present in the data.
   const campaigns = useMemo(() => {
@@ -62,6 +110,7 @@ export default function GoogleAdsQualitySection({
   // surface first, rather than tiny-spend ad groups creating noise.
   const [sortKey, setSortKey] = useState<SortKey>("impact")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
 
   const filtered = useMemo(() => {
     if (selectedCampaigns.length === 0 || selectedCampaigns.length === campaigns.length) {
@@ -89,6 +138,8 @@ export default function GoogleAdsQualitySection({
           return (a.quality_score - b.quality_score) * dir
         case "impact":
           return (impactOf(a) - impactOf(b)) * dir
+        case "weak_share":
+          return (a.weak_spend_share - b.weak_spend_share) * dir
       }
     })
   }, [filtered, sortKey, sortDir])
@@ -102,6 +153,15 @@ export default function GoogleAdsQualitySection({
       setSortKey(key)
       setSortDir("asc")
     }
+  }
+
+  function toggleExpand(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
   if (allAdGroups.length === 0) return null
@@ -168,42 +228,80 @@ export default function GoogleAdsQualitySection({
                 sortDir={sortDir}
                 onSort={toggleSort}
               />
+              <Th
+                label="Weak spend"
+                col="weak_share"
+                align="right"
+                title="Share of the ad group's spend on keywords with at least one below-average component. A high % means the averaged score is masking weak keywords underneath — expand the row to see them."
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onSort={toggleSort}
+              />
               <th className="px-2 py-2 font-medium">Expected CTR</th>
               <th className="px-2 py-2 font-medium">Ad Relevance</th>
               <th className="px-2 py-2 font-medium">Landing Page Exp.</th>
             </tr>
           </thead>
           <tbody>
-            {sorted.map((ag) => (
-              <tr
-                key={ag.ad_group_id}
-                className="border-b border-neutral-800/50 transition hover:bg-neutral-800/30"
-              >
-                <td className="px-2 py-2 text-neutral-200">{ag.ad_group_name}</td>
-                <td className="px-2 py-2 text-neutral-400">{ag.campaign_name}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-neutral-300">
-                  {fmtCurrency(ag.spend, currency)}
-                </td>
-                <td className="px-2 py-2 text-right tabular-nums text-neutral-300">
-                  {fmtNumber(ag.impressions)}
-                </td>
-                <td className={`px-2 py-2 text-right font-semibold tabular-nums ${qsColor(ag.quality_score)}`}>
-                  {ag.quality_score.toFixed(1)}
-                </td>
-                <td className="px-2 py-2 text-right tabular-nums text-neutral-300">
-                  {fmtCurrency(impactOf(ag), currency)}
-                </td>
-                <td className="px-2 py-2">
-                  <BandBadge band={ag.expected_ctr} />
-                </td>
-                <td className="px-2 py-2">
-                  <BandBadge band={ag.ad_relevance} />
-                </td>
-                <td className="px-2 py-2">
-                  <BandBadge band={ag.landing_page_experience} />
-                </td>
-              </tr>
-            ))}
+            {sorted.map((ag) => {
+              const isOpen = expanded.has(ag.ad_group_id)
+              const kws = keywordsByAdGroup.get(ag.ad_group_id) ?? []
+              return (
+                <Fragment key={ag.ad_group_id}>
+                  <tr
+                    onClick={() => toggleExpand(ag.ad_group_id)}
+                    className="cursor-pointer border-b border-neutral-800/50 transition hover:bg-neutral-800/30"
+                  >
+                    <td className="px-2 py-2 text-neutral-200">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          className={`inline-block text-[8px] text-neutral-500 transition-transform ${isOpen ? "rotate-90" : ""}`}
+                        >
+                          ▶
+                        </span>
+                        <span>{ag.ad_group_name}</span>
+                        <span className="text-[10px] text-neutral-600">({kws.length})</span>
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 text-neutral-400">{ag.campaign_name}</td>
+                    <td className="px-2 py-2 text-right tabular-nums text-neutral-300">
+                      {fmtCurrency(ag.spend, currency)}
+                    </td>
+                    <td className="px-2 py-2 text-right tabular-nums text-neutral-300">
+                      {fmtNumber(ag.impressions)}
+                    </td>
+                    <td className={`px-2 py-2 text-right font-semibold tabular-nums ${qsColor(ag.quality_score)}`}>
+                      {ag.quality_score.toFixed(1)}
+                    </td>
+                    <td className="px-2 py-2 text-right tabular-nums text-neutral-300">
+                      {fmtCurrency(impactOf(ag), currency)}
+                    </td>
+                    <td className="px-2 py-2 text-right tabular-nums">
+                      {ag.weak_spend_share > 0 ? (
+                        <span className={ag.weak_spend_share >= 0.3 ? "text-red-400" : "text-amber-400"}>
+                          {fmtPercent(ag.weak_spend_share * 100, 0)}
+                        </span>
+                      ) : (
+                        <span className="text-neutral-600">—</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-2">
+                      <BandBadge band={ag.expected_ctr} />
+                    </td>
+                    <td className="px-2 py-2">
+                      <BandBadge band={ag.ad_relevance} />
+                    </td>
+                    <td className="px-2 py-2">
+                      <BandBadge band={ag.landing_page_experience} />
+                    </td>
+                  </tr>
+                  {isOpen &&
+                    kws.map((kw) => (
+                      <KeywordDetailRow key={kw.criterion_id} kw={kw} currency={currency} />
+                    ))}
+                </Fragment>
+              )
+            })}
           </tbody>
         </table>
       </div>
