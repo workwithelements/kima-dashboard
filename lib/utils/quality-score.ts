@@ -71,7 +71,8 @@ export type KeywordQualityRow = {
   ad_group_name: string
   spend: number
   impressions: number
-  quality_score: number
+  /** 1–10. Null when Google Ads has no score yet (low-volume keyword). */
+  quality_score: number | null
   expected_ctr: QualityBand
   ad_relevance: QualityBand
   landing_page_experience: QualityBand
@@ -79,6 +80,14 @@ export type KeywordQualityRow = {
 
 /**
  * Roll keyword-level scores up to ad-group level, weighted by spend.
+ *
+ * Quality Score / component bands are averaged only over keywords that actually
+ * have a score — Google Ads returns a null QS for low-volume keywords, and
+ * counting those as zero would unfairly drag the ad group down. Spend and
+ * impressions still reflect every keyword so the totals match the rest of the
+ * dashboard. Ad groups with no scored keywords (e.g. all too low-volume) are
+ * dropped, since there's nothing meaningful to show.
+ *
  * Keywords with zero spend fall back to an even weight so they still count.
  */
 export function rollupAdGroupQualityScore(rows: KeywordQualityRow[]): AdGroupQualityScore[] {
@@ -91,14 +100,17 @@ export function rollupAdGroupQualityScore(rows: KeywordQualityRow[]): AdGroupQua
 
   const result: AdGroupQualityScore[] = []
   for (const list of Array.from(groups.values())) {
-    const totalSpend = list.reduce((s, r) => s + r.spend, 0)
-    // Weight by spend; if the whole ad group has no spend, weight evenly.
+    const scored = list.filter((r) => r.quality_score != null)
+    if (scored.length === 0) continue
+
+    const scoredSpend = scored.reduce((s, r) => s + r.spend, 0)
+    // Weight by spend across scored keywords; if they have no spend, weight evenly.
     const weightOf = (r: KeywordQualityRow) =>
-      totalSpend > 0 ? r.spend : 1 / list.length
-    const weightTotal = totalSpend > 0 ? totalSpend : 1
+      scoredSpend > 0 ? r.spend : 1 / scored.length
+    const weightTotal = scoredSpend > 0 ? scoredSpend : 1
 
     const wAvg = (pick: (r: KeywordQualityRow) => number) =>
-      list.reduce((s, r) => s + pick(r) * weightOf(r), 0) / weightTotal
+      scored.reduce((s, r) => s + pick(r) * weightOf(r), 0) / weightTotal
 
     const first = list[0]
     result.push({
@@ -106,9 +118,9 @@ export function rollupAdGroupQualityScore(rows: KeywordQualityRow[]): AdGroupQua
       campaign_name: first.campaign_name,
       ad_group_id: first.ad_group_id,
       ad_group_name: first.ad_group_name,
-      spend: totalSpend,
+      spend: list.reduce((s, r) => s + r.spend, 0),
       impressions: list.reduce((s, r) => s + r.impressions, 0),
-      quality_score: Math.round(wAvg((r) => r.quality_score) * 10) / 10,
+      quality_score: Math.round(wAvg((r) => r.quality_score as number) * 10) / 10,
       expected_ctr: ordinalToBand(wAvg((r) => QS_BANDS[r.expected_ctr].ordinal)),
       ad_relevance: ordinalToBand(wAvg((r) => QS_BANDS[r.ad_relevance].ordinal)),
       landing_page_experience: ordinalToBand(

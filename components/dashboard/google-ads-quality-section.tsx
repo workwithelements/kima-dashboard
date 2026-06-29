@@ -3,16 +3,17 @@
 import { useMemo, useState } from "react"
 import { Card } from "../ui/card"
 import AdSetSelector from "../ui/adset-selector"
-import { buildMockQualityScores } from "@/lib/data/mock-quality-scores"
 import {
   bandBadge,
   bandLabel,
   crucialAmends,
   drivers,
   qsColor,
+  rollupAdGroupQualityScore,
+  type KeywordQualityRow,
 } from "@/lib/utils/quality-score"
 import { fmtCurrency, fmtNumber } from "@/lib/utils/format"
-import type { AdGroupQualityScore, GoogleAdsDailyRow, QualityBand } from "@/lib/utils/types"
+import type { AdGroupQualityScore, QualityBand } from "@/lib/utils/types"
 
 type SortKey = "ad_group" | "campaign" | "spend" | "impressions" | "quality_score" | "impact"
 
@@ -40,11 +41,11 @@ export default function GoogleAdsQualitySection({
   rows,
   currency,
 }: {
-  rows: Partial<GoogleAdsDailyRow>[]
+  rows: KeywordQualityRow[]
   currency?: string
 }) {
-  // Phase 1: derive mock QS from the real GA rows already in scope.
-  const allAdGroups = useMemo(() => buildMockQualityScores(rows), [rows])
+  // Roll real keyword-level Quality Score up to ad-group level (spend-weighted).
+  const allAdGroups = useMemo(() => rollupAdGroupQualityScore(rows), [rows])
 
   // Campaign filter — distinct campaigns present in the data.
   const campaigns = useMemo(() => {
@@ -109,9 +110,6 @@ export default function GoogleAdsQualitySection({
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-medium text-neutral-400">Quality Score by Ad Group</h2>
-          <p className="mt-0.5 text-[11px] text-neutral-600">
-            Sample data — live Quality Score sync coming soon
-          </p>
           <p className="mt-0.5 text-[11px] text-neutral-600">
             {impactSorted ? (
               <span>Sorted by spend impact (spend × low score) — biggest opportunities first</span>

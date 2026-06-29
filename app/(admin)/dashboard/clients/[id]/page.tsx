@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic"
 
 import { notFound } from "next/navigation"
-import { fetchClientData, fetchGoogleAdsData, fetchBreakdownsData, fetchCreativeData } from "@/lib/data/fetch-client-data"
+import { fetchClientData, fetchGoogleAdsData, fetchGoogleAdsQualityData, fetchBreakdownsData, fetchCreativeData } from "@/lib/data/fetch-client-data"
 import { fetchShopifyData } from "@/lib/data/fetch-shopify-data"
 import { createServiceClient } from "@/lib/supabase/server"
 import { getPresetRange, getComparisonRange } from "@/lib/utils/dates"
@@ -65,7 +65,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
   const supabase = createServiceClient()
 
   const minDelay = new Promise((r) => setTimeout(r, 1000))
-  const [data, configRes, funnelViewsRes, gaRows, gaCompRows, breakdownsData, annotationsRes, shopifyData, shopifyCompData, creativeData] = await Promise.all([
+  const [data, configRes, funnelViewsRes, gaRows, gaCompRows, gaQualityRows, breakdownsData, annotationsRes, shopifyData, shopifyCompData, creativeData] = await Promise.all([
     fetchClientData(
       params.id,
       range.from,
@@ -87,6 +87,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
     fetchCompFrom && fetchCompTo
       ? fetchGoogleAdsData(params.id, fetchCompFrom, fetchCompTo)
       : Promise.resolve([]),
+    fetchGoogleAdsQualityData(params.id, range.to),
     fetchBreakdownsData(params.id, range.from, range.to),
     supabase
       .from("annotations")
@@ -129,6 +130,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       comparisonRows={data.comparisonRows}
       googleAdsRows={gaRows}
       googleAdsComparisonRows={gaCompRows}
+      googleAdsQualityRows={gaQualityRows}
       preset={preset}
       from={displayRange.from}
       to={displayRange.to}

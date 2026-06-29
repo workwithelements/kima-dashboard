@@ -17,6 +17,7 @@ import type { ComparisonType, Client } from "@/lib/utils/types"
 import type { Annotation } from "@/components/ui/annotations-bar"
 import type { NamingConfig } from "@/lib/utils/ad-name-parser"
 import type { MetaDemographicsRow, MetaPlacementsRow, MetaDailyRow, GoogleAdsDailyRow, ShopifyDailyOrdersRow, ShopifyAttributionRow, AdditionalSpendEntry } from "@/lib/utils/types"
+import type { KeywordQualityRow } from "@/lib/utils/quality-score"
 import type { FunnelView } from "@/lib/utils/funnel-views"
 
 type Tab = "performance" | "pacing" | "reach"
@@ -39,6 +40,7 @@ type Props = {
   perfComparisonRows: Partial<MetaDailyRow>[]
   googleAdsRows?: Partial<GoogleAdsDailyRow>[]
   googleAdsComparisonRows?: Partial<GoogleAdsDailyRow>[]
+  googleAdsQualityRows?: KeywordQualityRow[]
   baselineReach: number
   lifetimeSpend: number
   lifetimeReach: number
@@ -165,6 +167,7 @@ export default function ClientDashboard(props: Props) {
             comparisonRows={props.perfComparisonRows}
             googleAdsRows={props.googleAdsRows}
             googleAdsComparisonRows={props.googleAdsComparisonRows}
+            googleAdsQualityRows={props.googleAdsQualityRows}
             preset={props.preset}
             from={props.from}
             to={props.to}

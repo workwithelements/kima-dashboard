@@ -10,6 +10,7 @@ import {
   fetchReachData,
   fetchBreakdownsData,
   fetchGoogleAdsData,
+  fetchGoogleAdsQualityData,
   fetchConsolidatedSpend,
   consolidateDailySpend,
   fetchAllAdditionalSpend,
@@ -96,6 +97,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     breakdownsData,
     googleAdsRows,
     googleAdsComparisonRows,
+    googleAdsQualityRows,
     scorecardConfigRes,
     funnelViewsRes,
     annotationsRes,
@@ -111,6 +113,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     fetchBreakdownsData(client.id, range.from, range.to),
     hasGoogle ? fetchGoogleAdsData(client.id, range.from, range.to) : Promise.resolve([]),
     hasGoogle && compRange ? fetchGoogleAdsData(client.id, compRange.from, compRange.to) : Promise.resolve([]),
+    hasGoogle ? fetchGoogleAdsQualityData(client.id, range.to) : Promise.resolve([]),
     supabase
       .from("client_scorecard_config")
       .select("funnel_steps, key_action, contribution_margin_pct")
@@ -180,6 +183,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
       perfComparisonRows={perfData?.comparisonRows || []}
       googleAdsRows={googleAdsRows}
       googleAdsComparisonRows={googleAdsComparisonRows}
+      googleAdsQualityRows={googleAdsQualityRows}
       baselineReach={perfData?.baselineReach || 0}
       lifetimeSpend={perfData?.lifetimeSpend || 0}
       lifetimeReach={perfData?.lifetimeReach || 0}
