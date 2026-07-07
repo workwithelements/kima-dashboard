@@ -65,7 +65,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
   const supabase = createServiceClient()
 
   const minDelay = new Promise((r) => setTimeout(r, 1000))
-  const [data, configRes, funnelViewsRes, gaRows, gaCompRows, gaQualityRows, breakdownsData, annotationsRes, shopifyData, shopifyCompData, creativeData] = await Promise.all([
+  const [data, configRes, funnelViewsRes, gaRows, gaCompRows, gaQuality, breakdownsData, annotationsRes, shopifyData, shopifyCompData, creativeData] = await Promise.all([
     fetchClientData(
       params.id,
       range.from,
@@ -130,7 +130,7 @@ export default async function ClientDetailPage({ params, searchParams }: Props) 
       comparisonRows={data.comparisonRows}
       googleAdsRows={gaRows}
       googleAdsComparisonRows={gaCompRows}
-      googleAdsQualityRows={gaQualityRows}
+      googleAdsQuality={gaQuality}
       preset={preset}
       from={displayRange.from}
       to={displayRange.to}

@@ -17,6 +17,7 @@ import {
   expandAdditionalSpendDaily,
   mergeDailySpend,
 } from "@/lib/data/fetch-client-data"
+import { EMPTY_QUALITY_DATA } from "@/lib/utils/quality-score"
 import { fetchShopifyData } from "@/lib/data/fetch-shopify-data"
 import { getPresetRange, getComparisonRange, daysAgo, monthStart, today } from "@/lib/utils/dates"
 import type { DatePreset } from "@/lib/utils/dates"
@@ -97,7 +98,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     breakdownsData,
     googleAdsRows,
     googleAdsComparisonRows,
-    googleAdsQualityRows,
+    googleAdsQuality,
     scorecardConfigRes,
     funnelViewsRes,
     annotationsRes,
@@ -113,7 +114,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     fetchBreakdownsData(client.id, range.from, range.to),
     hasGoogle ? fetchGoogleAdsData(client.id, range.from, range.to) : Promise.resolve([]),
     hasGoogle && compRange ? fetchGoogleAdsData(client.id, compRange.from, compRange.to) : Promise.resolve([]),
-    hasGoogle ? fetchGoogleAdsQualityData(client.id, range.to) : Promise.resolve([]),
+    hasGoogle ? fetchGoogleAdsQualityData(client.id, range.to) : Promise.resolve(EMPTY_QUALITY_DATA),
     supabase
       .from("client_scorecard_config")
       .select("funnel_steps, key_action, contribution_margin_pct")
@@ -183,7 +184,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
       perfComparisonRows={perfData?.comparisonRows || []}
       googleAdsRows={googleAdsRows}
       googleAdsComparisonRows={googleAdsComparisonRows}
-      googleAdsQualityRows={googleAdsQualityRows}
+      googleAdsQuality={googleAdsQuality}
       baselineReach={perfData?.baselineReach || 0}
       lifetimeSpend={perfData?.lifetimeSpend || 0}
       lifetimeReach={perfData?.lifetimeReach || 0}

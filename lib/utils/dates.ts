@@ -55,6 +55,27 @@ export function dayOfMonth(dateStr: string): number {
   return new Date(dateStr + "T00:00:00").getDate()
 }
 
+/** Shift a YYYY-MM-DD date by N days (negative for past) */
+export function shiftDays(dateStr: string, n: number): string {
+  const d = new Date(dateStr + "T00:00:00")
+  d.setDate(d.getDate() + n)
+  return formatLocal(d)
+}
+
+/**
+ * Shift a YYYY-MM-DD date by N calendar months (negative for past), clamping
+ * the day to the target month's length so e.g. Mar 31 − 1 month = Feb 28/29
+ * rather than overflowing into March.
+ */
+export function shiftMonths(dateStr: string, n: number): string {
+  const d = new Date(dateStr + "T00:00:00")
+  const day = d.getDate()
+  d.setDate(1)
+  d.setMonth(d.getMonth() + n)
+  d.setDate(Math.min(day, daysInMonth(d.getFullYear(), d.getMonth() + 1)))
+  return formatLocal(d)
+}
+
 /** Date range presets */
 export type DatePreset =
   | "today"
