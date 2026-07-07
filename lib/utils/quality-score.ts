@@ -80,6 +80,51 @@ export type KeywordQualityRow = {
 }
 
 /**
+ * A historical Quality Score snapshot condensed to just the scores, used for
+ * the WoW / vs-previous-month comparison columns. Keyed maps rather than full
+ * rows keep the payload sent to the client small.
+ */
+export type QualitySnapshotComparison = {
+  /** The comparison snapshot's date (YYYY-MM-DD) */
+  snapshot_date: string
+  /** ad_group_id → spend-weighted quality score (1–10) */
+  ad_groups: Record<string, number>
+  /** criterion_id → keyword quality score (scored keywords only) */
+  keywords: Record<string, number>
+}
+
+/** Quality Score data for the dashboard: latest snapshot + historical comparisons */
+export type GoogleAdsQualityData = {
+  rows: KeywordQualityRow[]
+  /** Nearest snapshot ≥ 7 days before the current one, or null if history doesn't reach back */
+  weekAgo: QualitySnapshotComparison | null
+  /** Nearest snapshot ≥ 1 calendar month before the current one, or null if history doesn't reach back */
+  monthAgo: QualitySnapshotComparison | null
+}
+
+export const EMPTY_QUALITY_DATA: GoogleAdsQualityData = {
+  rows: [],
+  weekAgo: null,
+  monthAgo: null,
+}
+
+/** Condense a snapshot's keyword rows into the score maps used for comparisons. */
+export function toSnapshotComparison(
+  snapshotDate: string,
+  rows: KeywordQualityRow[]
+): QualitySnapshotComparison {
+  const ad_groups: Record<string, number> = {}
+  for (const ag of rollupAdGroupQualityScore(rows)) {
+    ad_groups[ag.ad_group_id] = ag.quality_score
+  }
+  const keywords: Record<string, number> = {}
+  for (const r of rows) {
+    if (r.quality_score != null) keywords[r.criterion_id] = r.quality_score
+  }
+  return { snapshot_date: snapshotDate, ad_groups, keywords }
+}
+
+/**
  * A keyword is "weak" if any of its three components is below average —
  * Google's explicit "this is hurting you" signal. Null-QS keywords (no data)
  * aren't counted as weak.

@@ -6,7 +6,8 @@
 import { unstable_cache } from "next/cache"
 import { createServiceClient } from "@/lib/supabase/server"
 import type { MetaDailyRow, MetaDemographicsRow, MetaPlacementsRow, GoogleAdsDailyRow, Client, AdPlatform, DailySpendRow, AdditionalSpendEntry } from "@/lib/utils/types"
-import type { KeywordQualityRow } from "@/lib/utils/quality-score"
+import { EMPTY_QUALITY_DATA, toSnapshotComparison, type GoogleAdsQualityData, type KeywordQualityRow, type QualitySnapshotComparison } from "@/lib/utils/quality-score"
+import { shiftDays, shiftMonths } from "@/lib/utils/dates"
 import type { NamingConfig } from "@/lib/utils/ad-name-parser"
 
 /** Cache TTL for dashboard data fetches (5 minutes) */
@@ -696,8 +697,43 @@ export async function fetchGoogleAdsData(
 const GA_QUALITY_COLUMNS =
   "campaign_id, campaign_name, ad_group_id, ad_group_name, criterion_id, keyword_text, spend, impressions, quality_score, expected_ctr, ad_relevance, landing_page_experience"
 
+type SupabaseServiceClient = ReturnType<typeof createServiceClient>
+
+/** Latest quality snapshot_date for a client on or before `maxDate`, or null. */
+async function latestQualitySnapshotDate(
+  supabase: SupabaseServiceClient,
+  clientId: string,
+  maxDate: string
+): Promise<string | null> {
+  const { data } = await supabase
+    .from("google_ads_keyword_quality")
+    .select("snapshot_date")
+    .eq("client_id", clientId)
+    .lte("snapshot_date", maxDate)
+    .order("snapshot_date", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  return (data as { snapshot_date: string } | null)?.snapshot_date ?? null
+}
+
+/** All keyword rows for one quality snapshot. */
+async function fetchQualitySnapshotRows(
+  supabase: SupabaseServiceClient,
+  clientId: string,
+  snapshotDate: string
+): Promise<KeywordQualityRow[]> {
+  return fetchAllRows<KeywordQualityRow>(() =>
+    supabase
+      .from("google_ads_keyword_quality")
+      .select(GA_QUALITY_COLUMNS)
+      .eq("client_id", clientId)
+      .eq("snapshot_date", snapshotDate)
+  )
+}
+
 /**
- * Fetch the latest Google Ads keyword Quality Score snapshot for a client.
+ * Fetch the latest Google Ads keyword Quality Score snapshot for a client,
+ * plus week-over-week and month-over-month comparison snapshots.
  *
  * Quality Score is a point-in-time daily snapshot, NOT a date-segmentable
  * metric — each row's spend/impressions already cover a trailing 30-day window
@@ -705,38 +741,53 @@ const GA_QUALITY_COLUMNS =
  * before the selected range's end date and return every keyword row for that
  * one snapshot. Summing across snapshots would double-count, so we never do.
  *
- * Returns [] when the client has no Quality Score data (e.g. Performance Max
- * accounts, which have no keywords) — the section hides itself in that case.
+ * Comparisons follow the same rule: the nearest snapshot on or before
+ * (snapshot − 7 days) and (snapshot − 1 calendar month). Each is null when the
+ * client's snapshot history doesn't reach back that far. Comparison snapshots
+ * are condensed to score maps (ad group + keyword) rather than full rows to
+ * keep the client payload small.
+ *
+ * Returns empty data when the client has no Quality Score data at all (e.g.
+ * Performance Max accounts, which have no keywords) — the section hides itself
+ * in that case.
  */
 export async function fetchGoogleAdsQualityData(
   clientId: string,
   to: string
-): Promise<KeywordQualityRow[]> {
+): Promise<GoogleAdsQualityData> {
   try {
     const supabase = createServiceClient()
 
     // Latest snapshot on or before the range end.
-    const { data: latest } = await supabase
-      .from("google_ads_keyword_quality")
-      .select("snapshot_date")
-      .eq("client_id", clientId)
-      .lte("snapshot_date", to)
-      .order("snapshot_date", { ascending: false })
-      .limit(1)
-      .maybeSingle()
+    const snapshotDate = await latestQualitySnapshotDate(supabase, clientId, to)
+    if (!snapshotDate) return EMPTY_QUALITY_DATA
 
-    const snapshotDate = (latest as { snapshot_date: string } | null)?.snapshot_date
-    if (!snapshotDate) return []
+    const [rows, weekAgoDate, monthAgoDate] = await Promise.all([
+      fetchQualitySnapshotRows(supabase, clientId, snapshotDate),
+      latestQualitySnapshotDate(supabase, clientId, shiftDays(snapshotDate, -7)),
+      latestQualitySnapshotDate(supabase, clientId, shiftMonths(snapshotDate, -1)),
+    ])
 
-    return await fetchAllRows<KeywordQualityRow>(() =>
-      supabase
-        .from("google_ads_keyword_quality")
-        .select(GA_QUALITY_COLUMNS)
-        .eq("client_id", clientId)
-        .eq("snapshot_date", snapshotDate)
+    // Fetch each distinct comparison snapshot once — a sparse history can
+    // resolve both comparisons to the same snapshot.
+    const comparisonDates = Array.from(
+      new Set([weekAgoDate, monthAgoDate].filter((d): d is string => d != null))
     )
+    const comparisons = new Map<string, QualitySnapshotComparison>()
+    await Promise.all(
+      comparisonDates.map(async (date) => {
+        const snapshotRows = await fetchQualitySnapshotRows(supabase, clientId, date)
+        comparisons.set(date, toSnapshotComparison(date, snapshotRows))
+      })
+    )
+
+    return {
+      rows,
+      weekAgo: weekAgoDate ? (comparisons.get(weekAgoDate) ?? null) : null,
+      monthAgo: monthAgoDate ? (comparisons.get(monthAgoDate) ?? null) : null,
+    }
   } catch {
-    return []
+    return EMPTY_QUALITY_DATA
   }
 }
 

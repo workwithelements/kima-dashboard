@@ -11,11 +11,21 @@ import {
   qsColor,
   rollupAdGroupQualityScore,
   type KeywordQualityRow,
+  type QualitySnapshotComparison,
 } from "@/lib/utils/quality-score"
-import { fmtCurrency, fmtNumber, fmtPercent } from "@/lib/utils/format"
+import { fmtCurrency, fmtDateShort, fmtNumber, fmtPercent } from "@/lib/utils/format"
 import type { AdGroupQualityScore, QualityBand } from "@/lib/utils/types"
 
-type SortKey = "ad_group" | "campaign" | "spend" | "impressions" | "quality_score" | "impact" | "weak_share"
+type SortKey =
+  | "ad_group"
+  | "campaign"
+  | "spend"
+  | "impressions"
+  | "quality_score"
+  | "wow"
+  | "mom"
+  | "impact"
+  | "weak_share"
 
 /**
  * Combined spend × quality score, in currency: spend weighted by the quality
@@ -26,6 +36,36 @@ type SortKey = "ad_group" | "campaign" | "spend" | "impressions" | "quality_scor
  */
 function impactOf(ag: AdGroupQualityScore): number {
   return (ag.spend * (10 - ag.quality_score)) / 10
+}
+
+/**
+ * Quality Score change vs a comparison snapshot, rounded to 1dp. Null when the
+ * entity wasn't in the comparison snapshot (new ad group / newly scored
+ * keyword) — nothing meaningful to diff against.
+ */
+function scoreDelta(current: number, prev: number | undefined): number | null {
+  if (prev == null) return null
+  return Math.round((current - prev) * 10) / 10
+}
+
+/** An ad group's QS delta vs a comparison snapshot (null when uncomparable). */
+function agDelta(
+  ag: AdGroupQualityScore,
+  comp: QualitySnapshotComparison | null | undefined
+): number | null {
+  return comp ? scoreDelta(ag.quality_score, comp.ad_groups[ag.ad_group_id]) : null
+}
+
+/** Signed, colour-coded QS delta: green up (better), red down, grey flat/none. */
+function DeltaValue({ delta }: { delta: number | null }) {
+  if (delta == null) return <span className="text-neutral-600">—</span>
+  if (delta === 0) return <span className="text-neutral-500">0.0</span>
+  return (
+    <span className={delta > 0 ? "text-green-400" : "text-red-400"}>
+      {delta > 0 ? "+" : "−"}
+      {Math.abs(delta).toFixed(1)}
+    </span>
+  )
 }
 
 function BandBadge({ band }: { band: QualityBand }) {
@@ -39,7 +79,17 @@ function BandBadge({ band }: { band: QualityBand }) {
 }
 
 /** A single keyword row shown when an ad group is expanded. */
-function KeywordDetailRow({ kw, currency }: { kw: KeywordQualityRow; currency?: string }) {
+function KeywordDetailRow({
+  kw,
+  weekAgo,
+  monthAgo,
+  currency,
+}: {
+  kw: KeywordQualityRow
+  weekAgo?: QualitySnapshotComparison | null
+  monthAgo?: QualitySnapshotComparison | null
+  currency?: string
+}) {
   return (
     <tr className="border-b border-neutral-800/30 bg-neutral-950/40 text-[11px]">
       <td className="px-2 py-1.5 pl-7 text-neutral-400" title={kw.keyword_text}>
@@ -59,6 +109,28 @@ function KeywordDetailRow({ kw, currency }: { kw: KeywordQualityRow; currency?: 
       >
         {kw.quality_score != null ? kw.quality_score.toFixed(0) : "—"}
       </td>
+      {weekAgo && (
+        <td className="px-2 py-1.5 text-right tabular-nums">
+          <DeltaValue
+            delta={
+              kw.quality_score != null
+                ? scoreDelta(kw.quality_score, weekAgo.keywords[kw.criterion_id])
+                : null
+            }
+          />
+        </td>
+      )}
+      {monthAgo && (
+        <td className="px-2 py-1.5 text-right tabular-nums">
+          <DeltaValue
+            delta={
+              kw.quality_score != null
+                ? scoreDelta(kw.quality_score, monthAgo.keywords[kw.criterion_id])
+                : null
+            }
+          />
+        </td>
+      )}
       <td className="px-2 py-1.5 text-right text-neutral-700">—</td>
       <td className="px-2 py-1.5" />
       <td className="px-2 py-1.5">
@@ -76,9 +148,13 @@ function KeywordDetailRow({ kw, currency }: { kw: KeywordQualityRow; currency?: 
 
 export default function GoogleAdsQualitySection({
   rows,
+  weekAgo,
+  monthAgo,
   currency,
 }: {
   rows: KeywordQualityRow[]
+  weekAgo?: QualitySnapshotComparison | null
+  monthAgo?: QualitySnapshotComparison | null
   currency?: string
 }) {
   // Roll real keyword-level Quality Score up to ad-group level (spend-weighted).
@@ -124,6 +200,13 @@ export default function GoogleAdsQualitySection({
 
   const sorted = useMemo(() => {
     const dir = sortDir === "asc" ? 1 : -1
+    // Deltas can be null (new ad group); those sort last in either direction.
+    const byDelta = (da: number | null, db: number | null) => {
+      if (da == null && db == null) return 0
+      if (da == null) return 1
+      if (db == null) return -1
+      return (da - db) * dir
+    }
     return [...filtered].sort((a, b) => {
       switch (sortKey) {
         case "ad_group":
@@ -136,13 +219,17 @@ export default function GoogleAdsQualitySection({
           return (a.impressions - b.impressions) * dir
         case "quality_score":
           return (a.quality_score - b.quality_score) * dir
+        case "wow":
+          return byDelta(agDelta(a, weekAgo), agDelta(b, weekAgo))
+        case "mom":
+          return byDelta(agDelta(a, monthAgo), agDelta(b, monthAgo))
         case "impact":
           return (impactOf(a) - impactOf(b)) * dir
         case "weak_share":
           return (a.weak_spend_share - b.weak_spend_share) * dir
       }
     })
-  }, [filtered, sortKey, sortDir])
+  }, [filtered, sortKey, sortDir, weekAgo, monthAgo])
 
   const impactSorted = sortKey === "impact"
 
@@ -219,6 +306,28 @@ export default function GoogleAdsQualitySection({
               <Th label="Spend" col="spend" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
               <Th label="Impr." col="impressions" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
               <Th label="Quality Score" col="quality_score" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              {weekAgo && (
+                <Th
+                  label="WoW"
+                  col="wow"
+                  align="right"
+                  title={`Quality Score change vs the snapshot from ${fmtDateShort(weekAgo.snapshot_date)} (~1 week earlier). "—" means the ad group wasn't scored then.`}
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onSort={toggleSort}
+                />
+              )}
+              {monthAgo && (
+                <Th
+                  label="vs prev mo"
+                  col="mom"
+                  align="right"
+                  title={`Quality Score change vs the snapshot from ${fmtDateShort(monthAgo.snapshot_date)} (~1 month earlier). "—" means the ad group wasn't scored then.`}
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onSort={toggleSort}
+                />
+              )}
               <Th
                 label="Impact"
                 col="impact"
@@ -273,6 +382,16 @@ export default function GoogleAdsQualitySection({
                     <td className={`px-2 py-2 text-right font-semibold tabular-nums ${qsColor(ag.quality_score)}`}>
                       {ag.quality_score.toFixed(1)}
                     </td>
+                    {weekAgo && (
+                      <td className="px-2 py-2 text-right tabular-nums">
+                        <DeltaValue delta={agDelta(ag, weekAgo)} />
+                      </td>
+                    )}
+                    {monthAgo && (
+                      <td className="px-2 py-2 text-right tabular-nums">
+                        <DeltaValue delta={agDelta(ag, monthAgo)} />
+                      </td>
+                    )}
                     <td className="px-2 py-2 text-right tabular-nums text-neutral-300">
                       {fmtCurrency(impactOf(ag), currency)}
                     </td>
@@ -297,7 +416,13 @@ export default function GoogleAdsQualitySection({
                   </tr>
                   {isOpen &&
                     kws.map((kw) => (
-                      <KeywordDetailRow key={kw.criterion_id} kw={kw} currency={currency} />
+                      <KeywordDetailRow
+                        key={kw.criterion_id}
+                        kw={kw}
+                        weekAgo={weekAgo}
+                        monthAgo={monthAgo}
+                        currency={currency}
+                      />
                     ))}
                 </Fragment>
               )
