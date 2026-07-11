@@ -1,9 +1,10 @@
 export const dynamic = "force-dynamic"
 
-import { fetchReachData } from "@/lib/data/fetch-client-data"
+import { fetchReachData, fetchReachEfficiencyData } from "@/lib/data/fetch-client-data"
 import { createServiceClient } from "@/lib/supabase/server"
 import { getPresetRange, getComparisonRange } from "@/lib/utils/dates"
 import type { DatePreset } from "@/lib/utils/dates"
+import type { WindowKey } from "@/lib/utils/reach-efficiency"
 import ReachAnalysisView from "@/components/dashboard/reach-analysis-view"
 import { notFound } from "next/navigation"
 
@@ -13,6 +14,10 @@ type Props = {
     preset?: string
     from?: string
     to?: string
+    /** CPMr report window: 7d | 14d | 30d | 90d | custom */
+    rw?: string
+    rfrom?: string
+    rto?: string
   }
 }
 
@@ -32,13 +37,26 @@ export default async function ReachAnalysisPage({ params, searchParams }: Props)
   const annFrom = annFromDate.toISOString().slice(0, 10)
   const supabase = createServiceClient()
 
-  const [data, annotationsRes] = await Promise.all([
+  // CPMr report window params (independent of the page date range)
+  const reportWindow = (searchParams.rw || "30d") as WindowKey
+  const reportCustom =
+    reportWindow === "custom" && searchParams.rfrom && searchParams.rto
+      ? { from: searchParams.rfrom, to: searchParams.rto }
+      : undefined
+
+  const [data, efficiency, annotationsRes] = await Promise.all([
     fetchReachData(
       params.id,
       range.from,
       range.to,
       compRange?.from,
       compRange?.to
+    ),
+    fetchReachEfficiencyData(
+      params.id,
+      range.to,
+      reportCustom?.from,
+      reportCustom?.to
     ),
     supabase
       .from("annotations")
@@ -72,6 +90,14 @@ export default async function ReachAnalysisPage({ params, searchParams }: Props)
       comparisonRows={data.comparisonRows}
       lifetimeRows={data.lifetimeRows}
       annotations={annotations}
+      efficiency={{
+        windows: efficiency.windows,
+        thumbnails: efficiency.thumbnails,
+        keyAction: efficiency.keyAction,
+        initialWindow: reportWindow,
+        customFrom: reportCustom?.from,
+        customTo: reportCustom?.to,
+      }}
     />
   )
 }

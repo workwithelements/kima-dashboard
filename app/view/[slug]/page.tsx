@@ -8,6 +8,7 @@ import {
   fetchClientData,
   fetchCreativeData,
   fetchReachData,
+  fetchReachEfficiencyData,
   fetchBreakdownsData,
   fetchGoogleAdsData,
   fetchGoogleAdsQualityData,
@@ -21,6 +22,7 @@ import { EMPTY_QUALITY_DATA } from "@/lib/utils/quality-score"
 import { fetchShopifyData } from "@/lib/data/fetch-shopify-data"
 import { getPresetRange, getComparisonRange, daysAgo, monthStart, today } from "@/lib/utils/dates"
 import type { DatePreset } from "@/lib/utils/dates"
+import type { WindowKey } from "@/lib/utils/reach-efficiency"
 import type { ComparisonType } from "@/lib/utils/types"
 import { calculatePacing } from "@/lib/utils/pacing"
 import { synthesiseDefaultView, type FunnelView } from "@/lib/utils/funnel-views"
@@ -34,6 +36,10 @@ type Props = {
     tab?: string
     compare?: string
     view?: string
+    /** CPMr report window: 7d | 14d | 30d | 90d | custom */
+    rw?: string
+    rfrom?: string
+    rto?: string
   }
 }
 
@@ -91,10 +97,18 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
 
   // Fetch all data in parallel for all tabs
   const hasGoogle = !!client.google_ads_customer_id
+  // CPMr report window params (independent of the page date range)
+  const reportWindow = (searchParams.rw || "30d") as WindowKey
+  const reportCustom =
+    reportWindow === "custom" && searchParams.rfrom && searchParams.rto
+      ? { from: searchParams.rfrom, to: searchParams.rto }
+      : undefined
+
   const [
     perfData,
     creativeData,
     reachData,
+    reachEfficiency,
     breakdownsData,
     googleAdsRows,
     googleAdsComparisonRows,
@@ -111,6 +125,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     fetchClientData(client.id, range.from, range.to, compRange?.from, compRange?.to),
     fetchCreativeData(client.id, range.from, range.to),
     fetchReachData(client.id, range.from, range.to, compRange?.from, compRange?.to),
+    fetchReachEfficiencyData(client.id, range.to, reportCustom?.from, reportCustom?.to),
     fetchBreakdownsData(client.id, range.from, range.to),
     hasGoogle ? fetchGoogleAdsData(client.id, range.from, range.to) : Promise.resolve([]),
     hasGoogle && compRange ? fetchGoogleAdsData(client.id, compRange.from, compRange.to) : Promise.resolve([]),
@@ -210,6 +225,14 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
       reachBaselineReach={reachData?.baselineReach || 0}
       reachComparisonRows={reachData?.comparisonRows || []}
       reachLifetimeRows={reachData?.lifetimeRows || []}
+      reachEfficiency={{
+        windows: reachEfficiency.windows,
+        thumbnails: reachEfficiency.thumbnails,
+        keyAction: reachEfficiency.keyAction,
+        initialWindow: reportWindow,
+        customFrom: reportCustom?.from,
+        customTo: reportCustom?.to,
+      }}
       /* Pacing tab */
       pacing={pacing}
       monthlyBudget={client.monthly_budget || null}
