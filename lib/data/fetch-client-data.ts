@@ -9,6 +9,13 @@ import type { MetaDailyRow, MetaDemographicsRow, MetaPlacementsRow, GoogleAdsDai
 import { EMPTY_QUALITY_DATA, toSnapshotComparison, type GoogleAdsQualityData, type KeywordQualityRow, type QualitySnapshotComparison } from "@/lib/utils/quality-score"
 import { shiftDays, shiftMonths } from "@/lib/utils/dates"
 import type { NamingConfig } from "@/lib/utils/ad-name-parser"
+import {
+  aggregateAdEfficiency,
+  WINDOW_PRESETS,
+  type AdEfficiencyRow,
+  type EfficiencyDailyRow,
+  type WindowKey,
+} from "@/lib/utils/reach-efficiency"
 
 /** Cache TTL for dashboard data fetches (5 minutes) */
 const CACHE_TTL_SECONDS = 300
@@ -957,6 +964,141 @@ export function mergeDailySpend(
   return Object.entries(byDate)
     .map(([date, spend]) => ({ date, spend: Math.round(spend * 100) / 100 }))
     .sort((a, b) => a.date.localeCompare(b.date))
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Reach efficiency (CPMr report)
+// ──────────────────────────────────────────────────────────────────────────
+
+export type ReachEfficiencyData = {
+  /** Per-ad aggregates for each preset window (and `custom` when requested),
+   *  all anchored to the same end date. */
+  windows: Partial<Record<WindowKey, AdEfficiencyRow[]>>
+  /** ad_id → creative thumbnail URL for every ad present in any window */
+  thumbnails: Record<string, string>
+  /** Key action the CPA is measured on (client's scorecard config) */
+  keyAction: string
+}
+
+/**
+ * Fetch per-ad reach-efficiency aggregates for the CPMr report.
+ * Pulls one 90-day span of per-ad daily rows ending at `to` and aggregates it
+ * into the 7/14/30/90d preset windows server-side, so the client can switch
+ * windows instantly. A custom range (which may extend past the 90d span) is
+ * fetched separately when provided.
+ */
+export async function fetchReachEfficiencyData(
+  clientId: string,
+  to: string,
+  customFrom?: string,
+  customTo?: string
+): Promise<ReachEfficiencyData> {
+  return unstable_cache(
+    () => _fetchReachEfficiencyDataInner(clientId, to, customFrom, customTo),
+    ["fetchReachEfficiencyData", clientId, to, customFrom ?? "", customTo ?? ""],
+    { revalidate: CACHE_TTL_SECONDS, tags: [`client:${clientId}`] }
+  )()
+}
+
+async function _fetchReachEfficiencyDataInner(
+  clientId: string,
+  to: string,
+  customFrom?: string,
+  customTo?: string
+): Promise<ReachEfficiencyData> {
+  const supabase = createServiceClient()
+
+  const { data: scorecard } = await supabase
+    .from("client_scorecard_config")
+    .select("key_action")
+    .eq("client_id", clientId)
+    .maybeSingle()
+  const keyAction = (scorecard?.key_action as string | undefined) || "purchases"
+  const convColumn = KEY_ACTION_COLUMN[keyAction] || "purchases"
+
+  const EFF_COLS = `date, ad_id, ad_name, adset_id, adset_name, campaign_id, campaign_name, spend, reach, impressions, purchases, purchase_value, video_plays${convColumn === "purchases" ? "" : `, ${convColumn}`}`
+
+  const from90 = shiftDays(to, -89)
+  const fetchSpan = (spanFrom: string, spanTo: string) =>
+    fetchAllRows<Record<string, any>>(() =>
+      supabase
+        .from("meta_daily_performance")
+        .select(EFF_COLS)
+        .eq("client_id", clientId)
+        .gte("date", spanFrom)
+        .lte("date", spanTo)
+        .order("date")
+    )
+
+  const hasCustom = Boolean(customFrom && customTo)
+  const customInsideSpan =
+    hasCustom && customFrom! >= from90 && customTo! <= to
+
+  const [spanRows, customRows] = await Promise.all([
+    fetchSpan(from90, to),
+    hasCustom && !customInsideSpan
+      ? fetchSpan(customFrom!, customTo!)
+      : Promise.resolve([] as Record<string, any>[]),
+  ])
+
+  const toEffRow = (r: Record<string, any>): EfficiencyDailyRow & { date: string } => ({
+    date: r.date,
+    ad_id: r.ad_id,
+    ad_name: r.ad_name,
+    adset_id: r.adset_id,
+    adset_name: r.adset_name,
+    campaign_id: r.campaign_id,
+    campaign_name: r.campaign_name,
+    spend: r.spend,
+    reach: r.reach,
+    impressions: r.impressions,
+    conversions: Number(r[convColumn]) || 0,
+    revenue: r.purchase_value,
+    video_plays: r.video_plays,
+  })
+
+  const span = spanRows.map(toEffRow)
+
+  const windows: Partial<Record<WindowKey, AdEfficiencyRow[]>> = {}
+  for (const preset of WINDOW_PRESETS) {
+    const windowFrom = shiftDays(to, -(preset.days - 1))
+    windows[preset.key] = aggregateAdEfficiency(
+      span.filter((r) => r.date >= windowFrom)
+    )
+  }
+  if (hasCustom) {
+    const customSource = customInsideSpan
+      ? span.filter((r) => r.date >= customFrom! && r.date <= customTo!)
+      : customRows.map(toEffRow)
+    windows.custom = aggregateAdEfficiency(customSource)
+  }
+
+  // Thumbnails for every ad on the map (batched — .in() caps around 300 items)
+  const adIds = new Set<string>()
+  for (const ads of Object.values(windows)) {
+    for (const ad of ads || []) adIds.add(ad.adId)
+  }
+  const idList = Array.from(adIds)
+  const BATCH_SIZE = 300
+  const thumbBatches = await Promise.all(
+    Array.from({ length: Math.ceil(idList.length / BATCH_SIZE) }, (_, i) =>
+      fetchAllRows<{ ad_id: string; creative_thumbnail_url: string | null }>(() =>
+        supabase
+          .from("meta_ad_metadata")
+          .select("ad_id, creative_thumbnail_url")
+          .in("ad_id", idList.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE))
+          .not("creative_thumbnail_url", "is", null)
+      )
+    )
+  )
+  const thumbnails: Record<string, string> = {}
+  for (const batch of thumbBatches) {
+    for (const row of batch) {
+      if (row.creative_thumbnail_url) thumbnails[row.ad_id] = row.creative_thumbnail_url
+    }
+  }
+
+  return { windows, thumbnails, keyAction }
 }
 
 // Re-export getClientPlatforms from types for backwards compat

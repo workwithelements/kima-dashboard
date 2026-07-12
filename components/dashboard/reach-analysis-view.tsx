@@ -43,6 +43,8 @@ import {
 import { deriveReachEvents } from "@/lib/utils/reach-events"
 import AnnotationsBar, { type Annotation } from "@/components/ui/annotations-bar"
 import type { DatePreset } from "@/lib/utils/dates"
+import ReachEfficiencySection from "@/components/dashboard/reach-efficiency-section"
+import type { AdEfficiencyRow, WindowKey } from "@/lib/utils/reach-efficiency"
 
 type ReachRow = {
   date: string
@@ -71,6 +73,15 @@ type Props = {
   annotations?: Annotation[]
   /** Read-only (public share view) — hides annotation add/delete controls. */
   readOnly?: boolean
+  /** Per-ad reach efficiency aggregates for the CPMr report section. */
+  efficiency?: {
+    windows: Partial<Record<WindowKey, AdEfficiencyRow[]>>
+    thumbnails: Record<string, string>
+    keyAction: string
+    initialWindow?: WindowKey
+    customFrom?: string
+    customTo?: string
+  }
 }
 
 const GRANULARITY_OPTIONS: { value: Granularity; label: string }[] = [
@@ -91,6 +102,7 @@ export default function ReachAnalysisView({
   lifetimeRows,
   annotations: initialAnnotations = [],
   readOnly = false,
+  efficiency,
 }: Props) {
   const [granularity, setGranularity] = useState<Granularity>("day")
   const [annotations, setAnnotations] = useState<Annotation[]>(initialAnnotations)
@@ -424,6 +436,20 @@ export default function ReachAnalysisView({
         </Card>
       </div>
 
+      {/* CPMr report — per-ad reach efficiency map + keep-on/off card rails */}
+      {efficiency && (
+        <div className="border-t border-neutral-800 pt-6">
+          <ReachEfficiencySection
+            windows={efficiency.windows}
+            thumbnails={efficiency.thumbnails}
+            keyAction={efficiency.keyAction}
+            currency={currency}
+            initialWindow={efficiency.initialWindow}
+            customFrom={efficiency.customFrom}
+            customTo={efficiency.customTo}
+          />
+        </div>
+      )}
     </div>
   )
 }

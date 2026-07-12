@@ -15,6 +15,19 @@ export function fmtCurrency(n: number, currency = "GBP"): string {
   return `${symbol}${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+/** Compact currency: abbreviates from 1k up ("£5.1k", "£1.2M"), 2dp below. */
+export function fmtCurrencyCompact(n: number, currency = "GBP"): string {
+  if (!isFinite(n)) return "—"
+  const symbol = currency === "GBP" ? "£" : currency === "USD" ? "$" : "€"
+  if (Math.abs(n) >= 1_000_000) {
+    return `${symbol}${(n / 1_000_000).toFixed(1)}M`
+  }
+  if (Math.abs(n) >= 1_000) {
+    return `${symbol}${(n / 1_000).toFixed(1)}k`
+  }
+  return `${symbol}${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
 export function fmtCurrencyFull(n: number, currency = "GBP"): string {
   if (!isFinite(n)) return "—"
   const symbol = currency === "GBP" ? "£" : currency === "USD" ? "$" : "€"

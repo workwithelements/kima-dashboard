@@ -19,6 +19,7 @@ import type { NamingConfig } from "@/lib/utils/ad-name-parser"
 import type { MetaDemographicsRow, MetaPlacementsRow, MetaDailyRow, GoogleAdsDailyRow, ShopifyDailyOrdersRow, ShopifyAttributionRow, AdditionalSpendEntry } from "@/lib/utils/types"
 import type { GoogleAdsQualityData } from "@/lib/utils/quality-score"
 import type { FunnelView } from "@/lib/utils/funnel-views"
+import type { AdEfficiencyRow, WindowKey } from "@/lib/utils/reach-efficiency"
 
 type Tab = "performance" | "pacing" | "reach"
 
@@ -67,6 +68,14 @@ type Props = {
   reachBaselineReach: number
   reachComparisonRows: { date: string; reach: number; impressions: number; spend?: number }[]
   reachLifetimeRows: { date: string; reach: number; impressions: number; spend?: number; adset_id?: string; adset_name?: string }[]
+  reachEfficiency?: {
+    windows: Partial<Record<WindowKey, AdEfficiencyRow[]>>
+    thumbnails: Record<string, string>
+    keyAction: string
+    initialWindow?: WindowKey
+    customFrom?: string
+    customTo?: string
+  }
   /* Pacing */
   pacing: PacingResult
   monthlyBudget: number | null
@@ -293,6 +302,7 @@ export default function ClientDashboard(props: Props) {
             currency={currency}
             comparisonRows={props.reachComparisonRows}
             readOnly
+            efficiency={props.reachEfficiency}
           />
         )}
       </div>
