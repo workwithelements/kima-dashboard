@@ -108,13 +108,18 @@ function CreativeCard({
   isNew?: boolean
 }) {
   const [imgError, setImgError] = useState(false)
+  const imgRef = useRef<HTMLImageElement>(null)
   const [showTagDropdown, setShowTagDropdown] = useState(false)
   const [tagAnchor, setTagAnchor] = useState<DOMRect | null>(null)
   const cls = CLASSIFICATIONS[ad.classification.type]
 
-  // Reset error state when thumbnail URL changes (e.g. after sync refresh)
+  // Reset error state when thumbnail URL changes (e.g. after sync refresh).
+  // Cards are server-rendered, so an image can fail before hydration attaches
+  // the onError listener — re-check completeness after mount.
   useEffect(() => {
     setImgError(false)
+    const el = imgRef.current
+    if (el && el.complete && el.naturalWidth === 0) setImgError(true)
   }, [thumbnailUrl])
 
   const assignedTagIds = new Set((tags || []).map((t) => t.id))
@@ -129,8 +134,9 @@ function CreativeCard({
       <div className="aspect-video bg-neutral-800 relative flex items-center justify-center">
         {thumbnailUrl && !imgError ? (
           <img
+            ref={imgRef}
             src={thumbnailUrl}
-            alt={ad.adName}
+            alt=""
             className="absolute inset-0 w-full h-full object-contain"
             loading="lazy"
             referrerPolicy="no-referrer"

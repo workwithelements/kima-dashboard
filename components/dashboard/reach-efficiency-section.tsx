@@ -108,6 +108,21 @@ export default function ReachEfficiencySection({
   const thresholds = useMemo(() => computeThresholds(filtered), [filtered])
   const points = useMemo(() => classifyAds(filtered, thresholds), [filtered, thresholds])
 
+  // Meta CDN thumbnail URLs expire after ~24h, so route every ad through
+  // /api/thumbnail, which refreshes expired URLs from the Graph API — even for
+  // ads with no synced thumbnail yet. Non-http URLs (test fixtures) pass through.
+  const proxiedThumbnails = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const ad of ads) {
+      const raw = thumbnails[ad.adId]
+      map[ad.adId] =
+        raw && !raw.startsWith("http")
+          ? raw
+          : `/api/thumbnail?ad_id=${encodeURIComponent(ad.adId)}`
+    }
+    return map
+  }, [ads, thumbnails])
+
   const efficient = useMemo(
     () =>
       points
@@ -218,7 +233,7 @@ export default function ReachEfficiencySection({
           <ReachEfficiencyScatter
             points={points}
             thresholds={thresholds}
-            thumbnails={thumbnails}
+            thumbnails={proxiedThumbnails}
             currency={currency}
             height={420}
           />
@@ -235,7 +250,7 @@ export default function ReachEfficiencySection({
         subtitle="low CPMr + low CPA — scale these"
         emptyText="No ads currently qualify — they need top-quartile spend, below-median CPMr and CPA under the split."
         points={efficient}
-        thumbnails={thumbnails}
+        thumbnails={proxiedThumbnails}
         currency={currency}
         cpaSplit={thresholds.cpaSplit}
         accent="text-emerald-400"
@@ -245,7 +260,7 @@ export default function ReachEfficiencySection({
         subtitle="cheap reach at scale, high CPA — don't pause"
         emptyText="No reach plays in this window."
         points={reachPlays}
-        thumbnails={thumbnails}
+        thumbnails={proxiedThumbnails}
         currency={currency}
         cpaSplit={thresholds.cpaSplit}
         accent="text-amber-400"
@@ -399,8 +414,17 @@ function RailCard({
   accent: string
 }) {
   const [imgError, setImgError] = useState(false)
+  const imgRef = useRef<HTMLImageElement>(null)
   const cls = CLASSIFICATION_CONFIG[point.classification]
   const cpaGood = point.cpa !== null && point.cpa <= cpaSplit
+
+  // Cards are server-rendered, so an image can fail before hydration attaches
+  // the onError listener — re-check after mount, and reset when the URL changes
+  useEffect(() => {
+    setImgError(false)
+    const el = imgRef.current
+    if (el && el.complete && el.naturalWidth === 0) setImgError(true)
+  }, [thumbnailUrl])
 
   return (
     <div className="flex w-56 shrink-0 flex-col overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900 transition-colors hover:border-neutral-700">
@@ -408,8 +432,9 @@ function RailCard({
         {thumbnailUrl && !imgError ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
+            ref={imgRef}
             src={thumbnailUrl}
-            alt={point.adName}
+            alt=""
             className="absolute inset-0 h-full w-full object-cover"
             loading="lazy"
             referrerPolicy="no-referrer"
