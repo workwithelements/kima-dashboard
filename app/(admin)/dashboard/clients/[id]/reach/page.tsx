@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic"
 
-import { fetchReachData, fetchReachEfficiencyData } from "@/lib/data/fetch-client-data"
+import { fetchReachData, fetchReachEfficiencyData, fetchCpmrFeedback } from "@/lib/data/fetch-client-data"
 import { createServiceClient } from "@/lib/supabase/server"
 import { getPresetRange, getComparisonRange } from "@/lib/utils/dates"
 import type { DatePreset } from "@/lib/utils/dates"
@@ -44,7 +44,7 @@ export default async function ReachAnalysisPage({ params, searchParams }: Props)
       ? { from: searchParams.rfrom, to: searchParams.rto }
       : undefined
 
-  const [data, efficiency, annotationsRes] = await Promise.all([
+  const [data, efficiency, cpmrFeedback, annotationsRes] = await Promise.all([
     fetchReachData(
       params.id,
       range.from,
@@ -58,6 +58,7 @@ export default async function ReachAnalysisPage({ params, searchParams }: Props)
       reportCustom?.from,
       reportCustom?.to
     ),
+    fetchCpmrFeedback(params.id),
     supabase
       .from("annotations")
       .select("id, date, text, created_at")
@@ -97,6 +98,8 @@ export default async function ReachAnalysisPage({ params, searchParams }: Props)
         initialWindow: reportWindow,
         customFrom: reportCustom?.from,
         customTo: reportCustom?.to,
+        feedback: cpmrFeedback.feedback,
+        typeRates: cpmrFeedback.typeRates,
       }}
     />
   )

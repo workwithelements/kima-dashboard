@@ -15,6 +15,8 @@ import {
   type AdEfficiencyRow,
   type WindowKey,
 } from "@/lib/utils/reach-efficiency"
+import ReachRecommendations from "@/components/dashboard/reach-recommendations"
+import type { CpmrFeedbackRow, TypeRates } from "@/lib/utils/reach-recommendations"
 
 const ChartPlaceholder = () => (
   <div className="h-[420px] animate-pulse rounded bg-neutral-800/50" />
@@ -33,6 +35,11 @@ type Props = {
   initialWindow?: WindowKey
   customFrom?: string
   customTo?: string
+  /** Recommendation feedback loop — omit to hide the panel */
+  clientId?: string
+  initialFeedback?: CpmrFeedbackRow[]
+  typeRates?: TypeRates
+  readOnly?: boolean
 }
 
 export default function ReachEfficiencySection({
@@ -43,6 +50,10 @@ export default function ReachEfficiencySection({
   initialWindow = "30d",
   customFrom,
   customTo,
+  clientId,
+  initialFeedback = [],
+  typeRates = {},
+  readOnly = false,
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -220,6 +231,21 @@ export default function ReachEfficiencySection({
           />
         </div>
       </div>
+
+      {/* Recommended actions — top calls from the same logic, with feedback loop */}
+      {clientId && points.length > 0 && (
+        <ReachRecommendations
+          points={points}
+          thresholds={thresholds}
+          thumbnails={proxiedThumbnails}
+          currency={currency}
+          clientId={clientId}
+          windowKey={windowKey}
+          initialFeedback={initialFeedback}
+          typeRates={typeRates}
+          readOnly={readOnly}
+        />
+      )}
 
       {/* Reach efficiency map */}
       <Card>

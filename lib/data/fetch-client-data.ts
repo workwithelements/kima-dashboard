@@ -16,6 +16,7 @@ import {
   type EfficiencyDailyRow,
   type WindowKey,
 } from "@/lib/utils/reach-efficiency"
+import type { ActionType, CpmrFeedbackRow, TypeRates } from "@/lib/utils/reach-recommendations"
 
 /** Cache TTL for dashboard data fetches (5 minutes) */
 const CACHE_TTL_SECONDS = 300
@@ -1099,6 +1100,46 @@ async function _fetchReachEfficiencyDataInner(
   }
 
   return { windows, thumbnails, keyAction }
+}
+
+export type CpmrFeedbackData = {
+  feedback: CpmrFeedbackRow[]
+  typeRates: TypeRates
+}
+
+/**
+ * Recommendation feedback for the CPMr report: the client's resolved
+ * recommendations plus global acceptance counts per action type (the
+ * cross-client learning signal). Uncached — the panel must reflect a
+ * just-recorded response on reload.
+ */
+export async function fetchCpmrFeedback(clientId: string): Promise<CpmrFeedbackData> {
+  try {
+    const supabase = createServiceClient()
+    const [feedbackRes, globalRes] = await Promise.all([
+      supabase
+        .from("cpmr_recommendation_feedback")
+        .select("ad_id, ad_name, action_type, status, feedback, created_at")
+        .eq("client_id", clientId)
+        .order("created_at", { ascending: false }),
+      supabase.from("cpmr_recommendation_feedback").select("action_type, status"),
+    ])
+
+    const typeRates: TypeRates = {}
+    for (const row of (globalRes.data || []) as { action_type: ActionType; status: string }[]) {
+      const entry = (typeRates[row.action_type] ||= { actioned: 0, dismissed: 0 })
+      if (row.status === "actioned") entry.actioned++
+      else entry.dismissed++
+    }
+
+    return {
+      feedback: (feedbackRes.data || []) as CpmrFeedbackRow[],
+      typeRates,
+    }
+  } catch {
+    // Table may not exist yet — the panel degrades to unweighted ranking
+    return { feedback: [], typeRates: {} }
+  }
 }
 
 // Re-export getClientPlatforms from types for backwards compat
