@@ -20,6 +20,7 @@ import type { MetaDemographicsRow, MetaPlacementsRow, MetaDailyRow, GoogleAdsDai
 import type { GoogleAdsQualityData } from "@/lib/utils/quality-score"
 import type { FunnelView } from "@/lib/utils/funnel-views"
 import type { AdEfficiencyRow, WindowKey } from "@/lib/utils/reach-efficiency"
+import type { CpmrFeedbackRow, TypeRates } from "@/lib/utils/reach-recommendations"
 
 type Tab = "performance" | "pacing" | "reach"
 
@@ -75,6 +76,8 @@ type Props = {
     initialWindow?: WindowKey
     customFrom?: string
     customTo?: string
+    feedback?: CpmrFeedbackRow[]
+    typeRates?: TypeRates
   }
   /* Pacing */
   pacing: PacingResult
