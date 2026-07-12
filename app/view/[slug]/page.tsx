@@ -9,6 +9,7 @@ import {
   fetchCreativeData,
   fetchReachData,
   fetchReachEfficiencyData,
+  fetchCpmrFeedback,
   fetchBreakdownsData,
   fetchGoogleAdsData,
   fetchGoogleAdsQualityData,
@@ -109,6 +110,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     creativeData,
     reachData,
     reachEfficiency,
+    cpmrFeedback,
     breakdownsData,
     googleAdsRows,
     googleAdsComparisonRows,
@@ -126,6 +128,7 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
     fetchCreativeData(client.id, range.from, range.to),
     fetchReachData(client.id, range.from, range.to, compRange?.from, compRange?.to),
     fetchReachEfficiencyData(client.id, range.to, reportCustom?.from, reportCustom?.to),
+    fetchCpmrFeedback(client.id),
     fetchBreakdownsData(client.id, range.from, range.to),
     hasGoogle ? fetchGoogleAdsData(client.id, range.from, range.to) : Promise.resolve([]),
     hasGoogle && compRange ? fetchGoogleAdsData(client.id, compRange.from, compRange.to) : Promise.resolve([]),
@@ -232,6 +235,8 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
         initialWindow: reportWindow,
         customFrom: reportCustom?.from,
         customTo: reportCustom?.to,
+        feedback: cpmrFeedback.feedback,
+        typeRates: cpmrFeedback.typeRates,
       }}
       /* Pacing tab */
       pacing={pacing}
