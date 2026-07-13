@@ -143,7 +143,10 @@ export default function UnitEconomicsView({
     }
     return [...filtered].sort((a, b) => {
       // no-data rows always sink to the bottom
-      if (a.noData !== b.noData) return a.noData ? 1 : -1
+      if (a.noData || b.noData) {
+        if (a.noData && b.noData) return 0
+        return a.noData ? 1 : -1
+      }
       return (val(a) - val(b)) * dir
     })
   }, [rows, statusFilter, sortKey, sortDesc, assumptions.horizonMonths])
