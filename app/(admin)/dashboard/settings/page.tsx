@@ -4,8 +4,7 @@ import { createClient, createServiceClient } from "@/lib/supabase/server"
 import type { CustomMetric } from "@/lib/utils/types"
 import CustomMetricsManager from "@/components/settings/custom-metrics-manager"
 import TeamManager from "@/components/settings/team-manager"
-
-const ADMIN_EMAIL = "tom@workwithelements.com"
+import { ADMIN_EMAIL } from "@/lib/auth/admin"
 
 export default async function SettingsPage() {
   const supabase = createServiceClient()

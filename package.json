@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "sync:shopify": "tsx scripts/sync-shopify.ts"
+    "sync:shopify": "tsx scripts/sync-shopify.ts",
+    "test:unit-economics": "tsx scripts/test-unit-economics.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.86.1",

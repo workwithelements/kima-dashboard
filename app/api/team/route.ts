@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient } from "@/lib/supabase/server"
-
-const ADMIN_EMAIL = "tom@workwithelements.com"
+import { ADMIN_EMAIL } from "@/lib/auth/admin"
 
 /** Verify the caller is the admin user */
 async function verifyAdmin(request: NextRequest) {

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { ADMIN_EMAIL } from "@/lib/auth/admin"
 
 type TeamMember = {
   id: string
@@ -8,8 +9,6 @@ type TeamMember = {
   created_at: string
   last_sign_in_at: string | null
 }
-
-const ADMIN_EMAIL = "tom@workwithelements.com"
 
 export default function TeamManager({
   initialMembers,
