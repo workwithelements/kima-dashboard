@@ -28,6 +28,21 @@ export function fmtCurrencyCompact(n: number, currency = "GBP"): string {
   return `${symbol}${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+/** Whole-currency-unit display ("$1,234"), abbreviated from 100k up. */
+export function fmtCurrencyWhole(n: number, currency = "GBP"): string {
+  if (!isFinite(n)) return "—"
+  const symbol = currency === "GBP" ? "£" : currency === "USD" ? "$" : "€"
+  const sign = n < 0 ? "−" : ""
+  const abs = Math.abs(n)
+  if (abs >= 1_000_000) {
+    return `${sign}${symbol}${(abs / 1_000_000).toFixed(1)}M`
+  }
+  if (abs >= 100_000) {
+    return `${sign}${symbol}${(abs / 1_000).toFixed(1)}k`
+  }
+  return `${sign}${symbol}${Math.round(abs).toLocaleString("en-GB")}`
+}
+
 export function fmtCurrencyFull(n: number, currency = "GBP"): string {
   if (!isFinite(n)) return "—"
   const symbol = currency === "GBP" ? "£" : currency === "USD" ? "$" : "€"

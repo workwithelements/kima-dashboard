@@ -16,6 +16,12 @@ import {
   type EfficiencyDailyRow,
   type WindowKey,
 } from "@/lib/utils/reach-efficiency"
+import {
+  assumptionsFromRow,
+  DEFAULT_LTV_ASSUMPTIONS,
+  type EconDailyRow,
+  type LtvAssumptions,
+} from "@/lib/utils/unit-economics"
 
 /** Cache TTL for dashboard data fetches (5 minutes) */
 const CACHE_TTL_SECONDS = 300
@@ -1259,5 +1265,83 @@ export async function fetchAdVolumeData(clientId: string): Promise<AdVolumeData 
     keyAction,
     newCreativePerMonth,
     activeAdsNow: active7.size,
+  }
+}
+
+/** Data for the per-client Unit Economics view (Alexia). */
+export type UnitEconomicsData = {
+  clientId: string
+  clientName: string
+  currency: string
+  /** Per-ad daily rows for the selected range. */
+  dailyRows: EconDailyRow[]
+  assumptions: LtvAssumptions
+  assumptionsUpdatedAt: string | null
+  assumptionsUpdatedBy: string | null
+  /** False until the applications_submitted migration has been run. */
+  applicationsColumnPresent: boolean
+}
+
+/**
+ * Fetch everything the Unit Economics view needs: per-ad daily performance
+ * for the range plus the client's LTV-model assumptions.
+ *
+ * The applications_submitted column may not exist yet (its migration is run
+ * manually and the Meta sync populates it separately), so its presence is
+ * probed first — fetchAllRows swallows query errors, which would otherwise
+ * turn a missing column into a silently empty dataset.
+ */
+export async function fetchUnitEconomicsData(
+  clientId: string,
+  from: string,
+  to: string
+): Promise<UnitEconomicsData | null> {
+  const supabase = createServiceClient()
+
+  const { data: client } = await supabase
+    .from("clients")
+    .select("id, name, currency_code")
+    .eq("id", clientId)
+    .single()
+  if (!client) return null
+
+  const probe = await supabase
+    .from("meta_daily_performance")
+    .select("applications_submitted")
+    .eq("client_id", clientId)
+    .limit(1)
+  const hasAppsColumn = !probe.error
+
+  const baseColumns = "date, campaign_name, ad_id, ad_name, spend, purchases"
+  const columns = hasAppsColumn ? `${baseColumns}, applications_submitted` : baseColumns
+
+  const [dailyRows, assumptionsRes] = await Promise.all([
+    fetchAllRows<EconDailyRow>(() =>
+      supabase
+        .from("meta_daily_performance")
+        .select(columns)
+        .eq("client_id", clientId)
+        .gte("date", from)
+        .lte("date", to)
+        .order("date")
+    ),
+    supabase
+      .from("client_ltv_assumptions")
+      .select("*")
+      .eq("client_id", clientId)
+      .maybeSingle(),
+  ])
+
+  const assumptionsRow = assumptionsRes.data as Record<string, unknown> | null
+
+  return {
+    clientId: client.id as string,
+    clientName: client.name as string,
+    currency: ((client as { currency_code?: string | null }).currency_code) || "GBP",
+    dailyRows,
+    assumptions: assumptionsRow ? assumptionsFromRow(assumptionsRow) : DEFAULT_LTV_ASSUMPTIONS,
+    assumptionsUpdatedAt: (assumptionsRow?.updated_at as string | undefined) ?? null,
+    assumptionsUpdatedBy: (assumptionsRow?.updated_by as string | undefined) ?? null,
+    applicationsColumnPresent: hasAppsColumn,
   }
 }

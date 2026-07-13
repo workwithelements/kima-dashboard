@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 
+export { ADMIN_EMAIL, isAdminEmail } from "./admin"
+
 /**
  * Authenticate the current request via Supabase session cookie.
  * Returns the user object or a 401 NextResponse.
