@@ -11,11 +11,14 @@ import { shiftDays, shiftMonths } from "@/lib/utils/dates"
 import type { NamingConfig } from "@/lib/utils/ad-name-parser"
 import {
   aggregateAdEfficiency,
+  resolveAdsetConversionEvents,
+  CONVERSION_EVENT_PRIORITY,
   WINDOW_PRESETS,
   type AdEfficiencyRow,
   type EfficiencyDailyRow,
   type WindowKey,
 } from "@/lib/utils/reach-efficiency"
+import type { ActionType, CpmrFeedbackRow, TypeRates } from "@/lib/utils/reach-recommendations"
 
 /** Cache TTL for dashboard data fetches (5 minutes) */
 const CACHE_TTL_SECONDS = 300
@@ -1014,9 +1017,14 @@ async function _fetchReachEfficiencyDataInner(
     .eq("client_id", clientId)
     .maybeSingle()
   const keyAction = (scorecard?.key_action as string | undefined) || "purchases"
-  const convColumn = KEY_ACTION_COLUMN[keyAction] || "purchases"
+  const keyActionColumn = KEY_ACTION_COLUMN[keyAction] || "purchases"
 
-  const EFF_COLS = `date, ad_id, ad_name, adset_id, adset_name, campaign_id, campaign_name, spend, reach, impressions, purchases, purchase_value, video_plays${convColumn === "purchases" ? "" : `, ${convColumn}`}`
+  // All conversion events, so each ad set's CPA can be pinned to its own goal
+  // event (key action first, then deepest-funnel event with conversions)
+  const EVENT_COLUMNS = Array.from(
+    new Set([...CONVERSION_EVENT_PRIORITY, keyActionColumn])
+  )
+  const EFF_COLS = `date, ad_id, ad_name, adset_id, adset_name, campaign_id, campaign_name, spend, reach, impressions, purchase_value, video_plays, ${EVENT_COLUMNS.join(", ")}`
 
   const from90 = shiftDays(to, -89)
   const fetchSpan = (spanFrom: string, spanTo: string) =>
@@ -1041,36 +1049,43 @@ async function _fetchReachEfficiencyDataInner(
       : Promise.resolve([] as Record<string, any>[]),
   ])
 
-  const toEffRow = (r: Record<string, any>): EfficiencyDailyRow & { date: string } => ({
-    date: r.date,
-    ad_id: r.ad_id,
-    ad_name: r.ad_name,
-    adset_id: r.adset_id,
-    adset_name: r.adset_name,
-    campaign_id: r.campaign_id,
-    campaign_name: r.campaign_name,
-    spend: r.spend,
-    reach: r.reach,
-    impressions: r.impressions,
-    conversions: Number(r[convColumn]) || 0,
-    revenue: r.purchase_value,
-    video_plays: r.video_plays,
-  })
+  const toEffRow = (r: Record<string, any>): EfficiencyDailyRow & { date: string } => {
+    const events: Record<string, number> = {}
+    for (const col of EVENT_COLUMNS) {
+      const n = Number(r[col]) || 0
+      if (n) events[col] = n
+    }
+    return {
+      date: r.date,
+      ad_id: r.ad_id,
+      ad_name: r.ad_name,
+      adset_id: r.adset_id,
+      adset_name: r.adset_name,
+      campaign_id: r.campaign_id,
+      campaign_name: r.campaign_name,
+      spend: r.spend,
+      reach: r.reach,
+      impressions: r.impressions,
+      events,
+      revenue: r.purchase_value,
+      video_plays: r.video_plays,
+    }
+  }
 
   const span = spanRows.map(toEffRow)
+  const buildWindow = (rows: (EfficiencyDailyRow & { date: string })[]) =>
+    resolveAdsetConversionEvents(aggregateAdEfficiency(rows), keyActionColumn)
 
   const windows: Partial<Record<WindowKey, AdEfficiencyRow[]>> = {}
   for (const preset of WINDOW_PRESETS) {
     const windowFrom = shiftDays(to, -(preset.days - 1))
-    windows[preset.key] = aggregateAdEfficiency(
-      span.filter((r) => r.date >= windowFrom)
-    )
+    windows[preset.key] = buildWindow(span.filter((r) => r.date >= windowFrom))
   }
   if (hasCustom) {
     const customSource = customInsideSpan
       ? span.filter((r) => r.date >= customFrom! && r.date <= customTo!)
       : customRows.map(toEffRow)
-    windows.custom = aggregateAdEfficiency(customSource)
+    windows.custom = buildWindow(customSource)
   }
 
   // Thumbnails for every ad on the map (batched — .in() caps around 300 items)
@@ -1099,6 +1114,46 @@ async function _fetchReachEfficiencyDataInner(
   }
 
   return { windows, thumbnails, keyAction }
+}
+
+export type CpmrFeedbackData = {
+  feedback: CpmrFeedbackRow[]
+  typeRates: TypeRates
+}
+
+/**
+ * Recommendation feedback for the CPMr report: the client's resolved
+ * recommendations plus global acceptance counts per action type (the
+ * cross-client learning signal). Uncached — the panel must reflect a
+ * just-recorded response on reload.
+ */
+export async function fetchCpmrFeedback(clientId: string): Promise<CpmrFeedbackData> {
+  try {
+    const supabase = createServiceClient()
+    const [feedbackRes, globalRes] = await Promise.all([
+      supabase
+        .from("cpmr_recommendation_feedback")
+        .select("ad_id, ad_name, action_type, status, feedback, created_at")
+        .eq("client_id", clientId)
+        .order("created_at", { ascending: false }),
+      supabase.from("cpmr_recommendation_feedback").select("action_type, status"),
+    ])
+
+    const typeRates: TypeRates = {}
+    for (const row of (globalRes.data || []) as { action_type: ActionType; status: string }[]) {
+      const entry = (typeRates[row.action_type] ||= { actioned: 0, dismissed: 0 })
+      if (row.status === "actioned") entry.actioned++
+      else entry.dismissed++
+    }
+
+    return {
+      feedback: (feedbackRes.data || []) as CpmrFeedbackRow[],
+      typeRates,
+    }
+  } catch {
+    // Table may not exist yet — the panel degrades to unweighted ranking
+    return { feedback: [], typeRates: {} }
+  }
 }
 
 // Re-export getClientPlatforms from types for backwards compat

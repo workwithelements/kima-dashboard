@@ -45,6 +45,7 @@ import AnnotationsBar, { type Annotation } from "@/components/ui/annotations-bar
 import type { DatePreset } from "@/lib/utils/dates"
 import ReachEfficiencySection from "@/components/dashboard/reach-efficiency-section"
 import type { AdEfficiencyRow, WindowKey } from "@/lib/utils/reach-efficiency"
+import type { CpmrFeedbackRow, TypeRates } from "@/lib/utils/reach-recommendations"
 
 type ReachRow = {
   date: string
@@ -81,6 +82,9 @@ type Props = {
     initialWindow?: WindowKey
     customFrom?: string
     customTo?: string
+    /** Recommendation feedback loop */
+    feedback?: CpmrFeedbackRow[]
+    typeRates?: TypeRates
   }
 }
 
@@ -447,6 +451,10 @@ export default function ReachAnalysisView({
             initialWindow={efficiency.initialWindow}
             customFrom={efficiency.customFrom}
             customTo={efficiency.customTo}
+            clientId={clientId}
+            initialFeedback={efficiency.feedback}
+            typeRates={efficiency.typeRates}
+            readOnly={readOnly}
           />
         </div>
       )}

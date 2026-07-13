@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic"
+
 import { NextRequest, NextResponse } from "next/server"
 import { createClient, createServiceClient } from "@/lib/supabase/server"
 
@@ -131,11 +133,22 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Caching must be `private` (browser-only, keyed per full URL): Netlify's
+  // CDN ignores query strings in its cache key unless told otherwise, so a
+  // `public` response for one ad_id gets served for EVERY ad_id (all previews
+  // show the same image) — and a shared cache would also hand auth-gated
+  // thumbnails to unauthenticated visitors. Netlify-Vary is belt-and-braces
+  // for any layer that does shared-cache the response.
+  const VARY_HEADERS = { "Netlify-Vary": "query=ad_id", Vary: "Cookie" }
+
   // Nothing resolvable — 404 so the client's onError placeholder renders
   if (!imageRes) {
     return NextResponse.json(
       { error: "no thumbnail available" },
-      { status: 404, headers: { "Cache-Control": "public, max-age=300" } }
+      {
+        status: 404,
+        headers: { "Cache-Control": "private, max-age=300", ...VARY_HEADERS },
+      }
     )
   }
 
@@ -147,7 +160,8 @@ export async function GET(request: NextRequest) {
     status: 200,
     headers: {
       "Content-Type": contentType,
-      "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+      "Cache-Control": "private, max-age=3600, stale-while-revalidate=86400",
+      ...VARY_HEADERS,
       "X-Thumbnail-Source": imageRes.url.includes("fbcdn") ? "cached" : "refreshed",
     },
   })
