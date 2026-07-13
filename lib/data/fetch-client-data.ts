@@ -18,7 +18,9 @@ import {
 } from "@/lib/utils/reach-efficiency"
 import {
   assumptionsFromRow,
+  groupEconDailyRows,
   DEFAULT_LTV_ASSUMPTIONS,
+  type AdEconGroup,
   type EconDailyRow,
   type LtvAssumptions,
 } from "@/lib/utils/unit-economics"
@@ -1273,8 +1275,8 @@ export type UnitEconomicsData = {
   clientId: string
   clientName: string
   currency: string
-  /** Per-ad daily rows for the selected range. */
-  dailyRows: EconDailyRow[]
+  /** Per-ad sums for the selected range — one small object per ad. */
+  adGroups: AdEconGroup[]
   assumptions: LtvAssumptions
   assumptionsUpdatedAt: string | null
   assumptionsUpdatedBy: string | null
@@ -1283,13 +1285,49 @@ export type UnitEconomicsData = {
 }
 
 /**
- * Fetch everything the Unit Economics view needs: per-ad daily performance
- * for the range plus the client's LTV-model assumptions.
+ * Per-ad sums cached like the other per-client fetchers (5-min TTL); the
+ * assumptions row is deliberately NOT cached so edits show up on reload.
  *
  * The applications_submitted column may not exist yet (its migration is run
  * manually and the Meta sync populates it separately), so its presence is
  * probed first — fetchAllRows swallows query errors, which would otherwise
- * turn a missing column into a silently empty dataset.
+ * turn a missing column into a silently empty dataset. Only the Postgres
+ * undefined-column error (42703) counts as missing; any other probe error is
+ * assumed transient so real applications data isn't silently dropped.
+ */
+async function _fetchAdEconGroups(
+  clientId: string,
+  from: string,
+  to: string
+): Promise<{ adGroups: AdEconGroup[]; hasAppsColumn: boolean }> {
+  const supabase = createServiceClient()
+
+  const probe = await supabase
+    .from("meta_daily_performance")
+    .select("applications_submitted")
+    .eq("client_id", clientId)
+    .limit(1)
+  const hasAppsColumn = probe.error?.code !== "42703"
+
+  const baseColumns = "date, campaign_name, ad_id, ad_name, spend, purchases"
+  const columns = hasAppsColumn ? `${baseColumns}, applications_submitted` : baseColumns
+
+  const dailyRows = await fetchAllRows<EconDailyRow>(() =>
+    supabase
+      .from("meta_daily_performance")
+      .select(columns)
+      .eq("client_id", clientId)
+      .gte("date", from)
+      .lte("date", to)
+      .order("date")
+  )
+
+  return { adGroups: groupEconDailyRows(dailyRows), hasAppsColumn }
+}
+
+/**
+ * Fetch everything the Unit Economics view needs: per-ad performance sums
+ * for the range plus the client's LTV-model assumptions.
  */
 export async function fetchUnitEconomicsData(
   clientId: string,
@@ -1298,33 +1336,17 @@ export async function fetchUnitEconomicsData(
 ): Promise<UnitEconomicsData | null> {
   const supabase = createServiceClient()
 
-  const { data: client } = await supabase
-    .from("clients")
-    .select("id, name, currency_code")
-    .eq("id", clientId)
-    .single()
-  if (!client) return null
-
-  const probe = await supabase
-    .from("meta_daily_performance")
-    .select("applications_submitted")
-    .eq("client_id", clientId)
-    .limit(1)
-  const hasAppsColumn = !probe.error
-
-  const baseColumns = "date, campaign_name, ad_id, ad_name, spend, purchases"
-  const columns = hasAppsColumn ? `${baseColumns}, applications_submitted` : baseColumns
-
-  const [dailyRows, assumptionsRes] = await Promise.all([
-    fetchAllRows<EconDailyRow>(() =>
-      supabase
-        .from("meta_daily_performance")
-        .select(columns)
-        .eq("client_id", clientId)
-        .gte("date", from)
-        .lte("date", to)
-        .order("date")
-    ),
+  const [clientRes, groupsRes, assumptionsRes] = await Promise.all([
+    supabase
+      .from("clients")
+      .select("id, name, currency_code")
+      .eq("id", clientId)
+      .single(),
+    unstable_cache(
+      () => _fetchAdEconGroups(clientId, from, to),
+      ["fetchAdEconGroups", clientId, from, to],
+      { revalidate: CACHE_TTL_SECONDS, tags: [`client:${clientId}`] }
+    )(),
     supabase
       .from("client_ltv_assumptions")
       .select("*")
@@ -1332,16 +1354,19 @@ export async function fetchUnitEconomicsData(
       .maybeSingle(),
   ])
 
+  const client = clientRes.data
+  if (!client) return null
+
   const assumptionsRow = assumptionsRes.data as Record<string, unknown> | null
 
   return {
     clientId: client.id as string,
     clientName: client.name as string,
     currency: ((client as { currency_code?: string | null }).currency_code) || "GBP",
-    dailyRows,
+    adGroups: groupsRes.adGroups,
     assumptions: assumptionsRow ? assumptionsFromRow(assumptionsRow) : DEFAULT_LTV_ASSUMPTIONS,
     assumptionsUpdatedAt: (assumptionsRow?.updated_at as string | undefined) ?? null,
     assumptionsUpdatedBy: (assumptionsRow?.updated_by as string | undefined) ?? null,
-    applicationsColumnPresent: hasAppsColumn,
+    applicationsColumnPresent: groupsRes.hasAppsColumn,
   }
 }

@@ -78,18 +78,19 @@ export async function PUT(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
-  const body = await request.json()
+  const body = await request.json().catch(() => null)
+  if (!body || typeof body !== "object") {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
+  }
 
   const cfg: LtvAssumptions = { ...DEFAULT_LTV_ASSUMPTIONS }
   for (const key of Object.keys(cfg) as (keyof LtvAssumptions)[]) {
-    if (body[key] === undefined) {
-      return NextResponse.json({ error: `Missing field: ${key}` }, { status: 400 })
-    }
-    const n = Number(body[key])
-    if (!isFinite(n)) {
+    // Strict number check — Number(null) is 0, which would silently zero a price
+    const v = body[key]
+    if (typeof v !== "number" || !isFinite(v)) {
       return NextResponse.json({ error: `Invalid number for ${key}` }, { status: 400 })
     }
-    cfg[key] = n
+    cfg[key] = v
   }
 
   for (const key of AMOUNT_FIELDS) {

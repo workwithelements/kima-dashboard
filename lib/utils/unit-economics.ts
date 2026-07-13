@@ -12,6 +12,8 @@
  * sampled renewal rates), not booked revenue.
  */
 
+import type { MetaDailyRow } from "./types"
+
 export type LtvAssumptions = {
   /** Annual plan cash collected on day 0 (paid upfront). */
   annualY1Upfront: number
@@ -183,15 +185,25 @@ export function scoreAd(
 }
 
 /** Daily row shape needed from meta_daily_performance. */
-export type EconDailyRow = {
-  date: string
-  ad_id: string
-  ad_name: string
-  campaign_name: string
-  spend: number
-  purchases: number
+export type EconDailyRow = Pick<
+  MetaDailyRow,
+  "date" | "ad_id" | "ad_name" | "campaign_name" | "spend" | "purchases"
+> & {
   /** NULL/undefined = not synced for that day; a number (incl. 0) = real data. */
   applications_submitted?: number | null
+}
+
+/** One ad's raw inputs, summed over the range — small enough to ship to the client. */
+export type AdEconGroup = {
+  adId: string
+  adName: string
+  campaignName: string
+  spend: number
+  purchases: number
+  /** Summed applications across days with synced data. */
+  apps: number
+  /** True when at least one day in range had a non-null applications value. */
+  hasAppsData: boolean
 }
 
 /** Where an ad's annual mix came from. */
@@ -243,20 +255,11 @@ function clamp01(n: number): number {
 }
 
 /**
- * Group daily rows into per-ad inputs, resolve each ad's annual mix
- * (own data → account average → manual fallback), and score every ad.
+ * Group daily rows into per-ad sums. Runs server-side so only one small
+ * object per ad (not every daily row) is serialized to the client view.
  */
-export function aggregateAdEcon(dailyRows: EconDailyRow[], cfg: LtvAssumptions): AdEconResult {
-  type Acc = {
-    adId: string
-    adName: string
-    campaignName: string
-    latestDate: string
-    spend: number
-    purchases: number
-    apps: number
-    hasAppsData: boolean
-  }
+export function groupEconDailyRows(dailyRows: EconDailyRow[]): AdEconGroup[] {
+  type Acc = AdEconGroup & { latestDate: string }
   const byAd = new Map<string, Acc>()
 
   for (const r of dailyRows) {
@@ -289,8 +292,15 @@ export function aggregateAdEcon(dailyRows: EconDailyRow[], cfg: LtvAssumptions):
     }
   }
 
-  const ads = Array.from(byAd.values())
+  return Array.from(byAd.values()).map(({ latestDate: _latestDate, ...group }) => group)
+}
 
+/**
+ * Resolve each ad's annual mix (own data → account average → manual
+ * fallback) and score every ad. Pure — safe to re-run client-side whenever
+ * the assumptions change.
+ */
+export function scoreAdGroups(ads: AdEconGroup[], cfg: LtvAssumptions): AdEconResult {
   // Account-average mix over ads with real applications data
   let appsSum = 0
   let purchasesWithAppsSum = 0
@@ -388,6 +398,11 @@ export function aggregateAdEcon(dailyRows: EconDailyRow[], cfg: LtvAssumptions):
   }
 
   return { rows, summary, accountAnnualMix, applicationsDataAvailable }
+}
+
+/** Convenience composition: group daily rows, then score. */
+export function aggregateAdEcon(dailyRows: EconDailyRow[], cfg: LtvAssumptions): AdEconResult {
+  return scoreAdGroups(groupEconDailyRows(dailyRows), cfg)
 }
 
 export const STATUS_META: Record<AdStatus, { label: string; explanation: string }> = {

@@ -3,9 +3,14 @@
  * Uses GBP (£) as default currency since most Elements clients are UK-based.
  */
 
+/** Display symbol for a client currency code. */
+export function currencySymbol(currency = "GBP"): string {
+  return currency === "GBP" ? "£" : currency === "USD" ? "$" : "€"
+}
+
 export function fmtCurrency(n: number, currency = "GBP"): string {
   if (!isFinite(n)) return "—"
-  const symbol = currency === "GBP" ? "£" : currency === "USD" ? "$" : "€"
+  const symbol = currencySymbol(currency)
   if (Math.abs(n) >= 1_000_000) {
     return `${symbol}${(n / 1_000_000).toFixed(1)}M`
   }
@@ -18,7 +23,7 @@ export function fmtCurrency(n: number, currency = "GBP"): string {
 /** Compact currency: abbreviates from 1k up ("£5.1k", "£1.2M"), 2dp below. */
 export function fmtCurrencyCompact(n: number, currency = "GBP"): string {
   if (!isFinite(n)) return "—"
-  const symbol = currency === "GBP" ? "£" : currency === "USD" ? "$" : "€"
+  const symbol = currencySymbol(currency)
   if (Math.abs(n) >= 1_000_000) {
     return `${symbol}${(n / 1_000_000).toFixed(1)}M`
   }
@@ -31,10 +36,11 @@ export function fmtCurrencyCompact(n: number, currency = "GBP"): string {
 /** Whole-currency-unit display ("$1,234"), abbreviated from 100k up. */
 export function fmtCurrencyWhole(n: number, currency = "GBP"): string {
   if (!isFinite(n)) return "—"
-  const symbol = currency === "GBP" ? "£" : currency === "USD" ? "$" : "€"
+  const symbol = currencySymbol(currency)
   const sign = n < 0 ? "−" : ""
   const abs = Math.abs(n)
-  if (abs >= 1_000_000) {
+  // 999,950+ would render as "1000.0k" in the k branch — promote to M
+  if (abs >= 999_950) {
     return `${sign}${symbol}${(abs / 1_000_000).toFixed(1)}M`
   }
   if (abs >= 100_000) {
@@ -45,7 +51,7 @@ export function fmtCurrencyWhole(n: number, currency = "GBP"): string {
 
 export function fmtCurrencyFull(n: number, currency = "GBP"): string {
   if (!isFinite(n)) return "—"
-  const symbol = currency === "GBP" ? "£" : currency === "USD" ? "$" : "€"
+  const symbol = currencySymbol(currency)
   return `${symbol}${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 

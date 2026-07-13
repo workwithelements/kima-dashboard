@@ -1,16 +1,16 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { memo, useCallback, useMemo, useState } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { Card, MetricCard } from "@/components/ui/card"
 import DateRangePicker from "@/components/ui/date-range-picker"
 import PaybackSparkline from "@/components/charts/payback-sparkline"
 import LtvAssumptionsModal from "@/components/dashboard/ltv-assumptions-modal"
 import {
-  aggregateAdEcon,
+  scoreAdGroups,
   STATUS_META,
+  type AdEconGroup,
   type AdStatus,
-  type EconDailyRow,
   type LtvAssumptions,
   type ScoredAdRow,
 } from "@/lib/utils/unit-economics"
@@ -44,8 +44,8 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "payback", label: "Payback" },
 ]
 
-function fmtPayback(m: number | null): string {
-  if (m === null) return ">24 mo"
+function fmtPayback(m: number | null, horizonMonths: number): string {
+  if (m === null) return `>${horizonMonths} mo`
   if (m === 0) return "day 0"
   return `${m.toFixed(1)} mo`
 }
@@ -60,7 +60,7 @@ function mixSourceNote(row: ScoredAdRow): string | null {
 type Props = {
   clientId: string
   currency: string
-  dailyRows: EconDailyRow[]
+  adGroups: AdEconGroup[]
   initialAssumptions: LtvAssumptions
   initialUpdatedAt: string | null
   initialUpdatedBy: string | null
@@ -74,7 +74,7 @@ type Props = {
 export default function UnitEconomicsView({
   clientId,
   currency,
-  dailyRows,
+  adGroups,
   initialAssumptions,
   initialUpdatedAt,
   initialUpdatedBy,
@@ -114,8 +114,13 @@ export default function UnitEconomicsView({
   }
 
   const { rows, summary, applicationsDataAvailable } = useMemo(
-    () => aggregateAdEcon(dailyRows, assumptions),
-    [dailyRows, assumptions]
+    () => scoreAdGroups(adGroups, assumptions),
+    [adGroups, assumptions]
+  )
+
+  const toggleExpanded = useCallback(
+    (adId: string) => setExpandedAdId((prev) => (prev === adId ? null : adId)),
+    []
   )
 
   const visibleRows = useMemo(() => {
@@ -252,7 +257,7 @@ export default function UnitEconomicsView({
                 : "border-neutral-700 text-neutral-400 hover:text-white"
             }`}
           >
-            All ({rows.length - summary.noDataCount})
+            All ({rows.length})
           </button>
           {STATUS_ORDER.map((s) => (
             <button
@@ -325,21 +330,17 @@ export default function UnitEconomicsView({
                 </td>
               </tr>
             )}
-            {visibleRows.map((r) => {
-              const expanded = expandedAdId === r.adId
-              const note = mixSourceNote(r)
-              return (
-                <FragmentRow
-                  key={r.adId}
-                  row={r}
-                  currency={currency}
-                  ltvCacTarget={assumptions.ltvCacTarget}
-                  expanded={expanded}
-                  note={note}
-                  onToggle={() => setExpandedAdId(expanded ? null : r.adId)}
-                />
-              )
-            })}
+            {visibleRows.map((r) => (
+              <FragmentRow
+                key={r.adId}
+                row={r}
+                currency={currency}
+                ltvCacTarget={assumptions.ltvCacTarget}
+                horizonMonths={assumptions.horizonMonths}
+                expanded={expandedAdId === r.adId}
+                onToggle={toggleExpanded}
+              />
+            ))}
           </tbody>
         </table>
       </Card>
@@ -390,26 +391,27 @@ export default function UnitEconomicsView({
   )
 }
 
-function FragmentRow({
+const FragmentRow = memo(function FragmentRow({
   row: r,
   currency,
   ltvCacTarget,
+  horizonMonths,
   expanded,
-  note,
   onToggle,
 }: {
   row: ScoredAdRow
   currency: string
   ltvCacTarget: number
+  horizonMonths: number
   expanded: boolean
-  note: string | null
-  onToggle: () => void
+  onToggle: (adId: string) => void
 }) {
   const s = r.score
+  const note = mixSourceNote(r)
   return (
     <>
       <tr
-        onClick={onToggle}
+        onClick={() => onToggle(r.adId)}
         className={`cursor-pointer border-b border-neutral-800/60 transition hover:bg-neutral-800/30 ${
           r.noData ? "opacity-40" : ""
         }`}
@@ -453,7 +455,9 @@ function FragmentRow({
             "—"
           )}
         </td>
-        <td className="px-3 py-2.5 text-right tabular-nums">{s ? fmtPayback(s.paybackMonth) : "—"}</td>
+        <td className="px-3 py-2.5 text-right tabular-nums">
+          {s ? fmtPayback(s.paybackMonth, horizonMonths) : "—"}
+        </td>
         <td className="px-2 py-2.5">
           {s && r.cpa !== null && (
             <PaybackSparkline curve={s.curve} cpa={r.cpa} paybackMonth={s.paybackMonth} />
@@ -493,7 +497,7 @@ function FragmentRow({
       )}
     </>
   )
-}
+})
 
 /** The three CAC ceilings with the ad's CPA positioned against them. */
 function CeilingLadder({

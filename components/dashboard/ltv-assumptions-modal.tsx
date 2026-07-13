@@ -6,7 +6,7 @@ import {
   scoreAd,
   type LtvAssumptions,
 } from "@/lib/utils/unit-economics"
-import { fmtCurrencyWhole, fmtDateFull } from "@/lib/utils/format"
+import { currencySymbol, fmtCurrencyWhole, fmtDateFull } from "@/lib/utils/format"
 
 type FieldDef = {
   key: keyof LtvAssumptions
@@ -95,11 +95,13 @@ export default function LtvAssumptionsModal({
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose()
+      // Don't unmount mid-save — the PUT would still land, leaving the
+      // parent's assumptions state out of sync with the DB.
+      if (e.key === "Escape" && !saving) onClose()
     }
     window.addEventListener("keydown", handleKey)
     return () => window.removeEventListener("keydown", handleKey)
-  }, [onClose])
+  }, [onClose, saving])
 
   /** Parse current inputs back into an LtvAssumptions; null when any field is invalid. */
   const draft: LtvAssumptions | null = useMemo(() => {
@@ -174,7 +176,8 @@ export default function LtvAssumptionsModal({
           </div>
           <button
             onClick={onClose}
-            className="rounded p-1 text-neutral-500 transition hover:bg-neutral-800 hover:text-white"
+            disabled={saving}
+            className="rounded p-1 text-neutral-500 transition hover:bg-neutral-800 hover:text-white disabled:opacity-50"
           >
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -198,9 +201,7 @@ export default function LtvAssumptionsModal({
                       </span>
                       <div className="mt-1 flex items-center gap-1.5">
                         {f.kind === "amount" && (
-                          <span className="text-xs text-neutral-500">
-                            {currency === "GBP" ? "£" : currency === "USD" ? "$" : "€"}
-                          </span>
+                          <span className="text-xs text-neutral-500">{currencySymbol(currency)}</span>
                         )}
                         <input
                           type="number"
@@ -251,7 +252,8 @@ export default function LtvAssumptionsModal({
             <div className="flex gap-3">
               <button
                 onClick={onClose}
-                className="rounded-lg border border-neutral-700 px-4 py-2 text-sm text-neutral-400 transition hover:bg-neutral-800 hover:text-white"
+                disabled={saving}
+                className="rounded-lg border border-neutral-700 px-4 py-2 text-sm text-neutral-400 transition hover:bg-neutral-800 hover:text-white disabled:opacity-50"
               >
                 {canEdit ? "Cancel" : "Close"}
               </button>

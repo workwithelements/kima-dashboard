@@ -20,12 +20,21 @@ type Props = {
   }
 }
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
 export default async function UnitEconomicsPage({ params, searchParams }: Props) {
   const preset = (searchParams.preset || "this_month") as DatePreset
-  const range =
-    searchParams.from && searchParams.to
-      ? { from: searchParams.from, to: searchParams.to }
-      : getPresetRange(preset)
+  // Malformed from/to (stale bookmark, hand-edited URL) would make the DB
+  // query error and render as a silently empty view — fall back to the preset.
+  const customValid =
+    searchParams.from &&
+    searchParams.to &&
+    DATE_RE.test(searchParams.from) &&
+    DATE_RE.test(searchParams.to) &&
+    searchParams.from <= searchParams.to
+  const range = customValid
+    ? { from: searchParams.from!, to: searchParams.to! }
+    : getPresetRange(preset)
 
   const supabase = createClient()
   const [data, userRes] = await Promise.all([
@@ -41,7 +50,7 @@ export default async function UnitEconomicsPage({ params, searchParams }: Props)
     <UnitEconomicsView
       clientId={data.clientId}
       currency={data.currency}
-      dailyRows={data.dailyRows}
+      adGroups={data.adGroups}
       initialAssumptions={data.assumptions}
       initialUpdatedAt={data.assumptionsUpdatedAt}
       initialUpdatedBy={data.assumptionsUpdatedBy}
