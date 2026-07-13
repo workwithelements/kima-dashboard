@@ -16,7 +16,7 @@
  * Resolved ads are never re-recommended for the same action.
  */
 
-import type { AdEfficiencyPoint, EfficiencyThresholds } from "./reach-efficiency"
+import { cpaSplitFor, type AdEfficiencyPoint, type EfficiencyThresholds } from "./reach-efficiency"
 
 export type ActionType = "scale" | "pause" | "protect"
 export type FeedbackStatus = "actioned" | "dismissed"
@@ -103,19 +103,21 @@ export function generateRecommendations(
   }
 
   for (const p of points) {
+    // Judge CPA against the split for the ad set's own goal event
+    const split = cpaSplitFor(thresholds, p.conversionEvent)
     if (p.classification === "efficient") {
       // Best-of-both ads: more budget here buys cheap reach that converts
       push("scale", p, p.spend)
     } else if (p.classification === "reachPlay") {
       // Only flag the reach plays someone might actually pause: CPA well past
       // the split (or unmeasurable) despite healthy reach buying
-      if (p.cpa === null || p.cpa > thresholds.cpaSplit * 1.25) {
+      if (p.cpa === null || p.cpa > split * 1.25) {
         push("protect", p, p.spend)
       }
     } else if (
       p.spend >= thresholds.spendMin &&
       p.cpmr > thresholds.cpmrMax &&
-      (p.cpa === null || p.cpa > thresholds.cpaSplit)
+      (p.cpa === null || p.cpa > split)
     ) {
       // Top-quartile spend buying expensive reach with a bad CPA — failing
       // both jobs; the reallocation candidates

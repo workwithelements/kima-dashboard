@@ -11,6 +11,8 @@ import { shiftDays, shiftMonths } from "@/lib/utils/dates"
 import type { NamingConfig } from "@/lib/utils/ad-name-parser"
 import {
   aggregateAdEfficiency,
+  resolveAdsetConversionEvents,
+  CONVERSION_EVENT_PRIORITY,
   WINDOW_PRESETS,
   type AdEfficiencyRow,
   type EfficiencyDailyRow,
@@ -1015,9 +1017,14 @@ async function _fetchReachEfficiencyDataInner(
     .eq("client_id", clientId)
     .maybeSingle()
   const keyAction = (scorecard?.key_action as string | undefined) || "purchases"
-  const convColumn = KEY_ACTION_COLUMN[keyAction] || "purchases"
+  const keyActionColumn = KEY_ACTION_COLUMN[keyAction] || "purchases"
 
-  const EFF_COLS = `date, ad_id, ad_name, adset_id, adset_name, campaign_id, campaign_name, spend, reach, impressions, purchases, purchase_value, video_plays${convColumn === "purchases" ? "" : `, ${convColumn}`}`
+  // All conversion events, so each ad set's CPA can be pinned to its own goal
+  // event (key action first, then deepest-funnel event with conversions)
+  const EVENT_COLUMNS = Array.from(
+    new Set([...CONVERSION_EVENT_PRIORITY, keyActionColumn])
+  )
+  const EFF_COLS = `date, ad_id, ad_name, adset_id, adset_name, campaign_id, campaign_name, spend, reach, impressions, purchase_value, video_plays, ${EVENT_COLUMNS.join(", ")}`
 
   const from90 = shiftDays(to, -89)
   const fetchSpan = (spanFrom: string, spanTo: string) =>
@@ -1042,36 +1049,43 @@ async function _fetchReachEfficiencyDataInner(
       : Promise.resolve([] as Record<string, any>[]),
   ])
 
-  const toEffRow = (r: Record<string, any>): EfficiencyDailyRow & { date: string } => ({
-    date: r.date,
-    ad_id: r.ad_id,
-    ad_name: r.ad_name,
-    adset_id: r.adset_id,
-    adset_name: r.adset_name,
-    campaign_id: r.campaign_id,
-    campaign_name: r.campaign_name,
-    spend: r.spend,
-    reach: r.reach,
-    impressions: r.impressions,
-    conversions: Number(r[convColumn]) || 0,
-    revenue: r.purchase_value,
-    video_plays: r.video_plays,
-  })
+  const toEffRow = (r: Record<string, any>): EfficiencyDailyRow & { date: string } => {
+    const events: Record<string, number> = {}
+    for (const col of EVENT_COLUMNS) {
+      const n = Number(r[col]) || 0
+      if (n) events[col] = n
+    }
+    return {
+      date: r.date,
+      ad_id: r.ad_id,
+      ad_name: r.ad_name,
+      adset_id: r.adset_id,
+      adset_name: r.adset_name,
+      campaign_id: r.campaign_id,
+      campaign_name: r.campaign_name,
+      spend: r.spend,
+      reach: r.reach,
+      impressions: r.impressions,
+      events,
+      revenue: r.purchase_value,
+      video_plays: r.video_plays,
+    }
+  }
 
   const span = spanRows.map(toEffRow)
+  const buildWindow = (rows: (EfficiencyDailyRow & { date: string })[]) =>
+    resolveAdsetConversionEvents(aggregateAdEfficiency(rows), keyActionColumn)
 
   const windows: Partial<Record<WindowKey, AdEfficiencyRow[]>> = {}
   for (const preset of WINDOW_PRESETS) {
     const windowFrom = shiftDays(to, -(preset.days - 1))
-    windows[preset.key] = aggregateAdEfficiency(
-      span.filter((r) => r.date >= windowFrom)
-    )
+    windows[preset.key] = buildWindow(span.filter((r) => r.date >= windowFrom))
   }
   if (hasCustom) {
     const customSource = customInsideSpan
       ? span.filter((r) => r.date >= customFrom! && r.date <= customTo!)
       : customRows.map(toEffRow)
-    windows.custom = aggregateAdEfficiency(customSource)
+    windows.custom = buildWindow(customSource)
   }
 
   // Thumbnails for every ad on the map (batched — .in() caps around 300 items)

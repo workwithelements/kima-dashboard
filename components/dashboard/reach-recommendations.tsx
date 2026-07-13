@@ -2,7 +2,13 @@
 
 import { useMemo, useState } from "react"
 import { fmtCurrency, fmtCurrencyCompact, fmtNumber } from "@/lib/utils/format"
-import type { AdEfficiencyPoint, EfficiencyThresholds, WindowKey } from "@/lib/utils/reach-efficiency"
+import {
+  conversionEventLabel,
+  cpaSplitFor,
+  type AdEfficiencyPoint,
+  type EfficiencyThresholds,
+  type WindowKey,
+} from "@/lib/utils/reach-efficiency"
 import {
   generateRecommendations,
   type ActionType,
@@ -42,7 +48,8 @@ function recommendationCopy(
   const cpmr = fmtCurrency(ad.cpmr, currency)
   const cpmrMax = fmtCurrency(thresholds.cpmrMax, currency)
   const cpa = ad.cpa !== null ? fmtCurrency(ad.cpa, currency) : null
-  const cpaSplit = fmtCurrency(thresholds.cpaSplit, currency)
+  const cpaSplit = fmtCurrency(cpaSplitFor(thresholds, ad.conversionEvent), currency)
+  const event = conversionEventLabel(ad.conversionEvent)
   const spend = fmtCurrencyCompact(ad.spend, currency)
   const reach = fmtNumber(ad.reach)
 
@@ -50,17 +57,17 @@ function recommendationCopy(
     case "scale":
       return {
         title: "Shift budget towards this ad",
-        reason: `${reach} people reached at ${cpmr} CPMr (threshold ${cpmrMax}) with CPA ${cpa} under the ${cpaSplit} split — cheap reach that converts. ${spend} already deployed; it has earned more.`,
+        reason: `${reach} people reached at ${cpmr} CPMr (threshold ${cpmrMax}) with a ${cpa} CPA on ${event}, under the ${cpaSplit} split — cheap reach that converts. ${spend} already deployed; it has earned more.`,
       }
     case "pause":
       return {
         title: "Pause and reallocate this ad",
-        reason: `${spend} spend buying reach at ${cpmr} CPMr (threshold ${cpmrMax})${cpa ? ` with CPA ${cpa} over the ${cpaSplit} split` : " with no conversions recorded"} — failing on both reach efficiency and CPA. Reallocate to the efficient-growth ads.`,
+        reason: `${spend} spend buying reach at ${cpmr} CPMr (threshold ${cpmrMax})${cpa ? ` with a ${cpa} CPA on ${event}, over the ${cpaSplit} split` : " with no conversions recorded on any goal event"} — failing on both reach efficiency and CPA. Reallocate to the efficient-growth ads.`,
       }
     case "protect":
       return {
         title: "Keep this ad live despite its CPA",
-        reason: `${cpa ? `CPA ${cpa} looks poor against the ${cpaSplit} split` : "No conversions recorded this window"}, but it buys reach at ${cpmr} CPMr vs the ${cpmrMax} threshold — among the cheapest awareness in the account (${reach} people). Pausing it typically shows up later as rising CPMs.`,
+        reason: `${cpa ? `A ${cpa} CPA on ${event} looks poor against the ${cpaSplit} split` : "No conversions recorded this window"}, but it buys reach at ${cpmr} CPMr vs the ${cpmrMax} threshold — among the cheapest awareness in the account (${reach} people). Pausing it typically shows up later as rising CPMs.`,
       }
   }
 }
@@ -199,7 +206,7 @@ export default function ReachRecommendations({
                       {meta.badge}
                     </span>
                     <span className={`text-xs font-medium ${meta.accent}`}>{copy.title}</span>
-                    <span className="truncate text-xs text-neutral-500" title={rec.ad.adName}>
+                    <span className="break-words text-xs text-neutral-500">
                       {rec.ad.adName}
                     </span>
                   </div>

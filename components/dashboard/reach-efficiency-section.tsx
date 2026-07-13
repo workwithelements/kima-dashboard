@@ -9,10 +9,13 @@ import { fmtCurrency, fmtCurrencyCompact, fmtNumber, fmtRoas, fmtDateShort } fro
 import {
   classifyAds,
   computeThresholds,
+  conversionEventLabel,
+  cpaSplitFor,
   CLASSIFICATION_CONFIG,
   WINDOW_PRESETS,
   type AdEfficiencyPoint,
   type AdEfficiencyRow,
+  type EfficiencyThresholds,
   type WindowKey,
 } from "@/lib/utils/reach-efficiency"
 import ReachRecommendations from "@/components/dashboard/reach-recommendations"
@@ -177,9 +180,9 @@ export default function ReachEfficiencySection({
         <h2 className="text-sm font-medium text-neutral-400">CPMr Report</h2>
         <p className="mt-1 max-w-3xl text-xs text-neutral-500">
           Which ads are driving top-of-funnel growth — high spend, low CPMr (cheap
-          reach at scale). Split by CPA on{" "}
-          <span className="text-neutral-400">{keyActionLabel}</span>: efficient
-          growth vs reach plays you shouldn&apos;t pause.
+          reach at scale). Split by CPA on each ad set&apos;s goal event
+          (<span className="text-neutral-400">{keyActionLabel}</span> where the ad
+          set records it): efficient growth vs reach plays you shouldn&apos;t pause.
         </p>
       </div>
 
@@ -210,10 +213,18 @@ export default function ReachEfficiencySection({
           onApply={applyCustomRange}
         />
         {filtered.length > 0 && (
-          <span className="text-xs text-neutral-500">
+          <span
+            className="text-xs text-neutral-500"
+            title={Object.entries(thresholds.cpaSplits)
+              .map(([e, v]) => `${conversionEventLabel(e)}: ${fmtCurrency(v, currency)}`)
+              .join(" · ") || undefined}
+          >
             thresholds · spend ≥ {fmtCurrency(thresholds.spendMin, currency)} · CPMr
             ≤ {fmtCurrency(thresholds.cpmrMax, currency)} · CPA split{" "}
             {fmtCurrency(thresholds.cpaSplit, currency)}
+            {Object.keys(thresholds.cpaSplits).length > 1 && (
+              <span className="text-neutral-600"> (per goal event)</span>
+            )}
           </span>
         )}
         <div className="ml-auto flex items-center gap-2">
@@ -278,7 +289,7 @@ export default function ReachEfficiencySection({
         points={efficient}
         thumbnails={proxiedThumbnails}
         currency={currency}
-        cpaSplit={thresholds.cpaSplit}
+        thresholds={thresholds}
         accent="text-emerald-400"
       />
       <AdRail
@@ -288,7 +299,7 @@ export default function ReachEfficiencySection({
         points={reachPlays}
         thumbnails={proxiedThumbnails}
         currency={currency}
-        cpaSplit={thresholds.cpaSplit}
+        thresholds={thresholds}
         accent="text-amber-400"
       />
     </div>
@@ -385,7 +396,7 @@ function AdRail({
   points,
   thumbnails,
   currency,
-  cpaSplit,
+  thresholds,
   accent,
 }: {
   title: string
@@ -394,7 +405,7 @@ function AdRail({
   points: AdEfficiencyPoint[]
   thumbnails: Record<string, string>
   currency: string
-  cpaSplit: number
+  thresholds: EfficiencyThresholds
   accent: string
 }) {
   return (
@@ -416,7 +427,7 @@ function AdRail({
               point={p}
               thumbnailUrl={thumbnails[p.adId]}
               currency={currency}
-              cpaSplit={cpaSplit}
+              thresholds={thresholds}
               accent={accent}
             />
           ))}
@@ -430,19 +441,20 @@ function RailCard({
   point,
   thumbnailUrl,
   currency,
-  cpaSplit,
+  thresholds,
   accent,
 }: {
   point: AdEfficiencyPoint
   thumbnailUrl?: string
   currency: string
-  cpaSplit: number
+  thresholds: EfficiencyThresholds
   accent: string
 }) {
   const [imgError, setImgError] = useState(false)
   const imgRef = useRef<HTMLImageElement>(null)
   const cls = CLASSIFICATION_CONFIG[point.classification]
-  const cpaGood = point.cpa !== null && point.cpa <= cpaSplit
+  const cpaGood =
+    point.cpa !== null && point.cpa <= cpaSplitFor(thresholds, point.conversionEvent)
 
   // Cards are server-rendered, so an image can fail before hydration attaches
   // the onError listener — re-check after mount, and reset when the URL changes
@@ -487,9 +499,7 @@ function RailCard({
         )}
       </div>
       <div className="flex flex-1 flex-col gap-1.5 p-3">
-        <p className="truncate text-xs text-neutral-300" title={point.adName}>
-          {point.adName}
-        </p>
+        <p className="break-words text-xs text-neutral-300">{point.adName}</p>
         <p className={`text-xl font-semibold tabular-nums ${accent}`}>
           {fmtCurrency(point.cpmr, currency)}
           <span className="ml-1.5 text-[10px] font-medium uppercase tracking-wider text-neutral-500">
@@ -505,6 +515,11 @@ function RailCard({
             valueClass={
               point.cpa === null ? "" : cpaGood ? "text-emerald-400" : "text-red-400"
             }
+            title={
+              point.cpa !== null
+                ? `CPA on the ad set's goal event: ${conversionEventLabel(point.conversionEvent)}`
+                : "No conversions on any goal event in this window"
+            }
           />
           <RailStat label="ROAS" value={point.revenue > 0 ? fmtRoas(point.roas) : "—"} />
         </div>
@@ -517,13 +532,15 @@ function RailStat({
   label,
   value,
   valueClass = "",
+  title,
 }: {
   label: string
   value: string
   valueClass?: string
+  title?: string
 }) {
   return (
-    <div className="min-w-0">
+    <div className="min-w-0" title={title}>
       <p className="text-[9px] font-medium uppercase tracking-wider text-neutral-600">
         {label}
       </p>

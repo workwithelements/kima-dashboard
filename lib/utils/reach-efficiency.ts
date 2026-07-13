@@ -20,8 +20,29 @@ export const WINDOW_PRESETS: { key: WindowKey; label: string; days: number }[] =
   { key: "90d", label: "90d", days: 90 },
 ]
 
-/** Daily performance row shape consumed by the aggregator. `conversions` is
- *  the client's key action, resolved server-side before aggregation. */
+/**
+ * Conversion events an ad set can be optimising towards, deepest-funnel
+ * first. The ad set's actual optimization_goal isn't synced from Meta, so we
+ * infer it: the client's key action when the ad set records any of it, else
+ * the first event in this order the ad set has conversions for in the window.
+ */
+export const CONVERSION_EVENT_PRIORITY = [
+  "purchases",
+  "trials_started",
+  "registrations_completed",
+  "app_installs",
+  "mobile_app_registrations",
+  "checkouts_initiated",
+  "adds_to_cart",
+] as const
+
+/** Human label for a conversion event column ("registrations_completed" → "registrations completed") */
+export function conversionEventLabel(event: string | null): string {
+  return event ? event.replace(/_/g, " ") : "conversions"
+}
+
+/** Daily performance row shape consumed by the aggregator. `events` carries
+ *  the per-event conversion counts for goal-event resolution. */
 export type EfficiencyDailyRow = {
   ad_id?: string | null
   ad_name?: string | null
@@ -32,12 +53,14 @@ export type EfficiencyDailyRow = {
   spend?: number | null
   reach?: number | null
   impressions?: number | null
-  conversions?: number | null
+  /** conversion event column → count for this day */
+  events?: Record<string, number> | null
   revenue?: number | null
   video_plays?: number | null
 }
 
-/** One ad aggregated over a window. */
+/** One ad aggregated over a window. `conversions` counts the ad set's
+ *  resolved goal event (see `conversionEvent`). */
 export type AdEfficiencyRow = {
   adId: string
   adName: string
@@ -49,8 +72,15 @@ export type AdEfficiencyRow = {
   reach: number
   impressions: number
   conversions: number
+  /** Which event `conversions` counts, or null when the ad set recorded none */
+  conversionEvent: string | null
   revenue: number
   isVideo: boolean
+}
+
+/** Aggregation output before goal-event resolution: per-ad per-event sums. */
+export type AdEfficiencyRawRow = AdEfficiencyRow & {
+  events: Record<string, number>
 }
 
 export type AdClassification = "efficient" | "reachPlay" | "other"
@@ -69,14 +99,29 @@ export type EfficiencyThresholds = {
   spendMin: number
   /** Maximum CPMr to qualify for the TOF growth zone. */
   cpmrMax: number
-  /** CPA at/below which a zone ad counts as efficient growth. */
+  /** Overall CPA split (median CPA across all converting ads) — fallback when
+   *  an ad's goal event has no per-event split. */
   cpaSplit: number
+  /** CPA split per goal event — median CPA among converting ads sharing that
+   *  event, so lead CPAs aren't judged against purchase CPAs. */
+  cpaSplits: Record<string, number>
+}
+
+/** The CPA split an ad should be judged against (its goal event's, else overall). */
+export function cpaSplitFor(
+  thresholds: EfficiencyThresholds,
+  conversionEvent: string | null
+): number {
+  return (
+    (conversionEvent ? thresholds.cpaSplits[conversionEvent] : undefined) ??
+    thresholds.cpaSplit
+  )
 }
 
 /** Aggregate daily rows to one row per ad. Ads without spend or reach in the
  *  window are dropped — they can't be placed on the map. */
-export function aggregateAdEfficiency(rows: EfficiencyDailyRow[]): AdEfficiencyRow[] {
-  const byAd = new Map<string, AdEfficiencyRow>()
+export function aggregateAdEfficiency(rows: EfficiencyDailyRow[]): AdEfficiencyRawRow[] {
+  const byAd = new Map<string, AdEfficiencyRawRow>()
   for (const r of rows) {
     if (!r.ad_id) continue
     let acc = byAd.get(r.ad_id)
@@ -92,16 +137,20 @@ export function aggregateAdEfficiency(rows: EfficiencyDailyRow[]): AdEfficiencyR
         reach: 0,
         impressions: 0,
         conversions: 0,
+        conversionEvent: null,
         revenue: 0,
         isVideo: false,
+        events: {},
       }
       byAd.set(r.ad_id, acc)
     }
     acc.spend += r.spend || 0
     acc.reach += r.reach || 0
     acc.impressions += r.impressions || 0
-    acc.conversions += r.conversions || 0
     acc.revenue += r.revenue || 0
+    for (const [event, count] of Object.entries(r.events || {})) {
+      if (count) acc.events[event] = (acc.events[event] || 0) + count
+    }
     if ((r.video_plays || 0) > 0) acc.isVideo = true
     // Prefer the most recent non-empty names (rows arrive date-ascending)
     if (r.ad_name) acc.adName = r.ad_name
@@ -111,6 +160,49 @@ export function aggregateAdEfficiency(rows: EfficiencyDailyRow[]): AdEfficiencyR
     if (r.campaign_name) acc.campaignName = r.campaign_name
   }
   return Array.from(byAd.values()).filter((a) => a.spend > 0 && a.reach > 0)
+}
+
+/**
+ * Pin each ad's conversions to its AD SET's goal event: the client's key
+ * action when the ad set recorded any of it in the window, otherwise the
+ * deepest-funnel event (CONVERSION_EVENT_PRIORITY) the ad set has. All ads in
+ * an ad set share one event, so their CPAs are comparable. Strips the
+ * per-event sums so the client payload stays flat.
+ */
+export function resolveAdsetConversionEvents(
+  ads: AdEfficiencyRawRow[],
+  keyAction: string
+): AdEfficiencyRow[] {
+  // Sum events per ad set
+  const adsetEvents = new Map<string, Record<string, number>>()
+  for (const ad of ads) {
+    const sums = adsetEvents.get(ad.adsetId) || {}
+    for (const [event, count] of Object.entries(ad.events)) {
+      sums[event] = (sums[event] || 0) + count
+    }
+    adsetEvents.set(ad.adsetId, sums)
+  }
+
+  // Pick each ad set's event: key action first, then priority order
+  const adsetEvent = new Map<string, string | null>()
+  for (const [adsetId, sums] of Array.from(adsetEvents.entries())) {
+    let event: string | null = null
+    if (sums[keyAction] > 0) {
+      event = keyAction
+    } else {
+      event = CONVERSION_EVENT_PRIORITY.find((e) => sums[e] > 0) ?? null
+    }
+    adsetEvent.set(adsetId, event)
+  }
+
+  return ads.map(({ events, ...ad }) => {
+    const event = adsetEvent.get(ad.adsetId) ?? null
+    return {
+      ...ad,
+      conversionEvent: event,
+      conversions: event ? events[event] || 0 : 0,
+    }
+  })
 }
 
 /** Linear-interpolated percentile (p in 0..1) of an unsorted numeric array. */
@@ -128,16 +220,30 @@ export function percentile(values: number[], p: number): number {
  * Auto-derive thresholds from the (already filtered) ad set:
  *  - spendMin: p75 of ad spend — "high spend" = top quartile of spenders
  *  - cpmrMax: median CPMr — "cheap reach" = cheaper than the typical ad
- *  - cpaSplit: median CPA among converting ads
+ *  - cpaSplit(s): median CPA among converting ads, overall and per goal event
  */
 export function computeThresholds(ads: AdEfficiencyRow[]): EfficiencyThresholds {
   const spends = ads.map((a) => a.spend)
   const cpmrs = ads.map((a) => (a.spend / a.reach) * 1000)
-  const cpas = ads.filter((a) => a.conversions > 0).map((a) => a.spend / a.conversions)
+
+  const converting = ads.filter((a) => a.conversions > 0)
+  const cpas = converting.map((a) => a.spend / a.conversions)
+
+  const cpasByEvent: Record<string, number[]> = {}
+  for (const a of converting) {
+    if (!a.conversionEvent) continue
+    ;(cpasByEvent[a.conversionEvent] ||= []).push(a.spend / a.conversions)
+  }
+  const cpaSplits: Record<string, number> = {}
+  for (const [event, values] of Object.entries(cpasByEvent)) {
+    cpaSplits[event] = percentile(values, 0.5)
+  }
+
   return {
     spendMin: percentile(spends, 0.75),
     cpmrMax: percentile(cpmrs, 0.5),
     cpaSplit: percentile(cpas, 0.5),
+    cpaSplits,
   }
 }
 
@@ -154,7 +260,9 @@ export function classifyAds(
     let classification: AdClassification = "other"
     if (inZone) {
       classification =
-        cpa !== null && cpa <= thresholds.cpaSplit ? "efficient" : "reachPlay"
+        cpa !== null && cpa <= cpaSplitFor(thresholds, a.conversionEvent)
+          ? "efficient"
+          : "reachPlay"
     }
     return { ...a, cpmr, cpa, roas, classification }
   })

@@ -15,6 +15,8 @@ import {
 import { fmtCurrency, fmtCurrencyCompact, fmtNumber, fmtRoas } from "@/lib/utils/format"
 import {
   CLASSIFICATION_CONFIG,
+  conversionEventLabel,
+  cpaSplitFor,
   type AdEfficiencyPoint,
   type EfficiencyThresholds,
 } from "@/lib/utils/reach-efficiency"
@@ -133,7 +135,7 @@ export default function ReachEfficiencyScatter({
                   point={point}
                   thumbnailUrl={thumbnails[point.adId]}
                   currency={currency}
-                  cpaSplit={thresholds.cpaSplit}
+                  thresholds={thresholds}
                 />
               )
             }}
@@ -188,15 +190,16 @@ function AdHoverCard({
   point,
   thumbnailUrl,
   currency,
-  cpaSplit,
+  thresholds,
 }: {
   point: AdEfficiencyPoint
   thumbnailUrl?: string
   currency: string
-  cpaSplit: number
+  thresholds: EfficiencyThresholds
 }) {
   const cls = CLASSIFICATION_CONFIG[point.classification]
-  const cpaGood = point.cpa !== null && point.cpa <= cpaSplit
+  const cpaGood =
+    point.cpa !== null && point.cpa <= cpaSplitFor(thresholds, point.conversionEvent)
   return (
     <div className="w-60 overflow-hidden rounded-xl border border-neutral-700 bg-neutral-900 shadow-2xl">
       <div className="relative aspect-video bg-neutral-800">
@@ -229,7 +232,7 @@ function AdHoverCard({
         )}
       </div>
       <div className="space-y-1 p-3">
-        <p className="truncate text-xs font-medium text-neutral-200" title={point.adName}>
+        <p className="break-words text-xs font-medium text-neutral-200">
           {point.adName}
         </p>
         <p className="text-xs text-neutral-400">
@@ -244,8 +247,14 @@ function AdHoverCard({
           <span className="tabular-nums">{fmtNumber(point.reach)}</span> reach
           <span className="mx-1.5 text-neutral-600">·</span>
           {point.cpa !== null ? (
-            <span className={`font-medium tabular-nums ${cpaGood ? "text-emerald-400" : "text-red-400"}`}>
+            <span
+              className={`font-medium tabular-nums ${cpaGood ? "text-emerald-400" : "text-red-400"}`}
+              title={`CPA on the ad set's goal event: ${conversionEventLabel(point.conversionEvent)}`}
+            >
               CPA {fmtCurrency(point.cpa, currency)}
+              <span className="ml-1 font-normal text-neutral-500">
+                / {conversionEventLabel(point.conversionEvent)}
+              </span>
             </span>
           ) : (
             <span className="text-neutral-500">no conversions</span>
