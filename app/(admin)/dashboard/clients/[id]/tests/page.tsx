@@ -17,7 +17,6 @@ export default async function CreativeTestsPage({ params }: Props) {
       tests={data.tests}
       results={data.results}
       config={data.config}
-      thumbnails={data.thumbnails}
       currency={data.currency}
       keyAction={data.keyAction}
       hasKeyAction={data.hasKeyAction}

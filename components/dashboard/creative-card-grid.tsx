@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
-import Image from "next/image"
+import AdCreativeMedia from "@/components/dashboard/ad-creative-media"
 import {
   CLASSIFICATIONS,
   getUnifiedStatusLabel,
@@ -16,13 +16,13 @@ import {
   type CreativeMetricKey,
 } from "@/lib/utils/creative-metrics"
 
-type ThumbnailMap = Record<string, string> // ad_id -> thumbnail_url
-
 export type TagInfo = { id: string; name: string; color: string }
 
 type Props = {
   ads: ClassifiedAd[]
-  thumbnails: ThumbnailMap
+  /** @deprecated no longer used — cards resolve media per adId via
+   *  /api/ad-preview, which can't show another ad's creative. */
+  thumbnails?: Record<string, string>
   videoAdIds: Set<string>
   rows: Partial<MetaDailyRow>[]
   currency?: string
@@ -43,7 +43,6 @@ type Props = {
 
 export default function CreativeCardGrid({
   ads,
-  thumbnails,
   videoAdIds,
   rows,
   currency = "GBP",
@@ -61,7 +60,6 @@ export default function CreativeCardGrid({
         <CreativeCard
           key={ad.adId}
           ad={ad}
-          thumbnailUrl={thumbnails[ad.adId]}
           isVideo={videoAdIds.has(ad.adId)}
           currency={currency}
           tags={adTags[ad.adId]}
@@ -84,7 +82,6 @@ export default function CreativeCardGrid({
 
 function CreativeCard({
   ad,
-  thumbnailUrl,
   isVideo,
   currency = "GBP",
   tags,
@@ -96,7 +93,6 @@ function CreativeCard({
   isNew,
 }: {
   ad: ClassifiedAd
-  thumbnailUrl?: string
   isVideo: boolean
   currency?: string
   tags?: TagInfo[]
@@ -107,20 +103,9 @@ function CreativeCard({
   onRemoveTag?: (adId: string, tagId: string) => void
   isNew?: boolean
 }) {
-  const [imgError, setImgError] = useState(false)
-  const imgRef = useRef<HTMLImageElement>(null)
   const [showTagDropdown, setShowTagDropdown] = useState(false)
   const [tagAnchor, setTagAnchor] = useState<DOMRect | null>(null)
   const cls = CLASSIFICATIONS[ad.classification.type]
-
-  // Reset error state when thumbnail URL changes (e.g. after sync refresh).
-  // Cards are server-rendered, so an image can fail before hydration attaches
-  // the onError listener — re-check completeness after mount.
-  useEffect(() => {
-    setImgError(false)
-    const el = imgRef.current
-    if (el && el.complete && el.naturalWidth === 0) setImgError(true)
-  }, [thumbnailUrl])
 
   const assignedTagIds = new Set((tags || []).map((t) => t.id))
   const unassignedTags = allTags.filter((t) => !assignedTagIds.has(t.id))
@@ -130,34 +115,16 @@ function CreativeCard({
       className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden hover:border-neutral-700 transition-colors flex flex-col cursor-pointer"
       onClick={onClick}
     >
-      {/* Thumbnail */}
-      <div className="aspect-video bg-neutral-800 relative flex items-center justify-center">
-        {thumbnailUrl && !imgError ? (
-          <img
-            ref={imgRef}
-            src={thumbnailUrl}
-            alt=""
-            className="absolute inset-0 w-full h-full object-contain"
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={() => setImgError(true)}
-          />
-        ) : (
-          <div className="text-neutral-600 text-xs text-center px-4">
-            {isVideo ? "\ud83c\udfa5" : "\ud83d\uddbc"} No preview
-          </div>
-        )}
-
-        {/* Video play icon overlay */}
-        {isVideo && thumbnailUrl && !imgError && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="h-8 w-8 rounded-full bg-black/50 flex items-center justify-center backdrop-blur-sm">
-              <svg className="h-4 w-4 text-white ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-            </div>
-          </div>
-        )}
+      {/* Creative media — lazy (fetches when scrolled into view), poster mode
+          so a grid full of video ads doesn't autoplay dozens at once */}
+      <div className="relative">
+        <AdCreativeMedia
+          adId={ad.adId}
+          isVideoHint={isVideo}
+          aspectClass="aspect-video"
+          lazy
+          videoMode="poster"
+        />
 
         {/* Classification badge overlaid on thumbnail (includes fatigue status) */}
         <span

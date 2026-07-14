@@ -2341,7 +2341,6 @@ export default function ClientPerformanceView({
             {tableViewMode === "grid" && previewsEnabled && isMeta && metaLevel === "ad" ? (
               <CreativeCardGrid
                 ads={gridAds}
-                thumbnails={proxyThumbnails}
                 videoAdIds={videoAdIds}
                 rows={filteredRows}
                 currency={currency}

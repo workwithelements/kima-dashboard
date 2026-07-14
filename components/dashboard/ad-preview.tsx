@@ -36,13 +36,37 @@ type Props = {
  *  Errors are deliberately not cached so a transient failure can retry. */
 const creativeCache = new Map<string, AdCreativeData>()
 
+/** Cap concurrent /api/ad-preview requests: a creative grid can mount
+ *  hundreds of media cells at once, and each cache-miss fans out into
+ *  several Meta Graph calls server-side — an unthrottled burst risks Meta
+ *  rate limits. Excess requests queue and drain in order. */
+const MAX_CONCURRENT_FETCHES = 6
+let inFlight = 0
+const fetchQueue: Array<() => void> = []
+
+function acquireSlot(): Promise<void> {
+  if (inFlight < MAX_CONCURRENT_FETCHES) {
+    inFlight++
+    return Promise.resolve()
+  }
+  return new Promise((resolve) => fetchQueue.push(() => { inFlight++; resolve() }))
+}
+
+function releaseSlot() {
+  inFlight--
+  fetchQueue.shift()?.()
+}
+
 /**
  * Fetch + cache the structured creative data for one ad. Strictly keyed by
  * adId with a stale-response guard, so a fast hover from ad A to ad B can
  * never leave A's creative rendered against B. Shared by the detail modal
- * (AdPreview) and the hover-preview surfaces (AdCreativeMedia).
+ * (AdPreview) and the preview surfaces (AdCreativeMedia).
+ *
+ * Pass `enabled: false` to defer the fetch (e.g. until a card scrolls into
+ * view) — the hook stays idle and starts fetching when it flips to true.
  */
-export function useAdCreative(adId: string): {
+export function useAdCreative(adId: string, enabled = true): {
   data: AdCreativeData | null
   errored: boolean
   errorReason: string | null
@@ -59,10 +83,23 @@ export function useAdCreative(adId: string): {
 
     const cachedData = creativeCache.get(adId)
     setData(cachedData ?? null)
-    if (cachedData) return
+    if (cachedData || !enabled) return
 
-    fetch(`/api/ad-preview?ad_id=${encodeURIComponent(adId)}`)
+    let holdingSlot = false
+    acquireSlot()
+      .then(() => {
+        holdingSlot = true
+        // Another ad (or a cached result) may have superseded us while queued
+        if (reqId !== reqRef.current) return null
+        const nowCached = creativeCache.get(adId)
+        if (nowCached) {
+          setData(nowCached)
+          return null
+        }
+        return fetch(`/api/ad-preview?ad_id=${encodeURIComponent(adId)}`)
+      })
       .then(async (res) => {
+        if (!res) return
         if (reqId !== reqRef.current) return
         const payload = await res.json().catch(() => null)
         if (reqId !== reqRef.current) return
@@ -88,7 +125,10 @@ export function useAdCreative(adId: string): {
         setErrored(true)
         setErrorReason(e?.message || "network error")
       })
-  }, [adId])
+      .finally(() => {
+        if (holdingSlot) releaseSlot()
+      })
+  }, [adId, enabled])
 
   return { data, errored, errorReason }
 }

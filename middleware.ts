@@ -37,13 +37,14 @@ export async function middleware(request: NextRequest) {
   }
 
   // Protect API routes (except public endpoints) — return 401 if not authenticated.
-  // /api/thumbnail does its own auth (admin session OR share-view session) so
-  // creative previews also load on public share pages.
+  // /api/thumbnail and /api/ad-preview do their own auth (admin session OR
+  // share-view session) so creative previews also load on public share pages.
   if (
     pathname.startsWith("/api/") &&
     !pathname.startsWith("/api/view-auth") &&
     !pathname.startsWith("/api/cron/") &&
-    !pathname.startsWith("/api/thumbnail")
+    !pathname.startsWith("/api/thumbnail") &&
+    !pathname.startsWith("/api/ad-preview")
   ) {
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })

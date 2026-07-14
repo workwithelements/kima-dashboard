@@ -227,7 +227,6 @@ export default async function ClientViewPage({ params, searchParams }: Props) {
       reachLifetimeRows={reachData?.lifetimeRows || []}
       reachEfficiency={{
         windows: reachEfficiency.windows,
-        thumbnails: reachEfficiency.thumbnails,
         keyAction: reachEfficiency.keyAction,
         initialWindow: reportWindow,
         customFrom: reportCustom?.from,

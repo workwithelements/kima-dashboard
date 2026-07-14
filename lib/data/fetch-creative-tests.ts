@@ -76,7 +76,6 @@ export type CreativeTestsData = {
   tests: CreativeTest[]
   results: Record<string, CreativeTestResult[]>
   config: CreativeTestConfig | null
-  thumbnails: Record<string, string>
   currency: string
   keyAction: string
   /** True when either creative_test_config.test_key_action OR
@@ -197,24 +196,10 @@ async function _fetchCreativeTestsInner(
   const adsetIdSet = new Set(tests.map((t) => t.adset_id))
   const adsetIds = Array.from(adsetIdSet)
 
-  // Fetch thumbnails, ad names, and adset performance data in parallel
-  const thumbnails: Record<string, string> = {}
+  // Fetch ad names and adset performance data in parallel
   const adNames: Record<string, string> = {}
 
   const BATCH = 300
-
-  // Helper: wrap Supabase thenable into a real Promise
-  async function fetchThumbnailBatch(chunk: string[]): Promise<void> {
-    const { data } = await supabase
-      .from("meta_ad_metadata")
-      .select("ad_id, creative_thumbnail_url")
-      .in("ad_id", chunk)
-    for (const row of data ?? []) {
-      if (row.creative_thumbnail_url) {
-        thumbnails[row.ad_id] = row.creative_thumbnail_url
-      }
-    }
-  }
 
   async function fetchNameBatch(chunk: string[]): Promise<void> {
     // meta_daily_performance has one row per (ad_id, date). Limiting the
@@ -248,7 +233,6 @@ async function _fetchCreativeTestsInner(
 
   for (let i = 0; i < allAdIds.length; i += BATCH) {
     const chunk = allAdIds.slice(i, i + BATCH)
-    fetchPromises.push(fetchThumbnailBatch(chunk))
     fetchPromises.push(fetchNameBatch(chunk))
   }
 
@@ -338,7 +322,6 @@ async function _fetchCreativeTestsInner(
     tests,
     results,
     config,
-    thumbnails,
     currency: clientResp.data.currency_code ?? "GBP",
     keyAction,
     hasKeyAction,
