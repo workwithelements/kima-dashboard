@@ -39,6 +39,10 @@ export default function AdCreativeMedia({
 }: Props) {
   const boxRef = useRef<HTMLDivElement>(null)
   const [inView, setInView] = useState(!lazy)
+  const [fallbackErrored, setFallbackErrored] = useState(false)
+
+  // All call sites key this component by adId, but reset defensively anyway
+  useEffect(() => setFallbackErrored(false), [adId])
 
   useEffect(() => {
     if (!lazy || inView) return
@@ -60,16 +64,37 @@ export default function AdCreativeMedia({
     return () => io.disconnect()
   }, [lazy, inView])
 
-  const { data, errored } = useAdCreative(adId, inView)
+  const { data, errored, errorReason } = useAdCreative(adId, inView)
 
   return (
     <div ref={boxRef} className={`relative overflow-hidden bg-neutral-800 ${aspectClass} ${className}`}>
       {data ? (
         <Media data={data} videoMode={videoMode} />
       ) : errored ? (
-        <div className="absolute inset-0 flex items-center justify-center text-xs text-neutral-600">
-          {isVideoHint ? "🎬" : "🖼"} No preview
-        </div>
+        // Degraded mode: /api/ad-preview failed (e.g. META_ACCESS_TOKEN not
+        // configured, Meta rate limit, archived creative). Fall back to the
+        // stored-thumbnail proxy, which can serve without a Meta token —
+        // lower quality but far better than an empty box.
+        fallbackErrored ? (
+          <div
+            className="absolute inset-0 flex items-center justify-center text-xs text-neutral-600"
+            title={errorReason ?? undefined}
+          >
+            {isVideoHint ? "🎬" : "🖼"} No preview
+          </div>
+        ) : (
+          <>
+            <img
+              src={`/api/thumbnail?ad_id=${encodeURIComponent(adId)}`}
+              alt=""
+              className="absolute inset-0 h-full w-full object-cover"
+              referrerPolicy="no-referrer"
+              onError={() => setFallbackErrored(true)}
+              title={errorReason ? `Preview degraded: ${errorReason}` : undefined}
+            />
+            {isVideoHint && <PlayGlyph />}
+          </>
+        )
       ) : (
         <div className="absolute inset-0 animate-pulse bg-neutral-800">
           <div className="absolute inset-0 flex items-center justify-center text-[10px] text-neutral-600">

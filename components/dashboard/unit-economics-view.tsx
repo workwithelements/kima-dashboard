@@ -4,7 +4,6 @@ import { memo, useCallback, useMemo, useState } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { Card, MetricCard } from "@/components/ui/card"
 import DateRangePicker from "@/components/ui/date-range-picker"
-import PaybackSparkline from "@/components/charts/payback-sparkline"
 import AdHoverPreview from "@/components/dashboard/ad-hover-preview"
 import LtvAssumptionsModal from "@/components/dashboard/ltv-assumptions-modal"
 import {
@@ -312,7 +311,7 @@ export default function UnitEconomicsView({
 
       {/* Per-ad table */}
       <Card className="overflow-x-auto !p-0">
-        <table className="w-full min-w-[1080px] text-sm">
+        <table className="w-full min-w-[1000px] text-sm">
           <thead>
             <tr className="border-b border-neutral-800 text-left text-[11px] uppercase tracking-wider text-neutral-500">
               <th className="px-4 py-3 font-medium">{groupBy === "adset" ? "Ad set" : "Ad"}</th>
@@ -324,7 +323,6 @@ export default function UnitEconomicsView({
                 { key: null, label: "Blended LTV" },
                 { key: "ltvCac" as SortKey, label: "LTV:CAC" },
                 { key: "payback" as SortKey, label: "Payback" },
-                { key: null, label: "" },
                 { key: "value" as SortKey, label: "Est. Value" },
                 { key: "net" as SortKey, label: "Est. Net" },
                 { key: null, label: "Status" },
@@ -350,7 +348,7 @@ export default function UnitEconomicsView({
           <tbody>
             {visibleRows.length === 0 && (
               <tr>
-                <td colSpan={12} className="px-4 py-8 text-center text-xs text-neutral-500">
+                <td colSpan={11} className="px-4 py-8 text-center text-xs text-neutral-500">
                   No {groupBy === "adset" ? "ad sets" : "ads"} in this range
                   {statusFilter !== "all" ? " with this status" : ""}.
                 </td>
@@ -493,11 +491,6 @@ const FragmentRow = memo(function FragmentRow({
         <td className="px-3 py-2.5 text-right tabular-nums">
           {s ? fmtPayback(s.paybackMonth, horizonMonths) : "—"}
         </td>
-        <td className="px-2 py-2.5">
-          {s && r.cpa !== null && (
-            <PaybackSparkline curve={s.curve} cpa={r.cpa} paybackMonth={s.paybackMonth} />
-          )}
-        </td>
         <td className="px-3 py-2.5 text-right tabular-nums">
           {s ? fmtCurrencyWhole(s.estTotalValue, currency) : "—"}
         </td>
@@ -525,7 +518,7 @@ const FragmentRow = memo(function FragmentRow({
       </tr>
       {expanded && s && r.cpa !== null && (
         <tr className="border-b border-neutral-800/60 bg-neutral-800/20">
-          <td colSpan={12} className="px-4 py-3">
+          <td colSpan={11} className="px-4 py-3">
             <CeilingLadder row={r} currency={currency} note={note} />
           </td>
         </tr>
