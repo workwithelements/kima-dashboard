@@ -76,7 +76,6 @@ type Props = {
   /** Per-ad reach efficiency aggregates for the CPMr report section. */
   efficiency?: {
     windows: Partial<Record<WindowKey, AdEfficiencyRow[]>>
-    thumbnails: Record<string, string>
     keyAction: string
     initialWindow?: WindowKey
     customFrom?: string
@@ -441,7 +440,6 @@ export default function ReachAnalysisView({
         <div className="border-t border-neutral-800 pt-6">
           <ReachEfficiencySection
             windows={efficiency.windows}
-            thumbnails={efficiency.thumbnails}
             keyAction={efficiency.keyAction}
             currency={currency}
             initialWindow={efficiency.initialWindow}

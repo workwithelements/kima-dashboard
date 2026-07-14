@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient } from "@/lib/supabase/server"
+import { isPreviewAuthorized } from "@/lib/auth/preview-auth"
 
 const META_GRAPH_URL = "https://graph.facebook.com/v21.0"
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
@@ -92,6 +93,12 @@ export async function GET(request: NextRequest) {
   }
 
   const supabase = createServiceClient()
+
+  // Exempted from the middleware's blanket API auth (like /api/thumbnail) so
+  // previews load on public share pages — must authorise per request.
+  if (!(await isPreviewAuthorized(request, supabase))) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
 
   // Cache key is fixed per-ad (data is format-independent now).
   // v12: creative resolution order flipped to ad_id-first — earlier rows may

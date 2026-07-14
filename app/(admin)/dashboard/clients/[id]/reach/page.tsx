@@ -92,7 +92,6 @@ export default async function ReachAnalysisPage({ params, searchParams }: Props)
       annotations={annotations}
       efficiency={{
         windows: efficiency.windows,
-        thumbnails: efficiency.thumbnails,
         keyAction: efficiency.keyAction,
         initialWindow: reportWindow,
         customFrom: reportCustom?.from,

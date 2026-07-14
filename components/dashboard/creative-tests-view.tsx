@@ -16,7 +16,8 @@ type Props = {
   tests: CreativeTest[]
   results: Record<string, CreativeTestResult[]>
   config: CreativeTestConfig | null
-  thumbnails: Record<string, string>
+  /** @deprecated no longer used — chips load via /api/thumbnail per adId. */
+  thumbnails?: Record<string, string>
   currency: string
   keyAction: string
   /** True when a key action is configured anywhere (test config OR scorecard) */
@@ -60,7 +61,6 @@ export default function CreativeTestsView({
   tests,
   results,
   config,
-  thumbnails,
   currency,
   keyAction,
   hasKeyAction,
@@ -372,8 +372,8 @@ export default function CreativeTestsView({
           <div className="space-y-3">
             {conceptGroups.map((group) => {
               const isExpanded = expandedConcept === group.conceptName
-              // Collect all thumbnails for the concept
-              const thumbIds = group.allAdIds.filter((id) => thumbnails[id]).slice(0, 4)
+              // Up to 4 variant chips — media resolves per adId via the proxy
+              const thumbIds = group.allAdIds.slice(0, 4)
 
               return (
                 <div
@@ -388,12 +388,7 @@ export default function CreativeTestsView({
                     {/* Thumbnails */}
                     <div className="flex -space-x-2 shrink-0">
                       {thumbIds.map((adId) => (
-                        <img
-                          key={adId}
-                          src={thumbnails[adId]}
-                          alt=""
-                          className="h-10 w-10 rounded-lg border-2 border-neutral-900 object-cover"
-                        />
+                        <ThumbChip key={adId} adId={adId} />
                       ))}
                       {thumbIds.length === 0 && (
                         <div className="h-10 w-10 rounded-lg border-2 border-neutral-900 bg-neutral-800" />
@@ -607,19 +602,7 @@ export default function CreativeTestsView({
                     {/* Thumbnails */}
                     <div className="flex -space-x-2 shrink-0">
                       {test.variant_ad_ids.slice(0, 4).map((adId) => (
-                        thumbnails[adId] ? (
-                          <img
-                            key={adId}
-                            src={thumbnails[adId]}
-                            alt=""
-                            className="h-10 w-10 rounded-lg border-2 border-neutral-900 object-cover"
-                          />
-                        ) : (
-                          <div
-                            key={adId}
-                            className="h-10 w-10 rounded-lg border-2 border-neutral-900 bg-neutral-800"
-                          />
-                        )
+                        <ThumbChip key={adId} adId={adId} />
                       ))}
                     </div>
 
@@ -797,5 +780,24 @@ export default function CreativeTestsView({
         </>
       )}
     </div>
+  )
+}
+
+/** 40px variant chip — served through /api/thumbnail so URLs never expire
+ *  and self-heal to the correct creative; falls back to a neutral square. */
+function ThumbChip({ adId }: { adId: string }) {
+  const [errored, setErrored] = useState(false)
+  if (errored) {
+    return <div className="h-10 w-10 rounded-lg border-2 border-neutral-900 bg-neutral-800" />
+  }
+  return (
+    <img
+      src={`/api/thumbnail?ad_id=${encodeURIComponent(adId)}`}
+      alt=""
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      onError={() => setErrored(true)}
+      className="h-10 w-10 rounded-lg border-2 border-neutral-900 bg-neutral-800 object-cover"
+    />
   )
 }

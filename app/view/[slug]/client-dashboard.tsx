@@ -70,7 +70,6 @@ type Props = {
   reachLifetimeRows: { date: string; reach: number; impressions: number; spend?: number; adset_id?: string; adset_name?: string }[]
   reachEfficiency?: {
     windows: Partial<Record<WindowKey, AdEfficiencyRow[]>>
-    thumbnails: Record<string, string>
     keyAction: string
     initialWindow?: WindowKey
     customFrom?: string
