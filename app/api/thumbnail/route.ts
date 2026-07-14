@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
     .from("meta_ad_metadata")
     .select("creative_thumbnail_url, creative_id")
     .eq("ad_id", adId)
-    .single()
+    .maybeSingle()
 
   // Try cached URL first
   let imageRes: Response | null = null
@@ -84,28 +84,41 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // If cached URL failed or was never synced, fetch fresh from Meta
+  // If cached URL failed or was never synced, fetch fresh from Meta.
+  // Resolve via the ad itself first — /{ad_id}?fields=creative{…} returns
+  // the creative actually attached to this ad and can never cross ads,
+  // whereas synced creative_ids have been observed pointing at the wrong
+  // creative. The stored creative_id is only a fallback (deleted ads).
   if (!imageRes) {
     const accessToken = process.env.META_ACCESS_TOKEN
     if (accessToken) {
       try {
-        // Try creative_id first, fall back to ad_id
-        const fetchId = meta?.creative_id || adId
-        const fields = meta?.creative_id
-          ? "image_url,thumbnail_url"
-          : "creative{image_url,thumbnail_url}"
-        const graphRes = await fetch(
-          `${META_GRAPH_URL}/${fetchId}?fields=${fields}&access_token=${accessToken}`,
-          { next: { revalidate: 0 } }
-        )
-        if (graphRes.ok) {
-          const data = await graphRes.json()
-          // Extract URL — from creative_id query or from ad → creative nested object
+        const lookups: Array<{ id: string; fields: string }> = [
+          { id: adId, fields: "creative{image_url,thumbnail_url}" },
+          ...(meta?.creative_id
+            ? [{ id: meta.creative_id, fields: "image_url,thumbnail_url" }]
+            : []),
+        ]
+        let data: any = null
+        for (const lookup of lookups) {
+          const graphRes = await fetch(
+            `${META_GRAPH_URL}/${lookup.id}?fields=${lookup.fields}&access_token=${accessToken}`,
+            { next: { revalidate: 0 } }
+          )
+          if (graphRes.ok) {
+            data = await graphRes.json()
+            break
+          }
+        }
+        if (data) {
+          // Extract URL — nested creative object (ad_id path) or root
+          // fields (creative_id path); prefer image_url (full-res) over
+          // the ~64px thumbnail_url.
           const freshUrl =
-            data.image_url ||
-            data.thumbnail_url ||
             data.creative?.image_url ||
-            data.creative?.thumbnail_url
+            data.image_url ||
+            data.creative?.thumbnail_url ||
+            data.thumbnail_url
           if (freshUrl) {
             // Update the cached URL in DB (fire-and-forget; only when a
             // metadata row exists to update)

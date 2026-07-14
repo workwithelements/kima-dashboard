@@ -5,6 +5,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { Card, MetricCard } from "@/components/ui/card"
 import DateRangePicker from "@/components/ui/date-range-picker"
 import PaybackSparkline from "@/components/charts/payback-sparkline"
+import AdHoverPreview from "@/components/dashboard/ad-hover-preview"
 import LtvAssumptionsModal from "@/components/dashboard/ltv-assumptions-modal"
 import {
   scoreAdGroups,
@@ -417,12 +418,14 @@ const FragmentRow = memo(function FragmentRow({
         }`}
       >
         <td className="max-w-[220px] px-4 py-2.5">
-          <p className="truncate text-xs text-white" title={r.adName}>
-            {r.adName}
-          </p>
-          <p className="truncate text-[10px] text-neutral-500" title={r.campaignName}>
-            {r.campaignName}
-          </p>
+          <AdHoverPreview adId={r.adId}>
+            <p className="truncate text-xs text-white" title={r.adName}>
+              {r.adName}
+            </p>
+            <p className="truncate text-[10px] text-neutral-500" title={r.campaignName}>
+              {r.campaignName}
+            </p>
+          </AdHoverPreview>
         </td>
         <td className="px-3 py-2.5 text-right tabular-nums">{fmtCurrencyWhole(r.spend, currency)}</td>
         <td className="px-3 py-2.5 text-right tabular-nums">{fmtNumber(r.conversions)}</td>

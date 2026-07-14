@@ -5,6 +5,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import dynamic from "next/dynamic"
 import { Card } from "@/components/ui/card"
 import AdSetSelector from "@/components/ui/adset-selector"
+import AdCreativeMedia from "@/components/dashboard/ad-creative-media"
 import { fmtCurrency, fmtCurrencyCompact, fmtNumber, fmtRoas, fmtDateShort } from "@/lib/utils/format"
 import {
   classifyAds,
@@ -26,7 +27,9 @@ const ReachEfficiencyScatter = dynamic(
 
 type Props = {
   windows: Partial<Record<WindowKey, AdEfficiencyRow[]>>
-  thumbnails: Record<string, string>
+  /** @deprecated no longer used — cards resolve media per adId via
+   *  /api/ad-preview, which can't show another ad's creative. */
+  thumbnails?: Record<string, string>
   keyAction: string
   currency?: string
   /** Initial window (from URL), so custom ranges survive navigation */
@@ -37,7 +40,6 @@ type Props = {
 
 export default function ReachEfficiencySection({
   windows,
-  thumbnails,
   keyAction,
   currency = "GBP",
   initialWindow = "30d",
@@ -107,21 +109,6 @@ export default function ReachEfficiencySection({
   // narrowing to one campaign or ad set
   const thresholds = useMemo(() => computeThresholds(filtered), [filtered])
   const points = useMemo(() => classifyAds(filtered, thresholds), [filtered, thresholds])
-
-  // Meta CDN thumbnail URLs expire after ~24h, so route every ad through
-  // /api/thumbnail, which refreshes expired URLs from the Graph API — even for
-  // ads with no synced thumbnail yet. Non-http URLs (test fixtures) pass through.
-  const proxiedThumbnails = useMemo(() => {
-    const map: Record<string, string> = {}
-    for (const ad of ads) {
-      const raw = thumbnails[ad.adId]
-      map[ad.adId] =
-        raw && !raw.startsWith("http")
-          ? raw
-          : `/api/thumbnail?ad_id=${encodeURIComponent(ad.adId)}`
-    }
-    return map
-  }, [ads, thumbnails])
 
   const efficient = useMemo(
     () =>
@@ -233,7 +220,6 @@ export default function ReachEfficiencySection({
           <ReachEfficiencyScatter
             points={points}
             thresholds={thresholds}
-            thumbnails={proxiedThumbnails}
             currency={currency}
             height={420}
           />
@@ -250,7 +236,6 @@ export default function ReachEfficiencySection({
         subtitle="low CPMr + low CPA — scale these"
         emptyText="No ads currently qualify — they need top-quartile spend, below-median CPMr and CPA under the split."
         points={efficient}
-        thumbnails={proxiedThumbnails}
         currency={currency}
         cpaSplit={thresholds.cpaSplit}
         accent="text-emerald-400"
@@ -260,7 +245,6 @@ export default function ReachEfficiencySection({
         subtitle="cheap reach at scale, high CPA — don't pause"
         emptyText="No reach plays in this window."
         points={reachPlays}
-        thumbnails={proxiedThumbnails}
         currency={currency}
         cpaSplit={thresholds.cpaSplit}
         accent="text-amber-400"
@@ -357,7 +341,6 @@ function AdRail({
   subtitle,
   emptyText,
   points,
-  thumbnails,
   currency,
   cpaSplit,
   accent,
@@ -366,7 +349,6 @@ function AdRail({
   subtitle: string
   emptyText: string
   points: AdEfficiencyPoint[]
-  thumbnails: Record<string, string>
   currency: string
   cpaSplit: number
   accent: string
@@ -388,7 +370,6 @@ function AdRail({
             <RailCard
               key={p.adId}
               point={p}
-              thumbnailUrl={thumbnails[p.adId]}
               currency={currency}
               cpaSplit={cpaSplit}
               accent={accent}
@@ -402,63 +383,27 @@ function AdRail({
 
 function RailCard({
   point,
-  thumbnailUrl,
   currency,
   cpaSplit,
   accent,
 }: {
   point: AdEfficiencyPoint
-  thumbnailUrl?: string
   currency: string
   cpaSplit: number
   accent: string
 }) {
-  const [imgError, setImgError] = useState(false)
-  const imgRef = useRef<HTMLImageElement>(null)
   const cls = CLASSIFICATION_CONFIG[point.classification]
   const cpaGood = point.cpa !== null && point.cpa <= cpaSplit
 
-  // Cards are server-rendered, so an image can fail before hydration attaches
-  // the onError listener — re-check after mount, and reset when the URL changes
-  useEffect(() => {
-    setImgError(false)
-    const el = imgRef.current
-    if (el && el.complete && el.naturalWidth === 0) setImgError(true)
-  }, [thumbnailUrl])
-
   return (
     <div className="flex w-56 shrink-0 flex-col overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900 transition-colors hover:border-neutral-700">
-      <div className="relative aspect-video bg-neutral-800">
-        {thumbnailUrl && !imgError ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            ref={imgRef}
-            src={thumbnailUrl}
-            alt=""
-            className="absolute inset-0 h-full w-full object-cover"
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={() => setImgError(true)}
-          />
-        ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-xs text-neutral-600">
-            {point.isVideo ? "🎥" : "🖼"} No preview
-          </div>
-        )}
+      <div className="relative">
+        <AdCreativeMedia adId={point.adId} isVideoHint={point.isVideo} aspectClass="aspect-video" />
         <span
           className={`absolute left-2 top-2 inline-flex items-center rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide backdrop-blur-sm ${cls.badgeClass}`}
         >
           {cls.badge}
         </span>
-        {point.isVideo && thumbnailUrl && !imgError && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-black/50 backdrop-blur-sm">
-              <svg className="ml-0.5 h-3.5 w-3.5 text-white" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-            </div>
-          </div>
-        )}
       </div>
       <div className="flex flex-1 flex-col gap-1.5 p-3">
         <p className="truncate text-xs text-neutral-300" title={point.adName}>

@@ -94,7 +94,10 @@ export async function GET(request: NextRequest) {
   const supabase = createServiceClient()
 
   // Cache key is fixed per-ad (data is format-independent now).
-  const cacheKey = "v11"
+  // v12: creative resolution order flipped to ad_id-first — earlier rows may
+  // hold a different ad's creative when meta_ad_metadata.creative_id was
+  // miswritten by the sync, so all v11 entries are treated as misses.
+  const cacheKey = "v12"
   const { data: cached } = await supabase
     .from("meta_ad_creative_previews")
     .select("html, fetched_at")
@@ -122,8 +125,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "META_ACCESS_TOKEN not set" }, { status: 503 })
   }
 
-  // Resolve creative_id (preferred — works for paused ads), then fall back
-  // to ad_id with adcreatives expansion.
+  // Resolve via the ad itself FIRST — /{ad_id}?fields=creative{…} returns
+  // the creative actually attached to this ad, so it can never cross ads.
+  // The stored creative_id is only a fallback (helps for deleted ads whose
+  // ad node is gone): synced creative_ids have been observed pointing at
+  // the wrong creative, which made every preview render the same ad.
   const { data: metaRow } = await supabase
     .from("meta_ad_metadata")
     .select("creative_id")
@@ -131,17 +137,18 @@ export async function GET(request: NextRequest) {
     .maybeSingle()
 
   const attempts: GraphAttempt[] = []
-  const candidates: Array<{ via: string; url: string }> = []
+  const candidates: Array<{ via: string; url: string }> = [
+    {
+      via: "ad_id",
+      url: `${META_GRAPH_URL}/${adId}?fields=${encodeURIComponent(`creative{${CREATIVE_FIELDS}}`)}&access_token=${accessToken}`,
+    },
+  ]
   if (metaRow?.creative_id) {
     candidates.push({
       via: "creative_id",
       url: `${META_GRAPH_URL}/${metaRow.creative_id}?fields=${encodeURIComponent(CREATIVE_FIELDS)}&access_token=${accessToken}`,
     })
   }
-  candidates.push({
-    via: "ad_id",
-    url: `${META_GRAPH_URL}/${adId}?fields=${encodeURIComponent(`creative{${CREATIVE_FIELDS}}`)}&access_token=${accessToken}`,
-  })
 
   for (const { via, url } of candidates) {
     try {
@@ -214,6 +221,23 @@ export async function GET(request: NextRequest) {
         .from("meta_ad_creative_previews")
         .upsert({ ad_id: adId, format: cacheKey, html: JSON.stringify(data), fetched_at: new Date().toISOString() })
         .then(() => {})
+
+      // Self-heal miswritten sync metadata: the ad_id path just told us the
+      // creative that is REALLY attached to this ad, so repair a stale or
+      // wrong stored creative_id/thumbnail (these also feed /api/thumbnail).
+      const trueCreativeId: string | undefined = via === "ad_id" ? raw?.id : undefined
+      if (trueCreativeId && metaRow && metaRow.creative_id !== trueCreativeId) {
+        const healUrl = data.media?.imageUrl ?? data.media?.thumbnailUrl ?? data.children[0]?.imageUrl ?? null
+        supabase
+          .from("meta_ad_metadata")
+          .update({
+            creative_id: trueCreativeId,
+            ...(healUrl ? { creative_thumbnail_url: healUrl } : {}),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("ad_id", adId)
+          .then(() => {})
+      }
 
       // Compact diagnostic so the client can console.log it. Tells us, in
       // one glance, which Meta fields were populated for this ad — useful

@@ -31,23 +31,41 @@ type Props = {
  * a square-ish card with header + body + media + footer; story/reels is a
  * full-height 9:16 frame with overlays on top of the media.
  */
-export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo, metaAccountId, adName }: Props) {
-  const [data, setData] = useState<AdCreativeData | null>(null)
+/** Session-lived creative cache so re-opening the same ad (modal or hover
+ *  preview) renders instantly instead of re-hitting /api/ad-preview.
+ *  Errors are deliberately not cached so a transient failure can retry. */
+const creativeCache = new Map<string, AdCreativeData>()
+
+/**
+ * Fetch + cache the structured creative data for one ad. Strictly keyed by
+ * adId with a stale-response guard, so a fast hover from ad A to ad B can
+ * never leave A's creative rendered against B. Shared by the detail modal
+ * (AdPreview) and the hover-preview surfaces (AdCreativeMedia).
+ */
+export function useAdCreative(adId: string): {
+  data: AdCreativeData | null
+  errored: boolean
+  errorReason: string | null
+} {
+  const [data, setData] = useState<AdCreativeData | null>(() => creativeCache.get(adId) ?? null)
   const [errored, setErrored] = useState(false)
   const [errorReason, setErrorReason] = useState<string | null>(null)
   const reqRef = useRef(0)
 
   useEffect(() => {
     const reqId = ++reqRef.current
-    setData(null)
     setErrored(false)
     setErrorReason(null)
 
-    // Format is purely a render-time concern — no need to refetch.
+    const cachedData = creativeCache.get(adId)
+    setData(cachedData ?? null)
+    if (cachedData) return
+
     fetch(`/api/ad-preview?ad_id=${encodeURIComponent(adId)}`)
       .then(async (res) => {
         if (reqId !== reqRef.current) return
         const payload = await res.json().catch(() => null)
+        if (reqId !== reqRef.current) return
         if (!res.ok) {
           setErrored(true)
           setErrorReason(summarizeAttempts(payload) || `HTTP ${res.status}`)
@@ -55,6 +73,7 @@ export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo,
           return
         }
         if (payload?.data) {
+          creativeCache.set(adId, payload.data as AdCreativeData)
           setData(payload.data as AdCreativeData)
           // Log the server-provided diagnostic so the team can inspect
           // which Meta fields were populated without a separate debug URL.
@@ -70,6 +89,12 @@ export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo,
         setErrorReason(e?.message || "network error")
       })
   }, [adId])
+
+  return { data, errored, errorReason }
+}
+
+export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo, metaAccountId, adName }: Props) {
+  const { data, errored, errorReason } = useAdCreative(adId)
 
   const isStory = isStoryFormat(format)
 
