@@ -1282,7 +1282,7 @@ async function _fetchAdEconGroups(
     .limit(1)
   const hasAppsColumn = probe.error?.code !== "42703"
 
-  const baseColumns = "date, campaign_name, ad_id, ad_name, spend, purchases"
+  const baseColumns = "date, campaign_name, adset_id, adset_name, ad_id, ad_name, spend, purchases"
   const columns = hasAppsColumn ? `${baseColumns}, applications_submitted` : baseColumns
 
   const dailyRows = await fetchAllRows<EconDailyRow>(() =>
@@ -1317,7 +1317,8 @@ export async function fetchUnitEconomicsData(
       .single(),
     unstable_cache(
       () => _fetchAdEconGroups(clientId, from, to),
-      ["fetchAdEconGroups", clientId, from, to],
+      // v2: groups now carry adset identity — don't serve pre-adset cache
+      ["fetchAdEconGroups-v2", clientId, from, to],
       { revalidate: CACHE_TTL_SECONDS, tags: [`client:${clientId}`] }
     )(),
     supabase

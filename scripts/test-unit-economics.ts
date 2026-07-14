@@ -8,6 +8,8 @@
 import {
   scoreAd,
   aggregateAdEcon,
+  groupByAdset,
+  groupEconDailyRows,
   DEFAULT_LTV_ASSUMPTIONS,
   type EconDailyRow,
 } from "../lib/utils/unit-economics"
@@ -70,6 +72,8 @@ const day = (over: Partial<EconDailyRow>): EconDailyRow => ({
   date: "2026-07-01",
   ad_id: "a",
   ad_name: "Ad A",
+  adset_id: "as1",
+  adset_name: "Ad Set 1",
   campaign_name: "Camp",
   spend: 0,
   purchases: 0,
@@ -120,6 +124,41 @@ check(
   "summary mix is conversion-weighted",
   approx(withData.summary.blendedAnnualMix, (0.3 * 20 + 0 * 10 + 0.2 * 5) / 35, 0.001),
   `got ${withData.summary.blendedAnnualMix}`
+)
+
+// ── Ad-set grouping ──
+console.log("Ad-set grouping:")
+const adsetGroups = groupByAdset(
+  groupEconDailyRows([
+    // Ad set as1: one ad with apps data, one without
+    day({ ad_id: "a", adset_id: "as1", adset_name: "Set One", spend: 500, purchases: 10, applications_submitted: 4 }),
+    day({ ad_id: "b", adset_id: "as1", adset_name: "Set One", spend: 300, purchases: 10 }),
+    // Ad set as2: single ad, no apps data
+    day({ ad_id: "c", adset_id: "as2", adset_name: "Set Two", spend: 200, purchases: 5 }),
+  ])
+)
+check("rolls ads up to one group per ad set", adsetGroups.length === 2, `got ${adsetGroups.length}`)
+const setOne = adsetGroups.find((g) => g.adId === "as1")!
+const setTwo = adsetGroups.find((g) => g.adId === "as2")!
+check("ad-set sums spend and purchases across its ads", setOne.spend === 800 && setOne.purchases === 20)
+check("ad-set carries the ad-set name as the row label", setOne.adName === "Set One", setOne.adName)
+check(
+  "apps summed only from ads with synced data, set still counts as having data",
+  setOne.apps === 4 && setOne.hasAppsData,
+  JSON.stringify({ apps: setOne.apps, hasAppsData: setOne.hasAppsData })
+)
+check("ad set with no synced ads keeps hasAppsData=false", !setTwo.hasAppsData && setTwo.apps === 0)
+const scoredSet = aggregateAdEcon(
+  [
+    day({ ad_id: "a", adset_id: "as1", adset_name: "Set One", spend: 500, purchases: 10, applications_submitted: 4 }),
+    day({ ad_id: "b", adset_id: "as1", adset_name: "Set One", spend: 300, purchases: 10, applications_submitted: 0 }),
+  ],
+  cfg
+)
+check(
+  "per-ad and per-adset totals agree (spend)",
+  Math.abs(scoredSet.summary.totalSpend - (setOne.spend)) < 0.001,
+  `${scoredSet.summary.totalSpend} vs ${setOne.spend}`
 )
 
 console.log("")
