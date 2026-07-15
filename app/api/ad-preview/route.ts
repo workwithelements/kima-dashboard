@@ -1,8 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient } from "@/lib/supabase/server"
+import { isPreviewAuthorized } from "@/lib/auth/preview-auth"
 
 const META_GRAPH_URL = "https://graph.facebook.com/v21.0"
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
+
+/** Every outbound Meta call gets a hard timeout: one hung request must never
+ *  stall the whole route past the serverless function limit (a killed
+ *  function returns an opaque 502 and the preview never renders). Timed-out
+ *  sub-fetches throw into their existing catch blocks and degrade to null. */
+const GRAPH_TIMEOUT_MS = 5000
+const SCRAPE_TIMEOUT_MS = 3500
+/** Ceiling for the whole enrichment stage (page info, video URLs, post,
+ *  image hashes, scrape). On timeout the creative renders from the main
+ *  call's fields alone — degraded but delivered. */
+const ENRICHMENT_TIMEOUT_MS = 6500
 
 /** What we ask Meta for in a single batched call. Nested expansion pulls page
  *  name + profile picture and carousel children without follow-up requests. */
@@ -93,8 +105,17 @@ export async function GET(request: NextRequest) {
 
   const supabase = createServiceClient()
 
+  // Exempted from the middleware's blanket API auth (like /api/thumbnail) so
+  // previews load on public share pages — must authorise per request.
+  if (!(await isPreviewAuthorized(request, supabase))) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
   // Cache key is fixed per-ad (data is format-independent now).
-  const cacheKey = "v11"
+  // v12: creative resolution order flipped to ad_id-first — earlier rows may
+  // hold a different ad's creative when meta_ad_metadata.creative_id was
+  // miswritten by the sync, so all v11 entries are treated as misses.
+  const cacheKey = "v12"
   const { data: cached } = await supabase
     .from("meta_ad_creative_previews")
     .select("html, fetched_at")
@@ -122,8 +143,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "META_ACCESS_TOKEN not set" }, { status: 503 })
   }
 
-  // Resolve creative_id (preferred — works for paused ads), then fall back
-  // to ad_id with adcreatives expansion.
+  // Resolve via the ad itself FIRST — /{ad_id}?fields=creative{…} returns
+  // the creative actually attached to this ad, so it can never cross ads.
+  // The stored creative_id is only a fallback (helps for deleted ads whose
+  // ad node is gone): synced creative_ids have been observed pointing at
+  // the wrong creative, which made every preview render the same ad.
   const { data: metaRow } = await supabase
     .from("meta_ad_metadata")
     .select("creative_id")
@@ -131,21 +155,22 @@ export async function GET(request: NextRequest) {
     .maybeSingle()
 
   const attempts: GraphAttempt[] = []
-  const candidates: Array<{ via: string; url: string }> = []
+  const candidates: Array<{ via: string; url: string }> = [
+    {
+      via: "ad_id",
+      url: `${META_GRAPH_URL}/${adId}?fields=${encodeURIComponent(`creative{${CREATIVE_FIELDS}}`)}&access_token=${accessToken}`,
+    },
+  ]
   if (metaRow?.creative_id) {
     candidates.push({
       via: "creative_id",
       url: `${META_GRAPH_URL}/${metaRow.creative_id}?fields=${encodeURIComponent(CREATIVE_FIELDS)}&access_token=${accessToken}`,
     })
   }
-  candidates.push({
-    via: "ad_id",
-    url: `${META_GRAPH_URL}/${adId}?fields=${encodeURIComponent(`creative{${CREATIVE_FIELDS}}`)}&access_token=${accessToken}`,
-  })
 
   for (const { via, url } of candidates) {
     try {
-      const res = await fetch(url, { next: { revalidate: 0 } })
+      const res = await fetch(url, { next: { revalidate: 0 }, signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS) })
       const text = await res.text()
       let json: any = null
       try { json = JSON.parse(text) } catch { /* keep null */ }
@@ -191,13 +216,38 @@ export async function GET(request: NextRequest) {
       // endpoint works on both ad_ids and creative_ids; we already know
       // which one was successful for the main fetch.
       const previewResourceId = via === "ad_id" ? adId : (metaRow?.creative_id ?? adId)
-      const [pageInfo, videoUrlMap, postInfo, imageHashMap, inlineVideoUrl] = await Promise.all([
-        pageId ? fetchPageInfo(pageId, accessToken) : Promise.resolve({ name: null, pictureUrl: null }),
-        fetchVideoSources(videoIds, accessToken),
-        storyId ? fetchPostInfo(storyId, accessToken) : Promise.resolve({ fullPicture: null, videoSource: null, permalinkUrl: null }),
-        accountId && imageHashes.length > 0 ? fetchImagesByHash(accountId, imageHashes, accessToken) : Promise.resolve({}),
-        isVideoAd ? extractInlineVideoUrl(previewResourceId, accessToken) : Promise.resolve(null),
+      const enrichmentFallback: [
+        { name: string | null; pictureUrl: string | null },
+        Record<string, string>,
+        { fullPicture: string | null; videoSource: string | null; permalinkUrl: string | null },
+        Record<string, string>,
+        string | null,
+      ] = [
+        { name: null, pictureUrl: null },
+        {},
+        { fullPicture: null, videoSource: null, permalinkUrl: null },
+        {},
+        null,
+      ]
+      let enrichmentTimer: ReturnType<typeof setTimeout> | undefined
+      const enriched = await Promise.race([
+        Promise.all([
+          pageId ? fetchPageInfo(pageId, accessToken) : Promise.resolve({ name: null, pictureUrl: null }),
+          fetchVideoSources(videoIds, accessToken),
+          storyId ? fetchPostInfo(storyId, accessToken) : Promise.resolve({ fullPicture: null, videoSource: null, permalinkUrl: null }),
+          accountId && imageHashes.length > 0 ? fetchImagesByHash(accountId, imageHashes, accessToken) : Promise.resolve({}),
+          isVideoAd ? extractInlineVideoUrl(previewResourceId, accessToken) : Promise.resolve(null),
+        ]).then((values) => ({ values, timedOut: false })),
+        new Promise<{ values: typeof enrichmentFallback; timedOut: true }>((resolve) => {
+          enrichmentTimer = setTimeout(() => {
+            console.warn(`[ad-preview] enrichment timed out for ${adId} — serving base creative`)
+            resolve({ values: enrichmentFallback, timedOut: true })
+          }, ENRICHMENT_TIMEOUT_MS)
+        }),
       ])
+      // Don't leave the timer holding the serverless function open
+      clearTimeout(enrichmentTimer)
+      const [pageInfo, videoUrlMap, postInfo, imageHashMap, inlineVideoUrl] = enriched.values
 
       // Roll the scraped URL into postInfo so normalizeCreative picks it
       // up via its existing postInfo.videoSource fallback. Cheaper than
@@ -209,11 +259,31 @@ export async function GET(request: NextRequest) {
 
       const data = normalizeCreative(raw, pageInfo, videoUrlMap, enrichedPostInfo, imageHashMap)
 
-      // Fire-and-forget cache write.
-      supabase
-        .from("meta_ad_creative_previews")
-        .upsert({ ad_id: adId, format: cacheKey, html: JSON.stringify(data), fetched_at: new Date().toISOString() })
-        .then(() => {})
+      // Fire-and-forget cache write — but never cache a degraded result for
+      // 24h; a timed-out enrichment should retry fully on the next request.
+      if (!enriched.timedOut) {
+        supabase
+          .from("meta_ad_creative_previews")
+          .upsert({ ad_id: adId, format: cacheKey, html: JSON.stringify(data), fetched_at: new Date().toISOString() })
+          .then(() => {})
+      }
+
+      // Self-heal miswritten sync metadata: the ad_id path just told us the
+      // creative that is REALLY attached to this ad, so repair a stale or
+      // wrong stored creative_id/thumbnail (these also feed /api/thumbnail).
+      const trueCreativeId: string | undefined = via === "ad_id" ? raw?.id : undefined
+      if (trueCreativeId && metaRow && metaRow.creative_id !== trueCreativeId) {
+        const healUrl = data.media?.imageUrl ?? data.media?.thumbnailUrl ?? data.children[0]?.imageUrl ?? null
+        supabase
+          .from("meta_ad_metadata")
+          .update({
+            creative_id: trueCreativeId,
+            ...(healUrl ? { creative_thumbnail_url: healUrl } : {}),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("ad_id", adId)
+          .then(() => {})
+      }
 
       // Compact diagnostic so the client can console.log it. Tells us, in
       // one glance, which Meta fields were populated for this ad — useful
@@ -299,7 +369,7 @@ async function fetchPageInfo(pageId: string, token: string): Promise<{ name: str
   try {
     const res = await fetch(
       `${META_GRAPH_URL}/${pageId}?fields=name,picture.type(large)&access_token=${token}`,
-      { next: { revalidate: 0 } }
+      { next: { revalidate: 0 }, signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS) }
     )
     const text = await res.text()
     let json: any = null
@@ -327,7 +397,7 @@ async function fetchImagesByHash(accountId: string, hashes: string[], token: str
   if (uniq.length === 0 || !accountId) return {}
   try {
     const url = `${META_GRAPH_URL}/act_${accountId}/adimages?hashes=${encodeURIComponent(JSON.stringify(uniq))}&fields=hash,url&access_token=${token}`
-    const res = await fetch(url, { next: { revalidate: 0 } })
+    const res = await fetch(url, { next: { revalidate: 0 }, signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS) })
     const text = await res.text()
     let json: any = null
     try { json = JSON.parse(text) } catch { /* keep null */ }
@@ -381,7 +451,7 @@ async function extractInlineVideoUrl(resourceId: string, token: string): Promise
   try {
     const previewsRes = await fetch(
       `${META_GRAPH_URL}/${resourceId}/previews?ad_format=MOBILE_FEED_STANDARD&access_token=${token}`,
-      { next: { revalidate: 0 } }
+      { next: { revalidate: 0 }, signal: AbortSignal.timeout(SCRAPE_TIMEOUT_MS) }
     )
     if (!previewsRes.ok) {
       const t = await previewsRes.text()
@@ -406,6 +476,7 @@ async function extractInlineVideoUrl(resourceId: string, token: string): Promise
     // Pull down the rendered page HTML.
     const innerRes = await fetch(innerUrl, {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; KIMA-Dashboard)" },
+      signal: AbortSignal.timeout(SCRAPE_TIMEOUT_MS),
     })
     if (!innerRes.ok) {
       console.warn(`[ad-preview] preview inner fetch failed status=${innerRes.status}`)
@@ -447,7 +518,7 @@ async function fetchPostInfo(storyId: string, token: string): Promise<{
   try {
     const res = await fetch(
       `${META_GRAPH_URL}/${storyId}?fields=full_picture,source,permalink_url,attachments{type,media{source,image{src}}}&access_token=${token}`,
-      { next: { revalidate: 0 } }
+      { next: { revalidate: 0 }, signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS) }
     )
     const text = await res.text()
     let json: any = null
@@ -488,7 +559,7 @@ async function fetchVideoSources(ids: string[], token: string): Promise<Record<s
   try {
     const res = await fetch(
       `${META_GRAPH_URL}/?ids=${uniq.join(",")}&fields=source,picture&access_token=${token}`,
-      { next: { revalidate: 0 } }
+      { next: { revalidate: 0 }, signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS) }
     )
     const text = await res.text()
     let json: any = null

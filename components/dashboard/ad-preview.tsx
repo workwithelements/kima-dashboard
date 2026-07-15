@@ -31,23 +31,78 @@ type Props = {
  * a square-ish card with header + body + media + footer; story/reels is a
  * full-height 9:16 frame with overlays on top of the media.
  */
-export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo, metaAccountId, adName }: Props) {
-  const [data, setData] = useState<AdCreativeData | null>(null)
+/** Session-lived creative cache so re-opening the same ad (modal or hover
+ *  preview) renders instantly instead of re-hitting /api/ad-preview.
+ *  Errors are deliberately not cached so a transient failure can retry. */
+const creativeCache = new Map<string, AdCreativeData>()
+
+/** Cap concurrent /api/ad-preview requests: a creative grid can mount
+ *  hundreds of media cells at once, and each cache-miss fans out into
+ *  several Meta Graph calls server-side — an unthrottled burst risks Meta
+ *  rate limits. Excess requests queue and drain in order. */
+const MAX_CONCURRENT_FETCHES = 6
+let inFlight = 0
+const fetchQueue: Array<() => void> = []
+
+function acquireSlot(): Promise<void> {
+  if (inFlight < MAX_CONCURRENT_FETCHES) {
+    inFlight++
+    return Promise.resolve()
+  }
+  return new Promise((resolve) => fetchQueue.push(() => { inFlight++; resolve() }))
+}
+
+function releaseSlot() {
+  inFlight--
+  fetchQueue.shift()?.()
+}
+
+/**
+ * Fetch + cache the structured creative data for one ad. Strictly keyed by
+ * adId with a stale-response guard, so a fast hover from ad A to ad B can
+ * never leave A's creative rendered against B. Shared by the detail modal
+ * (AdPreview) and the preview surfaces (AdCreativeMedia).
+ *
+ * Pass `enabled: false` to defer the fetch (e.g. until a card scrolls into
+ * view) — the hook stays idle and starts fetching when it flips to true.
+ */
+export function useAdCreative(adId: string, enabled = true): {
+  data: AdCreativeData | null
+  errored: boolean
+  errorReason: string | null
+} {
+  const [data, setData] = useState<AdCreativeData | null>(() => creativeCache.get(adId) ?? null)
   const [errored, setErrored] = useState(false)
   const [errorReason, setErrorReason] = useState<string | null>(null)
   const reqRef = useRef(0)
 
   useEffect(() => {
     const reqId = ++reqRef.current
-    setData(null)
     setErrored(false)
     setErrorReason(null)
 
-    // Format is purely a render-time concern — no need to refetch.
-    fetch(`/api/ad-preview?ad_id=${encodeURIComponent(adId)}`)
+    const cachedData = creativeCache.get(adId)
+    setData(cachedData ?? null)
+    if (cachedData || !enabled) return
+
+    let holdingSlot = false
+    acquireSlot()
+      .then(() => {
+        holdingSlot = true
+        // Another ad (or a cached result) may have superseded us while queued
+        if (reqId !== reqRef.current) return null
+        const nowCached = creativeCache.get(adId)
+        if (nowCached) {
+          setData(nowCached)
+          return null
+        }
+        return fetch(`/api/ad-preview?ad_id=${encodeURIComponent(adId)}`)
+      })
       .then(async (res) => {
+        if (!res) return
         if (reqId !== reqRef.current) return
         const payload = await res.json().catch(() => null)
+        if (reqId !== reqRef.current) return
         if (!res.ok) {
           setErrored(true)
           setErrorReason(summarizeAttempts(payload) || `HTTP ${res.status}`)
@@ -55,6 +110,7 @@ export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo,
           return
         }
         if (payload?.data) {
+          creativeCache.set(adId, payload.data as AdCreativeData)
           setData(payload.data as AdCreativeData)
           // Log the server-provided diagnostic so the team can inspect
           // which Meta fields were populated without a separate debug URL.
@@ -69,7 +125,16 @@ export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo,
         setErrored(true)
         setErrorReason(e?.message || "network error")
       })
-  }, [adId])
+      .finally(() => {
+        if (holdingSlot) releaseSlot()
+      })
+  }, [adId, enabled])
+
+  return { data, errored, errorReason }
+}
+
+export default function AdPreview({ adId, format, fallbackThumbnailUrl, isVideo, metaAccountId, adName }: Props) {
+  const { data, errored, errorReason } = useAdCreative(adId)
 
   const isStory = isStoryFormat(format)
 

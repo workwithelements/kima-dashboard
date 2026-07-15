@@ -187,7 +187,7 @@ export function scoreAd(
 /** Daily row shape needed from meta_daily_performance. */
 export type EconDailyRow = Pick<
   MetaDailyRow,
-  "date" | "ad_id" | "ad_name" | "campaign_name" | "spend" | "purchases"
+  "date" | "ad_id" | "ad_name" | "adset_id" | "adset_name" | "campaign_name" | "spend" | "purchases"
 > & {
   /** NULL/undefined = not synced for that day; a number (incl. 0) = real data. */
   applications_submitted?: number | null
@@ -197,6 +197,8 @@ export type EconDailyRow = Pick<
 export type AdEconGroup = {
   adId: string
   adName: string
+  adsetId: string
+  adsetName: string
   campaignName: string
   spend: number
   purchases: number
@@ -269,6 +271,8 @@ export function groupEconDailyRows(dailyRows: EconDailyRow[]): AdEconGroup[] {
       acc = {
         adId: r.ad_id,
         adName: r.ad_name || r.ad_id,
+        adsetId: r.adset_id || "",
+        adsetName: r.adset_name || "",
         campaignName: r.campaign_name || "",
         latestDate: r.date,
         spend: 0,
@@ -288,11 +292,53 @@ export function groupEconDailyRows(dailyRows: EconDailyRow[]): AdEconGroup[] {
     if (r.date >= acc.latestDate) {
       acc.latestDate = r.date
       if (r.ad_name) acc.adName = r.ad_name
+      if (r.adset_id) acc.adsetId = r.adset_id
+      if (r.adset_name) acc.adsetName = r.adset_name
       if (r.campaign_name) acc.campaignName = r.campaign_name
     }
   }
 
   return Array.from(byAd.values()).map(({ latestDate: _latestDate, ...group }) => group)
+}
+
+/**
+ * Roll per-ad groups up to one group per ad set (exact for the summed
+ * inputs, so the same scoring model applies at ad-set granularity). The
+ * result reuses AdEconGroup with adId/adName carrying the ad-set identity,
+ * so scoring and rendering are level-agnostic.
+ */
+export function groupByAdset(adGroups: AdEconGroup[]): AdEconGroup[] {
+  const byAdset = new Map<string, AdEconGroup>()
+  for (const g of adGroups) {
+    const key = g.adsetId || g.adsetName || "unknown"
+    let acc = byAdset.get(key)
+    if (!acc) {
+      acc = {
+        adId: key,
+        adName: g.adsetName || "Unknown ad set",
+        adsetId: g.adsetId,
+        adsetName: g.adsetName,
+        campaignName: g.campaignName,
+        spend: 0,
+        purchases: 0,
+        apps: 0,
+        hasAppsData: false,
+      }
+      byAdset.set(key, acc)
+    }
+    acc.spend += g.spend
+    acc.purchases += g.purchases
+    // Only ads with synced applications contribute to the count; the mix is
+    // then apps / all purchases — same treatment as mixed synced/unsynced
+    // days within a single ad.
+    if (g.hasAppsData) {
+      acc.apps += g.apps
+      acc.hasAppsData = true
+    }
+    if (g.adsetName) acc.adName = g.adsetName
+    if (g.campaignName) acc.campaignName = g.campaignName
+  }
+  return Array.from(byAdset.values())
 }
 
 /**

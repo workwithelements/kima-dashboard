@@ -4,9 +4,10 @@ import { memo, useCallback, useMemo, useState } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { Card, MetricCard } from "@/components/ui/card"
 import DateRangePicker from "@/components/ui/date-range-picker"
-import PaybackSparkline from "@/components/charts/payback-sparkline"
+import AdHoverPreview from "@/components/dashboard/ad-hover-preview"
 import LtvAssumptionsModal from "@/components/dashboard/ltv-assumptions-modal"
 import {
+  groupByAdset,
   scoreAdGroups,
   STATUS_META,
   type AdEconGroup,
@@ -93,6 +94,7 @@ export default function UnitEconomicsView({
   const [updatedBy, setUpdatedBy] = useState(initialUpdatedBy)
   const [showAssumptions, setShowAssumptions] = useState(false)
   const [statusFilter, setStatusFilter] = useState<AdStatus | "all">("all")
+  const [groupBy, setGroupBy] = useState<"ad" | "adset">("ad")
   const [sortKey, setSortKey] = useState<SortKey>("net")
   const [sortDesc, setSortDesc] = useState(true)
   const [expandedAdId, setExpandedAdId] = useState<string | null>(null)
@@ -113,10 +115,10 @@ export default function UnitEconomicsView({
     router.push(`${pathname}?${params.toString()}`)
   }
 
-  const { rows, summary, applicationsDataAvailable } = useMemo(
-    () => scoreAdGroups(adGroups, assumptions),
-    [adGroups, assumptions]
-  )
+  const { rows, summary, applicationsDataAvailable } = useMemo(() => {
+    const groups = groupBy === "adset" ? groupByAdset(adGroups) : adGroups
+    return scoreAdGroups(groups, assumptions)
+  }, [adGroups, assumptions, groupBy])
 
   const toggleExpanded = useCallback(
     (adId: string) => setExpandedAdId((prev) => (prev === adId ? null : adId)),
@@ -246,9 +248,31 @@ export default function UnitEconomicsView({
         </Card>
       </div>
 
-      {/* Status counts + filter pills */}
+      {/* Grouping + status counts + filter pills */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-1.5">
+          {/* Group-by toggle */}
+          <div className="mr-2 inline-flex rounded-lg border border-neutral-700 bg-neutral-800/50 p-0.5">
+            {([
+              { value: "ad", label: "By ad" },
+              { value: "adset", label: "By ad set" },
+            ] as const).map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => {
+                  setGroupBy(opt.value)
+                  setExpandedAdId(null)
+                }}
+                className={`rounded-md px-2.5 py-1 text-xs transition ${
+                  groupBy === opt.value
+                    ? "bg-brand-lime/15 text-brand-lime"
+                    : "text-neutral-400 hover:text-white"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
           <button
             onClick={() => setStatusFilter("all")}
             className={`rounded-full border px-3 py-1 text-xs transition ${
@@ -287,10 +311,10 @@ export default function UnitEconomicsView({
 
       {/* Per-ad table */}
       <Card className="overflow-x-auto !p-0">
-        <table className="w-full min-w-[1080px] text-sm">
+        <table className="w-full min-w-[1000px] text-sm">
           <thead>
             <tr className="border-b border-neutral-800 text-left text-[11px] uppercase tracking-wider text-neutral-500">
-              <th className="px-4 py-3 font-medium">Ad</th>
+              <th className="px-4 py-3 font-medium">{groupBy === "adset" ? "Ad set" : "Ad"}</th>
               {[
                 { key: "spend" as SortKey, label: "Spend" },
                 { key: null, label: "Conv." },
@@ -299,7 +323,6 @@ export default function UnitEconomicsView({
                 { key: null, label: "Blended LTV" },
                 { key: "ltvCac" as SortKey, label: "LTV:CAC" },
                 { key: "payback" as SortKey, label: "Payback" },
-                { key: null, label: "" },
                 { key: "value" as SortKey, label: "Est. Value" },
                 { key: "net" as SortKey, label: "Est. Net" },
                 { key: null, label: "Status" },
@@ -325,8 +348,9 @@ export default function UnitEconomicsView({
           <tbody>
             {visibleRows.length === 0 && (
               <tr>
-                <td colSpan={12} className="px-4 py-8 text-center text-xs text-neutral-500">
-                  No ads in this range{statusFilter !== "all" ? " with this status" : ""}.
+                <td colSpan={11} className="px-4 py-8 text-center text-xs text-neutral-500">
+                  No {groupBy === "adset" ? "ad sets" : "ads"} in this range
+                  {statusFilter !== "all" ? " with this status" : ""}.
                 </td>
               </tr>
             )}
@@ -339,6 +363,7 @@ export default function UnitEconomicsView({
                 horizonMonths={assumptions.horizonMonths}
                 expanded={expandedAdId === r.adId}
                 onToggle={toggleExpanded}
+                showHoverPreview={groupBy === "ad"}
               />
             ))}
           </tbody>
@@ -398,6 +423,7 @@ const FragmentRow = memo(function FragmentRow({
   horizonMonths,
   expanded,
   onToggle,
+  showHoverPreview,
 }: {
   row: ScoredAdRow
   currency: string
@@ -405,9 +431,21 @@ const FragmentRow = memo(function FragmentRow({
   horizonMonths: number
   expanded: boolean
   onToggle: (adId: string) => void
+  /** Ad-level rows get a creative hover preview; ad-set rows have no single creative. */
+  showHoverPreview: boolean
 }) {
   const s = r.score
   const note = mixSourceNote(r)
+  const nameCell = (
+    <>
+      <p className="truncate text-xs text-white" title={r.adName}>
+        {r.adName}
+      </p>
+      <p className="truncate text-[10px] text-neutral-500" title={r.campaignName}>
+        {r.campaignName}
+      </p>
+    </>
+  )
   return (
     <>
       <tr
@@ -417,12 +455,7 @@ const FragmentRow = memo(function FragmentRow({
         }`}
       >
         <td className="max-w-[220px] px-4 py-2.5">
-          <p className="truncate text-xs text-white" title={r.adName}>
-            {r.adName}
-          </p>
-          <p className="truncate text-[10px] text-neutral-500" title={r.campaignName}>
-            {r.campaignName}
-          </p>
+          {showHoverPreview ? <AdHoverPreview adId={r.adId}>{nameCell}</AdHoverPreview> : <div>{nameCell}</div>}
         </td>
         <td className="px-3 py-2.5 text-right tabular-nums">{fmtCurrencyWhole(r.spend, currency)}</td>
         <td className="px-3 py-2.5 text-right tabular-nums">{fmtNumber(r.conversions)}</td>
@@ -458,11 +491,6 @@ const FragmentRow = memo(function FragmentRow({
         <td className="px-3 py-2.5 text-right tabular-nums">
           {s ? fmtPayback(s.paybackMonth, horizonMonths) : "—"}
         </td>
-        <td className="px-2 py-2.5">
-          {s && r.cpa !== null && (
-            <PaybackSparkline curve={s.curve} cpa={r.cpa} paybackMonth={s.paybackMonth} />
-          )}
-        </td>
         <td className="px-3 py-2.5 text-right tabular-nums">
           {s ? fmtCurrencyWhole(s.estTotalValue, currency) : "—"}
         </td>
@@ -490,7 +518,7 @@ const FragmentRow = memo(function FragmentRow({
       </tr>
       {expanded && s && r.cpa !== null && (
         <tr className="border-b border-neutral-800/60 bg-neutral-800/20">
-          <td colSpan={12} className="px-4 py-3">
+          <td colSpan={11} className="px-4 py-3">
             <CeilingLadder row={r} currency={currency} note={note} />
           </td>
         </tr>

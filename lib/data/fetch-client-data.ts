@@ -982,8 +982,6 @@ export type ReachEfficiencyData = {
   /** Per-ad aggregates for each preset window (and `custom` when requested),
    *  all anchored to the same end date. */
   windows: Partial<Record<WindowKey, AdEfficiencyRow[]>>
-  /** ad_id → creative thumbnail URL for every ad present in any window */
-  thumbnails: Record<string, string>
   /** Key action the CPA is measured on (client's scorecard config) */
   keyAction: string
 }
@@ -1081,32 +1079,7 @@ async function _fetchReachEfficiencyDataInner(
     windows.custom = aggregateAdEfficiency(customSource)
   }
 
-  // Thumbnails for every ad on the map (batched — .in() caps around 300 items)
-  const adIds = new Set<string>()
-  for (const ads of Object.values(windows)) {
-    for (const ad of ads || []) adIds.add(ad.adId)
-  }
-  const idList = Array.from(adIds)
-  const BATCH_SIZE = 300
-  const thumbBatches = await Promise.all(
-    Array.from({ length: Math.ceil(idList.length / BATCH_SIZE) }, (_, i) =>
-      fetchAllRows<{ ad_id: string; creative_thumbnail_url: string | null }>(() =>
-        supabase
-          .from("meta_ad_metadata")
-          .select("ad_id, creative_thumbnail_url")
-          .in("ad_id", idList.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE))
-          .not("creative_thumbnail_url", "is", null)
-      )
-    )
-  )
-  const thumbnails: Record<string, string> = {}
-  for (const batch of thumbBatches) {
-    for (const row of batch) {
-      if (row.creative_thumbnail_url) thumbnails[row.ad_id] = row.creative_thumbnail_url
-    }
-  }
-
-  return { windows, thumbnails, keyAction }
+  return { windows, keyAction }
 }
 
 // Re-export getClientPlatforms from types for backwards compat
@@ -1309,7 +1282,7 @@ async function _fetchAdEconGroups(
     .limit(1)
   const hasAppsColumn = probe.error?.code !== "42703"
 
-  const baseColumns = "date, campaign_name, ad_id, ad_name, spend, purchases"
+  const baseColumns = "date, campaign_name, adset_id, adset_name, ad_id, ad_name, spend, purchases"
   const columns = hasAppsColumn ? `${baseColumns}, applications_submitted` : baseColumns
 
   const dailyRows = await fetchAllRows<EconDailyRow>(() =>
@@ -1344,7 +1317,8 @@ export async function fetchUnitEconomicsData(
       .single(),
     unstable_cache(
       () => _fetchAdEconGroups(clientId, from, to),
-      ["fetchAdEconGroups", clientId, from, to],
+      // v2: groups now carry adset identity — don't serve pre-adset cache
+      ["fetchAdEconGroups-v2", clientId, from, to],
       { revalidate: CACHE_TTL_SECONDS, tags: [`client:${clientId}`] }
     )(),
     supabase

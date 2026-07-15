@@ -13,6 +13,7 @@ import {
   Label,
 } from "recharts"
 import { fmtCurrency, fmtCurrencyCompact, fmtNumber, fmtRoas } from "@/lib/utils/format"
+import AdCreativeMedia from "@/components/dashboard/ad-creative-media"
 import {
   CLASSIFICATION_CONFIG,
   type AdEfficiencyPoint,
@@ -22,7 +23,9 @@ import {
 type Props = {
   points: AdEfficiencyPoint[]
   thresholds: EfficiencyThresholds
-  thumbnails: Record<string, string>
+  /** @deprecated no longer used — the hover card resolves media per adId
+   *  via /api/ad-preview, which can't show another ad's creative. */
+  thumbnails?: Record<string, string>
   currency?: string
   height?: number
 }
@@ -35,7 +38,6 @@ type Props = {
 export default function ReachEfficiencyScatter({
   points,
   thresholds,
-  thumbnails,
   currency = "GBP",
   height = 420,
 }: Props) {
@@ -130,8 +132,8 @@ export default function ReachEfficiencyScatter({
               if (!active || !point) return null
               return (
                 <AdHoverCard
+                  key={point.adId}
                   point={point}
-                  thumbnailUrl={thumbnails[point.adId]}
                   currency={currency}
                   cpaSplit={thresholds.cpaSplit}
                 />
@@ -183,15 +185,16 @@ export default function ReachEfficiencyScatter({
   )
 }
 
-/** Hover card: creative preview + badge + the numbers that drive the keep-on/off call. */
+/** Hover card: creative preview + badge + the numbers that drive the keep-on/off call.
+ *  Media comes from /api/ad-preview keyed strictly by adId (full-res image or
+ *  autoplaying video) — never from synced thumbnail URLs, which were low-res
+ *  and could point at the wrong creative. */
 function AdHoverCard({
   point,
-  thumbnailUrl,
   currency,
   cpaSplit,
 }: {
   point: AdEfficiencyPoint
-  thumbnailUrl?: string
   currency: string
   cpaSplit: number
 }) {
@@ -199,34 +202,13 @@ function AdHoverCard({
   const cpaGood = point.cpa !== null && point.cpa <= cpaSplit
   return (
     <div className="w-60 overflow-hidden rounded-xl border border-neutral-700 bg-neutral-900 shadow-2xl">
-      <div className="relative aspect-video bg-neutral-800">
-        {thumbnailUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={thumbnailUrl}
-            alt={point.adName}
-            className="absolute inset-0 h-full w-full object-cover"
-            referrerPolicy="no-referrer"
-          />
-        ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-xs text-neutral-600">
-            {point.isVideo ? "🎥" : "🖼"} No preview
-          </div>
-        )}
+      <div className="relative">
+        <AdCreativeMedia adId={point.adId} isVideoHint={point.isVideo} aspectClass="aspect-video" />
         <span
           className={`absolute left-2 top-2 inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide backdrop-blur-sm ${cls.badgeClass}`}
         >
           {cls.badge}
         </span>
-        {point.isVideo && thumbnailUrl && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-black/50 backdrop-blur-sm">
-              <svg className="ml-0.5 h-3.5 w-3.5 text-white" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-            </div>
-          </div>
-        )}
       </div>
       <div className="space-y-1 p-3">
         <p className="truncate text-xs font-medium text-neutral-200" title={point.adName}>
