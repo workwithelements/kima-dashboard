@@ -189,18 +189,48 @@ Clone the Amplitude wiring 1:1:
 
 ### 7. Surfacing in the dashboard
 
-Two options (can start with A, add B later):
+**Decision: ship a dedicated, gated "Traffic" tab (phase 1).** The dashboard is a
+per-client tab bar (`components/ui/client-header.tsx`) where each tab is its own
+server-rendered route that fetches data and renders one view. GA4 follows that
+grain exactly — same mechanism used to add the "Marketing Impact" tab.
 
-- **A. Channel/traffic view** — a new tab/section rendering
-  `ga4_daily_traffic`: sessions & engaged-session rate over time (Recharts, like
-  existing charts), a channel-group breakdown table, and top source/medium by
-  sessions + revenue.
-- **B. Attribution cross-check** — surface GA4 channel revenue next to
-  `shopify_daily_attribution` and the weekly attribution model, as an
-  independent second opinion on where conversions come from.
+**Gating wiring** (mirror the existing `marketingImpactEnabled` path):
 
-Gate all GA4 UI on `client.ga4_property_id` being set, so non-GA4 clients see
-nothing new — same convention as `marketing_impact_enabled` / platform gating.
+1. `clients.ga4_property_id` present → the client layout
+   (`app/(admin)/dashboard/clients/[id]/layout.tsx`) computes a `ga4Enabled`
+   boolean and passes it into `<ClientHeader>`.
+2. `ClientHeader` gets a new prop `ga4Enabled` and a new tab entry
+   `{ label: "Traffic", href: "/traffic", requiresGa4: true }`, filtered out when
+   `ga4Enabled` is false — same as `requiresMarketingImpact`.
+3. New route `app/(admin)/dashboard/clients/[id]/traffic/page.tsx` →
+   `fetchGA4Data(clientId, from, to)` → renders `<Ga4TrafficView>`.
+
+Clients without a `ga4_property_id` never see the tab — zero visual change for
+them.
+
+**`Ga4TrafficView` contents** (reuse existing scorecard-tile, Recharts, and
+breakdown-table patterns):
+
+- **Scorecard band** — Sessions, Engaged-session rate, Total users, New users,
+  Key events, Revenue, each with period-over-period deltas (reuse the existing
+  date-range + comparison controls).
+- **Sessions & engagement trend** — daily line/area chart.
+- **Channel-group breakdown** — table + stacked bar by
+  `sessionDefaultChannelGroup`, with sessions / key events / revenue per channel.
+- **Top source / medium** — ranked table by sessions and revenue.
+
+**Phase 2 (deferred): attribution cross-check.** Once GA4 numbers are validated,
+surface GA4 channel revenue next to `shopify_daily_attribution` and the weekly
+attribution model as an independent second opinion. Lives inside the existing
+Breakdowns / Marketing Impact surface, not a new tab. Explicitly out of scope for
+phase 1.
+
+**Not folding into the Performance tab** — that view is the largest, most complex
+file in the repo (~122 KB); regression risk outweighs the placement benefit.
+
+**Rollout:** build the `ga4_property_id` gating so any client can be switched on;
+no pilot client hardcoded. Set property IDs + grant the shared SA Viewer access
+per client when ready, backfill, validate against the GA4 UI, then flip on.
 
 ### 8. Dependency + env
 
@@ -222,10 +252,13 @@ nothing new — same convention as `marketing_impact_enabled` / platform gating.
 | 6 | `app/api/clients/[clientId]/ga4/route.ts` | New | GET/PUT config |
 | 7 | `app/api/clients/[clientId]/ga4/test/route.ts` | New | Connection test |
 | 8 | `components/dashboard/client-settings-view.tsx` | Edit | GA4 settings section |
-| 9 | Dashboard view (new component) | New | Channel/traffic surfacing |
-| 10 | `package.json` | Edit | `google-auth-library` dep + `sync:ga4` script |
-| 11 | `.env.local.example` | Edit | `GA4_SERVICE_ACCOUNT_JSON` |
-| 12 | GitHub Actions workflow or cron route | New | Daily sync |
+| 9 | `components/dashboard/ga4-traffic-view.tsx` | New | Traffic tab view (scorecards, trend, channel + source/medium) |
+| 10 | `app/(admin)/dashboard/clients/[id]/traffic/page.tsx` | New | Traffic route → `fetchGA4Data` → `<Ga4TrafficView>` |
+| 11 | `app/(admin)/dashboard/clients/[id]/layout.tsx` | Edit | Compute `ga4Enabled`, pass to `<ClientHeader>` |
+| 12 | `components/ui/client-header.tsx` | Edit | `ga4Enabled` prop + `Traffic` tab with `requiresGa4` gate |
+| 13 | `package.json` | Edit | `google-auth-library` dep + `sync:ga4` script |
+| 14 | `.env.local.example` | Edit | `GA4_SERVICE_ACCOUNT_JSON` |
+| 15 | GitHub Actions workflow or cron route | New | Daily sync |
 
 ## Effort estimate
 
