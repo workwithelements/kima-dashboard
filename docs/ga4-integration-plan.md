@@ -228,9 +228,14 @@ phase 1.
 **Not folding into the Performance tab** — that view is the largest, most complex
 file in the repo (~122 KB); regression risk outweighs the placement benefit.
 
-**Rollout:** build the `ga4_property_id` gating so any client can be switched on;
-no pilot client hardcoded. Set property IDs + grant the shared SA Viewer access
-per client when ready, backfill, validate against the GA4 UI, then flip on.
+**Rollout:** gating is generic (`ga4_property_id` presence), so no client is
+hardcoded — but **TouchNote is the pilot**. Steps: grant the shared service
+account Viewer on TouchNote's GA4 property → set `clients.ga4_property_id` for
+TouchNote → backfill with `sync:ga4 --client-id <touchnote> --from <backfill>` →
+validate the Traffic tab numbers against the GA4 UI → then flip on further
+clients by repeating the property-ID + SA-access steps. (TouchNote already has
+client-specific tabs — Retention Lift Test, NAC Analysis — so it's a natural
+first mover.)
 
 ### 8. Dependency + env
 
