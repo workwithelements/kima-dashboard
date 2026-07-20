@@ -4,7 +4,7 @@ import { useState, useMemo, useRef, useEffect } from "react"
 import type { AggregatedMetrics, HierarchyLevel } from "@/lib/utils/types"
 import { deriveMetrics } from "@/lib/utils/aggregate"
 import { calculateFunnelStep, FUNNEL_STEP_DEFS } from "@/lib/utils/funnel-steps"
-import { fmtCurrency, fmtNumber, fmtPercent, fmtRoas } from "@/lib/utils/format"
+import { fmtCurrency, fmtConversions, fmtNumber, fmtPercent, fmtRoas } from "@/lib/utils/format"
 
 type GroupRow = {
   id: string
@@ -129,11 +129,23 @@ const EXTRA_METRICS: ExtraMetricDef[] = [
   },
 ]
 
+/**
+ * Format a conversion/purchase count for a row. Google rows carry fractional
+ * conversions and are shown to 2 decimals (matching the Google Ads platform);
+ * Meta purchases are whole counts. `googleConversions` covers the pure-Google
+ * view where rows aren't tagged with a platform.
+ */
+function fmtConvCount(row: GroupRow, googleConversions: boolean): string {
+  const isGoogle = row.platform === "google" || googleConversions
+  return isGoogle ? fmtConversions(row.metrics.purchases) : fmtNumber(row.metrics.purchases)
+}
+
 /** Build columns dynamically based on configured funnel steps + extra columns */
 function buildColumns(
   funnelSteps: string[],
   extraCols: string[],
-  currency = "GBP"
+  currency = "GBP",
+  googleConversions = false
 ): ColumnDef[] {
   const cols: ColumnDef[] = [
     {
@@ -247,7 +259,7 @@ function buildColumns(
         key: "purchases",
         label: "Purch.",
         getValue: (row) => row.metrics.purchases,
-        format: (row) => fmtNumber(row.metrics.purchases),
+        format: (row) => fmtConvCount(row, googleConversions),
       },
       {
         key: "revenue",
@@ -275,7 +287,10 @@ function buildColumns(
       key: def.key,
       label: def.label,
       getValue: (row) => def.getValue(row, currency),
-      format: (row) => def.format(row, currency),
+      format:
+        def.key === "purchases"
+          ? (row) => fmtConvCount(row, googleConversions)
+          : (row) => def.format(row, currency),
     })
   }
 
@@ -294,6 +309,7 @@ export default function PerformanceTable({
   onRowClick,
   newAdIds,
   entityStatus,
+  googleConversions = false,
 }: {
   data: GroupRow[]
   /** Comparison period data — same shape, matched by row ID for delta badges */
@@ -312,6 +328,8 @@ export default function PerformanceTable({
   newAdIds?: Set<string>
   /** Entity status: testing (blue), live (green), paused (red) */
   entityStatus?: Map<string, "testing" | "live" | "paused">
+  /** Google Ads reports fractional conversions — show the Purch. count to 2dp */
+  googleConversions?: boolean
 }) {
   const [sortKey, setSortKey] = useState<string>("spend")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
@@ -341,8 +359,8 @@ export default function PerformanceTable({
   }, [showColPicker])
 
   const columns = useMemo(
-    () => buildColumns(funnelSteps, extraCols, currency),
-    [funnelSteps, extraCols, currency]
+    () => buildColumns(funnelSteps, extraCols, currency, googleConversions),
+    [funnelSteps, extraCols, currency, googleConversions]
   )
 
   const sorted = useMemo(() => {
@@ -385,9 +403,9 @@ export default function PerformanceTable({
 
   // Determine which extra metrics are already shown by default columns
   const defaultKeys = useMemo(() => {
-    const base = buildColumns(funnelSteps, [], currency)
+    const base = buildColumns(funnelSteps, [], currency, googleConversions)
     return new Set(base.map((c) => c.key))
-  }, [funnelSteps, currency])
+  }, [funnelSteps, currency, googleConversions])
 
   // Available extra metrics (those not already shown by default)
   const availableExtras = EXTRA_METRICS.filter((m) => !defaultKeys.has(m.key))
