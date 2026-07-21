@@ -17,7 +17,7 @@ import {
   calculateCM3,
   calculateMetaAttribution,
 } from "@/lib/utils/aggregate"
-import { fmtCurrency, fmtNumber, fmtPercent, fmtDelta } from "@/lib/utils/format"
+import { fmtCurrency, fmtConversions, fmtNumber, fmtPercent, fmtDelta } from "@/lib/utils/format"
 import {
   calculateFunnelStep,
   calculateNetNewReach,
@@ -2035,7 +2035,7 @@ export default function ClientPerformanceView({
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
             <MetricCard
               label="Conversions"
-              value={fmtNumber(metrics.purchases)}
+              value={fmtConversions(metrics.purchases)}
               delta={delta(metrics.purchases, compMetrics.purchases)}
             />
             <MetricCard
@@ -2076,7 +2076,7 @@ export default function ClientPerformanceView({
           <MetricCard
             label="Purchases"
             value={fmtNumber(allTotalKeyCount)}
-            subValue={`Meta: ${fmtNumber(allMetaKeyCount)} · Google: ${fmtNumber(allGoogleKeyCount)}`}
+            subValue={`Meta: ${fmtNumber(allMetaKeyCount)} · Google: ${fmtConversions(allGoogleKeyCount)}`}
             delta={delta(metrics.purchases, compMetrics.purchases)}
           />
           <MetricCard
@@ -2364,6 +2364,7 @@ export default function ClientPerformanceView({
                 onRowClick={handleDrillDown}
                 newAdIds={isMeta && metaLevel === "ad" ? newAdIds : undefined}
                 entityStatus={entityStatusMap}
+                googleConversions={isGoogleAds}
               />
             )}
           </div>

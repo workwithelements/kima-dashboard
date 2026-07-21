@@ -66,6 +66,24 @@ export function fmtNumber(n: number, decimals = 0): string {
   return n.toLocaleString("en-GB", { maximumFractionDigits: decimals })
 }
 
+/**
+ * Format a conversion count. Google Ads reports fractional conversions
+ * (e.g. 186.45) and shows them to 2 decimals in the platform UI, so we match
+ * that here rather than rounding to a whole number — otherwise the count fails
+ * to reconcile with the derived Cost/Conv. and ROAS columns, which use the raw
+ * fractional value. Meta purchases are whole counts and use fmtNumber instead.
+ */
+export function fmtConversions(n: number): string {
+  if (!isFinite(n)) return "—"
+  if (Math.abs(n) >= 1_000_000) {
+    return `${(n / 1_000_000).toFixed(2)}M`
+  }
+  if (Math.abs(n) >= 10_000) {
+    return `${(n / 1_000).toFixed(1)}k`
+  }
+  return n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
 export function fmtPercent(n: number, decimals = 1): string {
   if (!isFinite(n)) return "—"
   return `${n.toFixed(decimals)}%`
