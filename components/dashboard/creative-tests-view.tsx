@@ -220,14 +220,21 @@ export default function CreativeTestsView({
     return map
   }, [liveTests, adsetCampaigns])
 
-  /** Readiness of one test: min progress across the three thresholds. */
+  /** Readiness per the scan rule: days live is mandatory, then EITHER the
+   *  spend threshold OR the conversion threshold — not both. */
   function testReadiness(test: CreativeTest): number {
     const action = effectiveKeyAction(test).action
     const conv = testConversions(test, action) ?? 0
     const days = thresholds.minDays > 0 ? test.days_live / thresholds.minDays : 1
     const spend = thresholds.minSpend > 0 ? testSpend(test) / thresholds.minSpend : 1
     const convs = thresholds.minConversions > 0 ? conv / thresholds.minConversions : 1
-    return Math.min(1, days, spend, convs)
+    return Math.min(1, Math.min(days, Math.max(spend, convs)))
+  }
+
+  /** True when the test meets the scan-rule thresholds — used alongside
+   *  kima-sync's own "ready" status, which may lag or use another event. */
+  function thresholdsMet(test: CreativeTest): boolean {
+    return testReadiness(test) >= 1
   }
 
   // Live tests grouped campaign → concept
@@ -307,7 +314,7 @@ export default function CreativeTestsView({
   }, [completedTests])
 
   const liveConceptCount = campaignGroups.reduce((s, g) => s + g.concepts.length, 0)
-  const readyCount = liveTests.filter((t) => t.status === "ready").length
+  const readyCount = liveTests.filter((t) => t.status === "ready" || thresholdsMet(t)).length
 
   async function handleLinkNotion(testId: string) {
     if (!notionUrl.trim()) return
@@ -554,7 +561,7 @@ export default function CreativeTestsView({
                       (s, t) => s + (testConversions(t, effectiveKeyAction(t).action) ?? 0), 0
                     )
                     const maxDaysLive = Math.max(...group.tests.map((t) => t.days_live))
-                    const anyReady = group.tests.some((t) => t.status === "ready")
+                    const anyReady = group.tests.some((t) => t.status === "ready" || thresholdsMet(t))
 
                     return (
                       <div
@@ -727,7 +734,7 @@ export default function CreativeTestsView({
                                       />
                                     </div>
 
-                                    {test.status === "ready" ? (
+                                    {test.status === "ready" || thresholdsMet(test) ? (
                                       <button
                                         onClick={(e) => { e.stopPropagation(); handleRunAnalysis(test.id) }}
                                         disabled={analyzingId === test.id}
@@ -1138,8 +1145,8 @@ function EventPill({
   )
 }
 
-/** Three compact meters showing how far a test is through its readiness
- *  thresholds: days live, spend, and conversions on the optimisation event. */
+/** Compact meters for the scan readiness rule: days live is mandatory,
+ *  then EITHER spend OR conversions on the optimisation event. */
 function ThresholdMeters({
   days,
   minDays,
@@ -1159,8 +1166,16 @@ function ThresholdMeters({
   convLabel: string
   currency: string
 }) {
+  const spendPct = minSpend > 0 ? spend / minSpend : 1
+  const convPct = conversions === null ? 0 : minConversions > 0 ? conversions / minConversions : 1
+  // Either branch satisfies the second condition, so once one is met the
+  // pair reads as met — the unmet sibling shouldn't look like a blocker.
+  const eitherMet = spendPct >= 1 || convPct >= 1
   return (
-    <div className="space-y-1">
+    <div
+      className="space-y-1"
+      title="Ready for review when Days is met AND either Spend or Conversions is met"
+    >
       <MeterRow
         label="Days"
         display={`${days} / ${minDays}`}
@@ -1169,22 +1184,37 @@ function ThresholdMeters({
       <MeterRow
         label="Spend"
         display={`${fmtCurrency(spend, currency)} / ${fmtCurrency(minSpend, currency)}`}
-        pct={minSpend > 0 ? spend / minSpend : 1}
+        pct={spendPct}
+        groupMet={eitherMet}
       />
       <MeterRow
-        label={convLabel}
+        label={`or ${convLabel}`}
         display={conversions === null ? "—" : `${fmtNumber(conversions)} / ${fmtNumber(minConversions)}`}
-        pct={conversions === null ? 0 : minConversions > 0 ? conversions / minConversions : 1}
+        pct={convPct}
+        groupMet={eitherMet}
       />
     </div>
   )
 }
 
-function MeterRow({ label, display, pct }: { label: string; display: string; pct: number }) {
+function MeterRow({
+  label,
+  display,
+  pct,
+  groupMet,
+}: {
+  label: string
+  display: string
+  pct: number
+  /** For either/or rows: the sibling row already satisfied the condition,
+   *  so this row is dimmed rather than shown as a blocker. */
+  groupMet?: boolean
+}) {
   const clamped = Math.max(0, Math.min(1, pct))
   const met = pct >= 1
+  const satisfied = met || groupMet === true
   return (
-    <div className="flex items-center gap-2">
+    <div className={`flex items-center gap-2 ${!met && groupMet ? "opacity-50" : ""}`}>
       <span className="w-14 shrink-0 truncate text-[10px] uppercase tracking-wide text-neutral-500" title={label}>
         {label}
       </span>
@@ -1194,7 +1224,7 @@ function MeterRow({ label, display, pct }: { label: string; display: string; pct
           style={{ width: `${clamped * 100}%` }}
         />
       </div>
-      <span className={`w-24 shrink-0 text-right text-[10px] tabular-nums ${met ? "text-brand-lime" : "text-neutral-400"}`}>
+      <span className={`w-24 shrink-0 text-right text-[10px] tabular-nums ${satisfied ? (met ? "text-brand-lime" : "text-neutral-500") : "text-neutral-400"}`}>
         {display}
       </span>
     </div>
