@@ -1,6 +1,8 @@
 import { unstable_cache } from "next/cache"
 import { createServiceClient } from "@/lib/supabase/server"
 import type { NamingConfig } from "@/lib/utils/ad-name-parser"
+import { fetchAdsetGoals, type AdsetGoal } from "@/lib/data/fetch-adset-goals"
+import { KEY_ACTIONS, type KeyAction } from "@/lib/utils/key-actions"
 
 const CACHE_TTL_SECONDS = 300
 
@@ -26,6 +28,9 @@ export type CreativeTest = {
   notion_matched: boolean
   flag_reason: string | null
   dismissed_at: string | null
+  /** Per-test optimisation event override (replaces the adset default).
+   *  Optional — column exists only after the adset-goals migration. */
+  key_action_override?: string | null
   created_at: string
   updated_at: string
 }
@@ -72,6 +77,14 @@ export type CreativeTestConfig = {
 /** Rank of a single ad within its ad set (by CPA, lower = better) */
 export type AdsetRank = { rank: number; total: number }
 
+/** Lifetime totals for a test's variants within the test's own ad set —
+ *  one number per conversion event so the optimisation-event selector can
+ *  re-derive threshold progress without another fetch. */
+export type TestEventTotals = {
+  spend: number
+  events: Record<KeyAction, number>
+}
+
 export type CreativeTestsData = {
   tests: CreativeTest[]
   results: Record<string, CreativeTestResult[]>
@@ -90,20 +103,24 @@ export type CreativeTestsData = {
   adsetRanks: Record<string, AdsetRank>
   /** ad_id → total spend in last 14 days (0 = inactive) */
   recentAdSpend: Record<string, number>
+  /** campaign_id → campaign_name (for grouping live tests by campaign) */
+  campaignNames: Record<string, string>
+  /** test.adset_id → campaign_id fallback when creative_tests.campaign_id is null */
+  adsetCampaigns: Record<string, string>
+  /** test_id → lifetime spend + per-event conversion totals (scoped to the
+   *  test's ad set, so an ad running in several ad sets is attributed
+   *  correctly to each test) */
+  testEventTotals: Record<string, TestEventTotals>
+  /** adset_id → Meta optimisation goal (default optimisation event source) */
+  adsetGoals: Record<string, AdsetGoal>
 }
 
-/** Map key_action to the corresponding meta_daily_performance column */
-function getConversionColumn(keyAction: string): string {
-  switch (keyAction) {
-    case "unique_link_clicks": return "unique_link_clicks"
-    case "landing_page_views": return "landing_page_views"
-    case "adds_to_cart": return "adds_to_cart"
-    case "checkouts_initiated": return "checkouts_initiated"
-    case "registrations_completed": return "registrations_completed"
-    case "app_installs": return "app_installs"
-    case "purchases":
-    default: return "purchases"
-  }
+const EVENT_COLUMNS = KEY_ACTIONS.map((a) => a.value)
+
+function emptyEvents(): Record<KeyAction, number> {
+  const out = {} as Record<KeyAction, number>
+  for (const col of EVENT_COLUMNS) out[col] = 0
+  return out
 }
 
 export async function fetchCreativeTests(
@@ -196,32 +213,61 @@ async function _fetchCreativeTestsInner(
   const adsetIdSet = new Set(tests.map((t) => t.adset_id))
   const adsetIds = Array.from(adsetIdSet)
 
-  // Fetch ad names and adset performance data in parallel
-  const adNames: Record<string, string> = {}
-
   const BATCH = 300
+  const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000).toISOString().split("T")[0]
 
-  async function fetchNameBatch(chunk: string[]): Promise<void> {
-    // meta_daily_performance has one row per (ad_id, date). Limiting the
-    // query to chunk.length capped total rows, not distinct ad_ids, so most
-    // ads ended up missing from `adNames` — which then made every conforming
-    // test get filtered out as "non-conforming". Paginate newest-first and
-    // stop as soon as every ad in the chunk has a name.
-    const needed = new Set(chunk)
+  const adNames: Record<string, string> = {}
+  const recentAdSpend: Record<string, number> = {}
+  const campaignNames: Record<string, string> = {}
+  const adsetCampaigns: Record<string, string> = {}
+  // (ad_id → adset_id → lifetime spend + event totals). Keyed per adset so an
+  // ad appearing in multiple ad sets contributes only its own adset's rows to
+  // each test.
+  const perAdAdset = new Map<string, Map<string, TestEventTotals>>()
+
+  /** One paginated pass per chunk of variant ads: newest-first so the first
+   *  ad_name seen is the freshest, while lifetime totals and campaign lookups
+   *  accumulate across every row. meta_daily_performance has one row per
+   *  (ad_id, date) so a chunk can far exceed one page — paginate to the end. */
+  async function fetchVariantPerfBatch(chunk: string[]): Promise<void> {
     const PAGE = 1000
     let offset = 0
-    while (needed.size > 0) {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
       const { data } = await supabase
         .from("meta_daily_performance")
-        .select("ad_id, ad_name")
+        .select(`date, ad_id, ad_name, adset_id, campaign_id, campaign_name, spend, ${EVENT_COLUMNS.join(", ")}`)
         .in("ad_id", chunk)
         .order("date", { ascending: false })
         .range(offset, offset + PAGE - 1)
       if (!data || data.length === 0) break
-      for (const row of data) {
-        if (row.ad_name && needed.has(row.ad_id)) {
-          adNames[row.ad_id] = row.ad_name
-          needed.delete(row.ad_id)
+      for (const raw of data) {
+        const row = raw as Record<string, any>
+        if (row.ad_name && !adNames[row.ad_id]) adNames[row.ad_id] = row.ad_name
+        if (row.date >= fourteenDaysAgo) {
+          recentAdSpend[row.ad_id] = (recentAdSpend[row.ad_id] || 0) + (row.spend || 0)
+        }
+        if (row.campaign_id && row.campaign_name) {
+          campaignNames[row.campaign_id] = row.campaign_name
+        }
+        if (row.adset_id && row.campaign_id && !adsetCampaigns[row.adset_id]) {
+          adsetCampaigns[row.adset_id] = row.campaign_id
+        }
+        if (row.adset_id) {
+          let byAdset = perAdAdset.get(row.ad_id)
+          if (!byAdset) {
+            byAdset = new Map()
+            perAdAdset.set(row.ad_id, byAdset)
+          }
+          let totals = byAdset.get(row.adset_id)
+          if (!totals) {
+            totals = { spend: 0, events: emptyEvents() }
+            byAdset.set(row.adset_id, totals)
+          }
+          totals.spend += row.spend || 0
+          for (const col of EVENT_COLUMNS) {
+            totals.events[col] += row[col] || 0
+          }
         }
       }
       if (data.length < PAGE) break
@@ -233,45 +279,29 @@ async function _fetchCreativeTestsInner(
 
   for (let i = 0; i < allAdIds.length; i += BATCH) {
     const chunk = allAdIds.slice(i, i + BATCH)
-    fetchPromises.push(fetchNameBatch(chunk))
-  }
-
-  // Fetch recent spend per variant ad (last 14 days) to detect inactive tests
-  const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000).toISOString().split("T")[0]
-  const recentAdSpend: Record<string, number> = {}
-
-  async function fetchRecentSpendBatch(chunk: string[]): Promise<void> {
-    const { data } = await supabase
-      .from("meta_daily_performance")
-      .select("ad_id, spend")
-      .in("ad_id", chunk)
-      .gte("date", fourteenDaysAgo)
-    for (const row of data ?? []) {
-      recentAdSpend[row.ad_id] = (recentAdSpend[row.ad_id] || 0) + (row.spend || 0)
-    }
-  }
-
-  for (let i = 0; i < allAdIds.length; i += BATCH) {
-    const chunk = allAdIds.slice(i, i + BATCH)
-    fetchPromises.push(fetchRecentSpendBatch(chunk))
+    fetchPromises.push(fetchVariantPerfBatch(chunk))
   }
 
   // Fetch adset-level performance for ranking (all ads in each adset, last 30 days)
-  const convCol = getConversionColumn(keyAction)
+  const convCol = EVENT_COLUMNS.includes(keyAction as KeyAction) ? keyAction : "purchases"
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString().split("T")[0]
   // ad_id → { spend, conversions, adsetId }
   const adsetPerfMap = new Map<string, { spend: number; conversions: number; adsetId: string }>()
 
   async function fetchAdsetPerfBatch(chunk: string[]): Promise<void> {
-    // Always select spend + purchases; use purchases as the base column,
-    // then read the actual key-action column via cast to any
     const { data } = await supabase
       .from("meta_daily_performance")
-      .select("ad_id, adset_id, spend, purchases, landing_page_views, adds_to_cart, checkouts_initiated, registrations_completed, app_installs")
+      .select("ad_id, adset_id, campaign_id, campaign_name, spend, purchases, landing_page_views, adds_to_cart, checkouts_initiated, registrations_completed, app_installs, unique_link_clicks, trials_started")
       .eq("client_id", clientId)
       .in("adset_id", chunk)
       .gte("date", thirtyDaysAgo)
     for (const row of data ?? []) {
+      if (row.campaign_id && row.campaign_name) {
+        campaignNames[row.campaign_id] = row.campaign_name
+      }
+      if (row.adset_id && row.campaign_id && !adsetCampaigns[row.adset_id]) {
+        adsetCampaigns[row.adset_id] = row.campaign_id
+      }
       const conv = (row as Record<string, any>)[convCol] || 0
       const existing = adsetPerfMap.get(row.ad_id)
       if (existing) {
@@ -292,7 +322,37 @@ async function _fetchCreativeTestsInner(
     fetchPromises.push(fetchAdsetPerfBatch(chunk))
   }
 
+  // Adset optimisation goals — only needed for tests still in flight (the
+  // default optimisation event of each live test). Runs concurrently with
+  // the perf batches; failures degrade to {}.
+  const liveAdsetIds = Array.from(
+    new Set(tests.filter((t) => t.status !== "analysed").map((t) => t.adset_id))
+  )
+  let adsetGoals: Record<string, AdsetGoal> = {}
+  fetchPromises.push(
+    fetchAdsetGoals(clientId, liveAdsetIds).then((g) => {
+      adsetGoals = g
+    })
+  )
+
   await Promise.all(fetchPromises)
+
+  // Per-test lifetime totals, scoped to the test's own ad set
+  const testEventTotals: Record<string, TestEventTotals> = {}
+  for (const test of tests) {
+    const totals: TestEventTotals = { spend: 0, events: emptyEvents() }
+    let sawRows = false
+    for (const adId of test.variant_ad_ids) {
+      const adTotals = perAdAdset.get(adId)?.get(test.adset_id)
+      if (!adTotals) continue
+      sawRows = true
+      totals.spend += adTotals.spend
+      for (const col of EVENT_COLUMNS) {
+        totals.events[col] += adTotals.events[col]
+      }
+    }
+    if (sawRows) testEventTotals[test.id] = totals
+  }
 
   // Compute adset rankings (rank by CPA ascending, no-conversion ads last)
   const adsetRanks: Record<string, AdsetRank> = {}
@@ -329,5 +389,9 @@ async function _fetchCreativeTestsInner(
     namingConfig,
     adsetRanks,
     recentAdSpend,
+    campaignNames,
+    adsetCampaigns,
+    testEventTotals,
+    adsetGoals,
   }
 }
