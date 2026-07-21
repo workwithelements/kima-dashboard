@@ -28,7 +28,12 @@ export async function POST(
     return NextResponse.json({ error: "Test not found" }, { status: 404 })
   }
 
-  if (test.status !== "ready") {
+  // "ready" is stamped by kima-sync, but the dashboard also computes
+  // readiness itself per the scan rule (days AND (spend OR conversions)) —
+  // possibly against a different optimisation event — so operator-initiated
+  // analysis of a still-"monitoring" test is allowed. Only already-analysed
+  // or flagged tests are refused.
+  if (test.status !== "ready" && test.status !== "monitoring") {
     return NextResponse.json(
       { error: `Test is not ready for analysis (status: ${test.status})` },
       { status: 400 }
